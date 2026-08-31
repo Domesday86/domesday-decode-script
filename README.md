@@ -65,8 +65,9 @@ nix develop
 ./decode-ggv.sh --list
 ```
 
-Output goes to `<output root>/<disc id>/<capture basename>.*`, e.g.
-`/home/sdi/raid/decodes/domesday-decode-script/GGV1069/Pioneer GGV1069_….cvbs`.
+Output goes to `<output root>/<disc id>/<decoder>/<capture basename>.*`, where
+`<decoder>` names the ld-decode commit that produced the decode — see [Which
+ld-decode made a decode](#which-ld-decode-made-a-decode).
 
 ### Configuration
 
@@ -77,6 +78,8 @@ environment variable:
 | --- | --- | --- | --- |
 | `-l, --library` | `DD_LIBRARY` | `/home/sdi/raid/library` | capture library root |
 | `-o, --output` | `DD_OUTPUT` | `/home/sdi/raid/decodes/domesday-decode-script` | decode output root |
+| `--decoder` | `DD_DECODER` | from `flake.lock` | decoder directory name |
+| `--no-verify-decoder` | `DD_VERIFY_DECODER=0` | check | skip the ld-decode/`flake.lock` check |
 | `-f, --frames` | `DD_FRAMES` | `1000` | frames per disc, or `all` |
 | `--lead-in` | `DD_LEAD_IN` | `1` | frames of lead-in to keep before CAV #1 |
 | `--probe` | `DD_PROBE` | `800` | first frame the start search probes |
@@ -87,6 +90,67 @@ environment variable:
 Disc source paths in the table are relative to the library root, so pointing
 `--library` at another copy of the library is all that is needed to decode from
 somewhere else.
+
+### Which ld-decode made a decode
+
+These are pre-release branch builds, and two of them do not agree frame for
+frame — so a decode is only meaningful alongside the ld-decode that produced it.
+Decodes are therefore filed under the pinned commit:
+
+```
+/home/sdi/raid/decodes/domesday-decode-script/
+└── GGV1011/
+    ├── ld-decode-3caccf0/          # chad-2026.07.04-prev8-parallel
+    │   ├── GGV1011_….cvbs
+    │   ├── GGV1011_….start
+    │   └── decoder.txt
+    └── ld-decode-<next rev>/       # after nix flake update
+```
+
+Decoding a disc again after updating ld-decode lands beside the earlier decode
+rather than on top of it. Only a re-run of the *same* commit collides, and that
+still stops with `already exists; pass --force to overwrite`. The `.start` cache
+sits inside the decoder directory too, since which start keeps the lead-in is a
+question about the writer's behaviour and so about the build.
+
+The name is the short revision `flake.lock` pins, because that is the build `nix
+develop` puts on `PATH`. That is a claim about the flake rather than about the
+ld-decode that will actually run, so it is checked before anything is decoded —
+`nix eval` on the flake (evaluation only, it never builds; about two seconds
+with the store warm) against the ld-decode in the environment:
+
+```
+$ ./decode-ggv.sh --frames all
+decode-ggv.sh: the ld-decode that would run is not the build flake.lock pins, so
+the decode would be filed under a commit that did not produce it:
+    on PATH:       /nix/store/1g064rx9…-python3.12-ld-decode-7.2.0/bin/ld-decode
+    on PYTHONPATH: /nix/store/1g064rx9…/lib/python3.12/site-packages/lddecode
+    flake.lock:    /nix/store/apx0civl…-python3.12-ld-decode-7.2.0
+Leave and re-enter the dev shell (exit; nix develop) to pick up the pinned
+build, or pass --no-verify-decoder to decode with the one you have.
+```
+
+A shell entered before `nix flake update` (or before pulling a new lock) still
+holds the previous build, and would otherwise file hours of decoding under a
+commit that did not produce it. Both halves of the environment are checked
+because either can be stale on its own: ld-decode's launcher is a wrapper that
+touches only `PATH`, so the `lddecode` package the interpreter imports is
+whichever one `PYTHONPATH` names first — and it is the module, not the launcher,
+that decodes.
+
+`--decoder NAME` labels a decode by hand (for an ld-decode built outside the
+flake, say), and skips the check. `--no-verify-decoder` keeps the name from
+`flake.lock` but decodes with whatever is present.
+
+Each decoder directory gets a `decoder.txt` recording what its name is short
+for, for whoever finds the decode later:
+
+```
+decoder:  ld-decode-3caccf0 (from flake.lock)
+binary:   /nix/store/apx0civl…-python3.12-ld-decode-7.2.0/bin/ld-decode
+version:  7.2.0+git.3caccf0
+recorded: 2026-08-31T07:30:58+02:00
+```
 
 ### Finding the start of the disc
 
@@ -193,7 +257,9 @@ set anyway by a player stall much later in the disc.
 Decodes are CVBS (`--cvbs`): `<basename>.cvbs` (4fsc) plus the `.meta` SQLite
 sidecar, `_audio_0.wav`, and the `.dropouts.meta` / `.efm` / `.efm.meta`
 extension sidecars. Pass `--tbc` for the older `.tbc` output. ld-decode writes
-the `.cvbs` name itself, so nothing here renames it.
+the `.cvbs` name itself, so nothing here renames it. Earlier branch builds
+called it `.composite`; a decode is recognised under either name, so an existing
+decode is still found whichever build made it.
 
 The sample encoding differs by standard, and ld-decode chooses it from whether
 the signal can carry non-standard values:
@@ -276,7 +342,7 @@ ld-decode writes a timestamped, line-oriented log of its own beside each decode,
 at `<basename>.log`. That is the thing to follow:
 
 ```sh
-tail -f "/home/sdi/raid/decodes/domesday-decode-script/GGV1011/GGV1011_….log"
+tail -f "/home/sdi/raid/decodes/domesday-decode-script/GGV1011/ld-decode-3caccf0/GGV1011_….log"
 ```
 
 ld-decode has no non-interactive output mode — it draws progress with carriage

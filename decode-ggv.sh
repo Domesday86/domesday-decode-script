@@ -15,6 +15,11 @@
 # serial loop, not I/O and not the worker count, that bounds a decode. --jobs
 # runs several decodes at once, which is what actually fills the cores.
 #
+# Decodes are filed under the ld-decode commit that produced them, so decoding a
+# disc again with a different build lands beside the earlier decode instead of
+# on top of it: only a re-run of the same commit can overwrite, and only then
+# with --force.
+#
 set -euo pipefail
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,8 +32,17 @@ FIND_START="$SELF_DIR/find-disc-start.sh"
 # Root of the capture library. Disc source paths are relative to this.
 LIBRARY="${DD_LIBRARY:-/home/sdi/raid/library}"
 
-# Root of the decode output tree. Each disc gets a subdirectory here.
+# Root of the decode output tree. Decodes are filed under
+# <root>/<disc id>/<decoder>/, where <decoder> names the ld-decode build.
 OUTPUT="${DD_OUTPUT:-/home/sdi/raid/decodes/domesday-decode-script}"
+
+# Name of the decoder directory. Empty means work it out from flake.lock (see
+# "identifying the decoder" below); set it to label a decode by hand.
+DECODER="${DD_DECODER:-}"
+
+# Check that the ld-decode on PATH really is the build flake.lock pins before
+# writing a decode under that commit's name. 0 skips the check.
+VERIFY_DECODER="${DD_VERIFY_DECODER:-1}"
 
 # Frames to decode per disc: a number, or "all" for the whole side.
 FRAMES="${DD_FRAMES:-1000}"
@@ -77,6 +91,9 @@ in the table is decoded.
 Options:
   -l, --library DIR     capture library root (default: $LIBRARY)
   -o, --output DIR      decode output root (default: $OUTPUT)
+      --decoder NAME    decoder directory name (default: from flake.lock)
+      --no-verify-decoder
+                        skip the check that ld-decode matches flake.lock
   -f, --frames N|all    frames to decode per disc (default: $FRAMES)
       --lead-in N       frames of lead-in to keep before CAV #1 (default: $LEAD_IN)
       --probe N         first frame the start search probes (default: $PROBE)
@@ -90,8 +107,13 @@ Options:
       --list            list the discs in the table and exit
   -h, --help            this message
 
-Environment: DD_LIBRARY DD_OUTPUT DD_FRAMES DD_LEAD_IN DD_PROBE DD_JOBS
-             DD_THREADS DD_CVBS
+Environment: DD_LIBRARY DD_OUTPUT DD_DECODER DD_VERIFY_DECODER DD_FRAMES
+             DD_LEAD_IN DD_PROBE DD_JOBS DD_THREADS DD_CVBS
+
+Decodes go to <output>/<disc id>/<decoder>/<capture basename>.*, where
+<decoder> is the ld-decode commit flake.lock pins. Decoding a disc again after
+updating ld-decode therefore writes a new directory rather than overwriting the
+earlier decode; re-running the same commit still needs --force.
 
 A single decode uses only about a third of a 16-core machine, because
 ld-decode's decode loop is serial and its demodulation workers wait on it.
@@ -149,6 +171,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -l|--library)    LIBRARY="${2:?--library needs a directory}"; shift 2 ;;
     -o|--output)     OUTPUT="${2:?--output needs a directory}"; shift 2 ;;
+    --decoder)       DECODER="${2:?--decoder needs a name}"; shift 2 ;;
+    --no-verify-decoder) VERIFY_DECODER=0; shift ;;
     -f|--frames)     FRAMES="${2:?--frames needs a value}"; shift 2 ;;
     --lead-in)       LEAD_IN="${2:?--lead-in needs a value}"; shift 2 ;;
     --probe)         PROBE="${2:?--probe needs a frame}"; shift 2 ;;
@@ -188,6 +212,113 @@ fi
 command -v ld-decode >/dev/null 2>&1 || die "ld-decode not on PATH (run: nix develop)"
 [ -x "$FIND_START" ] || die "missing helper: $FIND_START"
 [ -d "$LIBRARY" ] || die "library not found: $LIBRARY"
+
+# --- identifying the decoder -----------------------------------------------
+#
+# A decode is only meaningful alongside the ld-decode that produced it: these
+# are pre-release branch builds, and two of them will not agree frame for frame.
+# So each decode is filed under the commit that made it, and a decode with a
+# different ld-decode lands beside the old one instead of overwriting it.
+#
+# The name is the short revision flake.lock pins, since that is the build
+# `nix develop` puts on PATH. But that is a statement about the flake, not about
+# the ld-decode actually running: a shell entered before `nix flake update` (or
+# before pulling a new lock) still holds the previous build, and would file
+# hours of decoding under a commit that did not produce it. So the flake is
+# evaluated -- evaluation only, it never builds -- and the store path it yields
+# is checked against the binary that will run.
+#
+# The binary alone does not settle it either. ld-decode's launcher is a thin
+# wrapper that only touches PATH, so the lddecode package the interpreter
+# actually imports is whichever one PYTHONPATH names first -- and a dev shell
+# exports a PYTHONPATH of its own. A shell can therefore hold a new ld-decode on
+# PATH and an old lddecode on PYTHONPATH, and it is the module that decodes. So
+# that is checked too.
+
+decoder_from_lock() {
+  local lock="$SELF_DIR/flake.lock" rev=""
+  [ -f "$lock" ] || return 1
+  if command -v jq >/dev/null 2>&1; then
+    rev=$(jq -r '.nodes["ld-decode"].locked.rev // empty' "$lock" 2>/dev/null)
+  else
+    # Within the ld-decode node, "locked" carries the revision and "original"
+    # only the branch it was locked from, so the first "rev" here is the one.
+    rev=$(sed -n '/^    "ld-decode": {/,/^    },$/p' "$lock" \
+            | sed -n 's/.*"rev": "\([0-9a-f]\{7,\}\)".*/\1/p' | head -1)
+  fi
+  [ -n "$rev" ] || return 1
+  printf 'ld-decode-%s\n' "${rev:0:7}"
+}
+
+# Fallback when there is no lock to read: the Nix store path already identifies
+# the build exactly, it just does not say which commit it came from.
+decoder_from_binary() {
+  local bin="$1" hash
+  case "$bin" in
+    /nix/store/*) hash="${bin#/nix/store/}"; printf 'ld-decode-store-%s\n' "${hash:0:8}" ;;
+    *)            printf 'ld-decode-%s\n' "$(ld-decode --version 2>/dev/null | tr -c 'A-Za-z0-9.+-' '-' | sed 's/-*$//')" ;;
+  esac
+}
+
+# The lddecode package ld-decode will import, if PYTHONPATH supplies one: the
+# first entry on it holding the package wins, exactly as Python resolves it.
+# Nothing found means the interpreter falls back to the binary's own copy.
+lddecode_on_pythonpath() {
+  local entry
+  local -a entries
+  IFS=: read -r -a entries <<< "${PYTHONPATH:-}"
+  for entry in "${entries[@]}"; do
+    [ -n "$entry" ] || continue
+    if [ -f "$entry/lddecode/__init__.py" ]; then
+      readlink -f -- "$entry/lddecode"
+      return 0
+    fi
+  done
+  return 1
+}
+
+LD_DECODE_BIN=$(readlink -f -- "$(command -v ld-decode)")
+DECODER_SOURCE=""
+
+if [ -n "$DECODER" ]; then
+  DECODER_SOURCE="named on the command line"
+elif DECODER=$(decoder_from_lock); then
+  DECODER_SOURCE="flake.lock"
+else
+  DECODER=$(decoder_from_binary "$LD_DECODE_BIN")
+  DECODER_SOURCE="the ld-decode on PATH (no flake.lock to read)"
+fi
+case "$DECODER" in
+  */*|""|.|..) die "invalid decoder name: \"$DECODER\"" ;;
+esac
+
+# Only the lock-derived name makes a claim that can be wrong: the other two are
+# read from the binary itself, or asserted deliberately.
+if [ "$DECODER_SOURCE" = flake.lock ] && [ "$VERIFY_DECODER" = 1 ]; then
+  if ! command -v nix >/dev/null 2>&1; then
+    printf 'warning: nix not on PATH; not checking ld-decode against flake.lock\n' >&2
+  elif ! expected=$(nix eval --raw "$SELF_DIR#ld-decode.outPath" 2>/dev/null); then
+    printf 'warning: could not evaluate the flake; not checking ld-decode against flake.lock\n' >&2
+  else
+    stale=""
+    case "$LD_DECODE_BIN" in
+      "$expected"/*) ;;
+      *) stale="    on PATH:       $LD_DECODE_BIN" ;;
+    esac
+    if module=$(lddecode_on_pythonpath); then
+      case "$module" in
+        "$expected"/*) ;;
+        *) stale="$stale${stale:+$'\n'}    on PYTHONPATH: $module" ;;
+      esac
+    fi
+    [ -z "$stale" ] || die "the ld-decode that would run is not the build flake.lock pins, so
+the decode would be filed under a commit that did not produce it:
+$stale
+    flake.lock:    $expected
+Leave and re-enter the dev shell (exit; nix develop) to pick up the pinned
+build, or pass --no-verify-decoder to decode with the one you have."
+  fi
+fi
 
 # --- disc selection --------------------------------------------------------
 
@@ -246,12 +377,27 @@ fi
 # decodes are about to want; and resolving up front means a missing source or an
 # existing output is reported in seconds rather than after hours of decoding.
 
-R_ID=(); R_STD=(); R_SRC=(); R_DEST=(); R_BASE=(); R_START=(); R_PRODUCT=()
+R_ID=(); R_STD=(); R_SRC=(); R_DEST=(); R_BASE=(); R_START=()
+
+# The decoded video file, if one is there. CVBS output is .cvbs on the pinned
+# build and was .composite on earlier ones.
+existing_product() {
+  local dest="$1" base="$2" ext
+  if [ "$USE_CVBS" = 1 ]; then
+    set -- cvbs composite
+  else
+    set -- tbc
+  fi
+  for ext in "$@"; do
+    if [ -e "$dest/$base.$ext" ]; then printf '%s\n' "$dest/$base.$ext"; return 0; fi
+  done
+  return 1
+}
 
 resolve_disc() {
   local id="$1" std="$2" rel="$3"
   local src="$LIBRARY/$rel"
-  local dest="$OUTPUT/$id"
+  local dest="$OUTPUT/$id/$DECODER"
   local base name content start cache product report kv
 
   name="${rel##*/}"
@@ -262,16 +408,25 @@ resolve_disc() {
   [ -f "$src" ] || die "source not found: $src"
 
   printf '   output: %s/%s\n' "$dest" "$base"
-  if [ "$USE_CVBS" = 1 ]; then
-    product="$dest/$base.cvbs"
-  else
-    product="$dest/$base.tbc"
-  fi
-  if [ -e "$product" ] && [ "$FORCE" != 1 ] && [ "$DRY_RUN" != 1 ]; then
+  # The CVBS writer has been renamed between branch builds (.composite before
+  # .cvbs), so a decode is looked for under either name rather than only the one
+  # the pinned build happens to use: an existing decode must be recognised
+  # whichever build made it, and a finished decode must not be called a failure
+  # because the extension moved under us.
+  product=$(existing_product "$dest" "$base") || product=""
+  if [ -n "$product" ] && [ "$FORCE" != 1 ] && [ "$DRY_RUN" != 1 ]; then
     die "$product already exists; pass --force to overwrite"
   fi
 
   mkdir -p "$dest"
+  # What the directory name is short for, for anyone who finds the decode later.
+  if [ "$DRY_RUN" != 1 ]; then
+    { printf 'decoder:  %s (from %s)\n' "$DECODER" "$DECODER_SOURCE"
+      printf 'binary:   %s\n' "$LD_DECODE_BIN"
+      printf 'version:  %s\n' "$(ld-decode --version 2>/dev/null || echo unknown)"
+      printf 'recorded: %s\n' "$(date -Is)"
+    } > "$dest/decoder.txt"
+  fi
   cache="$dest/$base.start"
 
   if [ -n "$START_OVERRIDE" ]; then
@@ -310,7 +465,7 @@ resolve_disc() {
   fi
 
   R_ID+=("$id");     R_STD+=("$std");   R_SRC+=("$src")
-  R_DEST+=("$dest"); R_BASE+=("$base"); R_START+=("$start"); R_PRODUCT+=("$product")
+  R_DEST+=("$dest"); R_BASE+=("$base"); R_START+=("$start")
 }
 
 # --- decoding --------------------------------------------------------------
@@ -319,7 +474,7 @@ decode_one() {
   local i="$1" prefix="$2"
   local id="${R_ID[$i]}" std="${R_STD[$i]}" src="${R_SRC[$i]}"
   local dest="${R_DEST[$i]}" base="${R_BASE[$i]}"
-  local start="${R_START[$i]}" product="${R_PRODUCT[$i]}"
+  local start="${R_START[$i]}"
   local -a cmd
 
   cmd=(ld-decode)
@@ -345,13 +500,14 @@ decode_one() {
 
   run_ld_decode "$prefix" "${cmd[@]}"
 
-  [ -f "$product" ] || die "ld-decode wrote no $product"
+  existing_product "$dest" "$base" >/dev/null \
+    || die "ld-decode wrote no video file at $dest/$base.*"
 }
 
 # --- main ------------------------------------------------------------------
 
-printf 'library: %s\noutput:  %s\nframes:  %s\njobs:    %s\nthreads: %s\n' \
-  "$LIBRARY" "$OUTPUT" "$FRAMES" "$JOBS" \
+printf 'library: %s\noutput:  %s\ndecoder: %s (%s)\nframes:  %s\njobs:    %s\nthreads: %s\n' \
+  "$LIBRARY" "$OUTPUT" "$DECODER" "$DECODER_SOURCE" "$FRAMES" "$JOBS" \
   "$([ "$DECODE_THREADS" = 0 ] && echo "auto (ld-decode)" || echo "$DECODE_THREADS per decode")"
 
 for d in "${selected[@]}"; do
