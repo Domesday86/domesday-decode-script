@@ -25,7 +25,7 @@ This puts `ld-decode` and its sibling tools on `PATH`:
 
 | Command | Purpose |
 | --- | --- |
-| `ld-decode` | Decode a raw RF capture to `.tbc` |
+| `ld-decode` | Decode a raw RF capture to `.cvbs` (or `.tbc` with `--tbc`) |
 | `ld-find-start` | ld-decode’s own start finder (see below; `find-disc-start.sh` is used instead) |
 | `ld-cut` | Cut a section out of a capture |
 | `ld-compress` | Compress a capture to `.ldf` |
@@ -110,7 +110,7 @@ Decodes are therefore filed under the pinned commit:
 ```
 /home/sdi/raid/decodes/domesday-decode-script/
 └── GGV1011/
-    ├── ld-decode-3caccf0/          # chad-2026.07.04-prev8-parallel
+    ├── ld-decode-12be078/          # chad-2026.07.04-prev8-parallel
     │   ├── GGV1011_….cvbs
     │   ├── GGV1011_….start
     │   └── decoder.txt
@@ -135,7 +135,7 @@ decode-ggv.sh: the ld-decode that would run is not the build flake.lock pins, so
 the decode would be filed under a commit that did not produce it:
     on PATH:       /nix/store/1g064rx9…-python3.12-ld-decode-7.2.0/bin/ld-decode
     on PYTHONPATH: /nix/store/1g064rx9…/lib/python3.12/site-packages/lddecode
-    flake.lock:    /nix/store/apx0civl…-python3.12-ld-decode-7.2.0
+    flake.lock:    /nix/store/b4b6k8ps…-python3.12-ld-decode-7.2.0
 Leave and re-enter the dev shell (exit; nix develop) to pick up the pinned
 build, or pass --no-verify-decoder to decode with the one you have.
 ```
@@ -156,9 +156,9 @@ Each decoder directory gets a `decoder.txt` recording what its name is short
 for, for whoever finds the decode later:
 
 ```
-decoder:  ld-decode-3caccf0 (from flake.lock)
-binary:   /nix/store/apx0civl…-python3.12-ld-decode-7.2.0/bin/ld-decode
-version:  7.2.0+git.3caccf0
+decoder:  ld-decode-12be078 (from flake.lock)
+binary:   /nix/store/b4b6k8ps…-python3.12-ld-decode-7.2.0/bin/ld-decode
+version:  7.2.0+git.12be078
 recorded: 2026-08-31T07:30:58+02:00
 ```
 
@@ -266,10 +266,17 @@ set anyway by a player stall much later in the disc.
 
 Decodes are CVBS (`--cvbs`): `<basename>.cvbs` (4fsc) plus the `.meta` SQLite
 sidecar, `_audio_0.wav`, and the `.dropouts.meta` / `.efm` / `.efm.meta`
-extension sidecars. Pass `--tbc` for the older `.tbc` output. ld-decode writes
-the `.cvbs` name itself, so nothing here renames it. Earlier branch builds
+extension sidecars. Pass `--tbc` for the older `.tbc` / `.tbc.db` output. ld-decode
+writes the `.cvbs` name itself, so nothing here renames it. Earlier branch builds
 called it `.composite`; a decode is recognised under either name, so an existing
 decode is still found whichever build made it.
+
+CVBS is ld-decode's own default on the pinned build, but the scripts pass
+`--cvbs` or `--tbc` explicitly all the same. The default flipped once already —
+`.tbc` was what a bare `ld-decode` wrote on earlier builds — and the extension
+the script looks for afterwards follows the flag, so a decode made under a
+flipped default would be reported as having written no video file after the
+hours it took to make.
 
 The sample encoding differs by standard, and ld-decode chooses it from whether
 the signal can carry non-standard values:
@@ -352,7 +359,7 @@ ld-decode writes a timestamped, line-oriented log of its own beside each decode,
 at `<basename>.log`. That is the thing to follow:
 
 ```sh
-tail -f "/home/sdi/raid/decodes/domesday-decode-script/GGV1011/ld-decode-3caccf0/GGV1011_….log"
+tail -f "/home/sdi/raid/decodes/domesday-decode-script/GGV1011/ld-decode-12be078/GGV1011_….log"
 ```
 
 ld-decode has no non-interactive output mode — it draws progress with carriage

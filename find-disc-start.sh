@@ -95,11 +95,16 @@ trap 'rm -rf "$WORK"' EXIT
 # successive frames advance together -- a lone address in a spin-up region can
 # be a misread, and it is exactly that kind of misread that sends the
 # arithmetic to the wrong part of the disc.
+#
+# Only the VBI readings ld-decode prints as it decodes are wanted here, and
+# those are the same whichever writer runs -- but the output format is named
+# anyway rather than left to the default, which has flipped between branch
+# builds, so a probe stays the cheap CVBS run it is meant to be.
 probe() {
   local frame="$1" raw
   local -a ff=() cav=()
 
-  raw=$(ld-decode "--$STANDARD" --start "$frame" --length 3 --threads "$THREADS" \
+  raw=$(ld-decode "--$STANDARD" --cvbs --start "$frame" --length 3 --threads "$THREADS" \
           "$INFILE" "$WORK/probe" 2>&1 || true)
 
   while read -r f c; do

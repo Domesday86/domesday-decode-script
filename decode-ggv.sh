@@ -487,7 +487,12 @@ decode_one() {
     PAL) cmd+=(--pal) ;;
     *)   cmd+=(--ntsc) ;;
   esac
-  if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs); fi
+  # Ask for the format wanted either way rather than leaning on the default:
+  # CVBS is the default on the pinned build but was not on earlier ones, and
+  # the extension `existing_product` then looks for follows the flag, so a
+  # silently flipped default would fail a finished decode as "wrote no video
+  # file" -- after the hours it took to make it.
+  if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs); else cmd+=(--tbc); fi
   cmd+=(--start "$start")
   [ "$FRAMES" = all ] || cmd+=(--length "$FRAMES")
   cmd+=(--threads "$DECODE_THREADS" "$src" "$dest/$base")
