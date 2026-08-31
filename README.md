@@ -61,6 +61,7 @@ nix develop
 ./decode-ggv.sh                 # both discs, first 1000 frames each
 ./decode-ggv.sh --frames 2      # quick smoke test
 ./decode-ggv.sh --frames all GGV1069
+./decode-ggv.sh --frames all -j 2   # both discs at once
 ./decode-ggv.sh --list
 ```
 
@@ -79,7 +80,8 @@ environment variable:
 | `-f, --frames` | `DD_FRAMES` | `1000` | frames per disc, or `all` |
 | `--lead-in` | `DD_LEAD_IN` | `1` | frames of lead-in to keep before CAV #1 |
 | `--probe` | `DD_PROBE` | `800` | first frame the start search probes |
-| `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads |
+| `-j, --jobs` | `DD_JOBS` | `1` | discs decoded concurrently |
+| `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
 
 Disc source paths in the table are relative to the library root, so pointing
@@ -188,19 +190,85 @@ set anyway by a player stall much later in the disc.
 
 ### Output format
 
-Decodes are CVBS (`--cvbs`): `<basename>.cvbs` (u16le, 4fsc) plus the `.meta`
-SQLite sidecar, `_audio_0.wav`, and the `.dropouts.meta` / `.efm` / `.efm.meta`
-extension sidecars. Pass `--tbc` for the older `.tbc` output.
+Decodes are CVBS (`--cvbs`): `<basename>.cvbs` (4fsc) plus the `.meta` SQLite
+sidecar, `_audio_0.wav`, and the `.dropouts.meta` / `.efm` / `.efm.meta`
+extension sidecars. Pass `--tbc` for the older `.tbc` output. ld-decode writes
+the `.cvbs` name itself, so nothing here renames it.
 
-ld-decode currently names the video output `<basename>.composite`, but the
-required name is `<basename>.cvbs`, so `decode-ggv.sh` renames it after each
-decode. Nothing refers to the file by name — the `.meta` sidecar records a
-`signal_type`, not a filename — so the rename is all that is needed, with no
-sidecar to keep in step. Drop this step once ld-decode writes `.cvbs` itself.
+The sample encoding differs by standard, and ld-decode chooses it from whether
+the signal can carry non-standard values:
 
-The sample encoding is `CVBS_U16_4FSC`: 10-bit codes clamped to 4–1019 and
-stored `<< 6` in 16-bit containers. `CVBS_U10_4FSC` is permitted by the `.meta`
-schema but ld-decode hardcodes the U16 preset and offers no switch for it.
+| Standard | Preset | Container | Range |
+| --- | --- | --- | --- |
+| PAL | `CVBS_U10_4FSC` | s16le, 10-bit domain | full s16 headroom |
+| NTSC | `CVBS_U16_4FSC` | u16le, 10-bit `<< 6` | 4–1019, shifted |
+
+PAL gets the signed U10 preset because the Domesday pilot burst sits outside the
+EBU 3280 protected range, and `CVBS_U16_4FSC` cannot hold values there — encoding
+PAL as U16 would clamp the pilot burst away. Read the preset back from the
+`.meta` sidecar rather than assuming one: it is recorded per decode, and a
+reader that guesses u16le will misread every PAL decode. `--cvbs-encoding`
+overrides the choice if you need to force a preset.
+
+### Decoding several discs at once
+
+One decode does not fill a modern machine, and no amount of `--threads` will
+make it. On a 16-core host a single full decode keeps about **5.4 cores** busy:
+
+```
+$ ps -o pid,pcpu,args -C python3.12
+  29278  180   ld-decode --ntsc --cvbs --start 280 --threads 0 ...   # main
+  29394   33   ...multiprocessing-fork                               # worker 1
+  29400   33   ...multiprocessing-fork                               # worker 2
+  ...                                                                # 10 in all
+```
+
+The ten workers are running at a third of a core each — they are starved, not
+saturated. `lddecode/parallel.py` explains why: block demodulation is farmed out
+to the pool and prefetched, but *the decode loop that consumes those blocks is
+strictly in-order on the main thread*. That serial loop is the 1.8 cores in the
+first row, and it cannot ask for blocks fast enough to keep ten workers busy.
+ld-decode's own auto-threads formula already knows this and caps the pool at
+ten, "diminishing returns past that on the shared read path".
+
+It is not I/O either. Decoding from the NFS library reads at about 4 MB/s over a
+10Gb link, and system-wide iowait sits at 0.1%.
+
+So the spare cores are only reachable by running more than one decode. `--jobs`
+does that:
+
+```sh
+./decode-ggv.sh --frames all -j 2       # both discs at once
+```
+
+Two full decodes together take about as long as the longer one alone, instead of
+the sum of the two. Roughly three concurrent decodes will use a 16-core host.
+
+With `-j` above 1:
+
+* **Starts are resolved for every disc first, serially,** before any decode
+  starts. The start search runs short ld-decode probe decodes of its own, so
+  running those concurrently would only make them contend for the cores the real
+  decodes are about to want — and resolving up front means a missing source or
+  an existing output is reported in seconds rather than after hours of decoding.
+* **`--threads` auto is divided between the jobs** rather than claimed in full
+  by each: `clamp(max(ncpu - 2, 1) / jobs, 1, 10)`, so `-j 2` on 16 cores gives 7
+  workers per decode. Since a decode's workers are bounded by its serial loop
+  rather than by their own number, a smaller pool per decode still keeps up. At
+  `-j 1` the choice is left to ld-decode (`--threads 0`), so its own formula
+  stays authoritative for the single-decode case. An explicit `-t N` is always
+  used exactly as given. `-j` is first clamped to the number of discs selected,
+  so the budget is never split more ways than there are decodes to run.
+* **Console progress is prefixed with the disc id**, since the decodes
+  interleave.
+
+A failing decode does not take the others with it. Each disc's exit status is
+recorded separately, the discs that succeed are still finished and renamed, and
+the run ends by naming the ones that failed:
+
+```
+decode-ggv.sh: decode failed for: GGV1069 (see each disc's .log)
+```
 
 ### Following a long decode
 
