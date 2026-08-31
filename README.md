@@ -101,6 +101,135 @@ Disc source paths in the table are relative to the library root, so pointing
 `--library` at another copy of the library is all that is needed to decode from
 somewhere else.
 
+## Decoding the Domesday discs
+
+`decode-domesday.sh` decodes the twelve PAL Domesday disc sets. Each set is two
+double-sided discs — the Community disc carries **North** and **South**, the
+National disc carries **A** and **B** — so 12 sets × 4 sides. Three sides of
+every set are CAV; **National B is CLV**.
+
+```sh
+nix develop
+./decode-domesday.sh --list                       # what is in the table
+./decode-domesday.sh -f 2 DS1                     # quick smoke test of one set
+./decode-domesday.sh DS1                          # set 1, first 1000 frames a side
+./decode-domesday.sh --frames all DS1:NationalB   # one side in full
+./decode-domesday.sh --frames all NB -j 3         # every National B, three at a time
+./decode-domesday.sh --frames all -j 3            # the whole library
+```
+
+`--frames` is the switch to reach for while testing: it defaults to **1000
+frames** a side, and `--frames all` decodes the whole side. Everything else —
+the start search, the output layout, the decoder check — behaves identically
+either way, so a 1000-frame run is a faithful rehearsal of a full one.
+
+### Choosing what to decode
+
+A selector picks sides, and selectors add together:
+
+| Selector | Means |
+| --- | --- |
+| *(none)* | every side of every set — 49 decodes |
+| `DS4` | every side of disc set 4 |
+| `DS4:NationalA` | one side of one set |
+| `NationalB` | that side of every set |
+| `NB` | the same, by short name (`CN` `CS` `NA` `NB`) |
+
+`--side` narrows whatever the selectors chose rather than adding to it, so
+`--side NB DS4 DS7` and `DS4:NB DS7:NB` are the same request. Set and side names
+are matched regardless of case, and naming a side twice still decodes it once.
+
+The sides come out in table order — set by set, and within a set North, South,
+A, B — however the selectors were written.
+
+### Sides captured in more than one pass
+
+A side the player could not read in one pass was captured in several, and each
+part is a decode in its own right, so a set can have more than four decodes.
+`DS1`'s National A is the one such side in the library: the player lost the disc
+at picture 37480 and a second pass picks up at 39001.
+
+Both parts are selected together — `DS1:NationalA` means the whole side — and
+`--list` numbers them:
+
+```
+$ ./decode-domesday.sh --list DS1
+DS1:CommunityNorth       CAV  picture #1      …_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf
+DS1:CommunitySouth       CAV  picture #1      …_CommunitySouth_20191014_CAV_PAL_00001-54000.ldf
+DS1:NationalA part 1/2   CAV  picture #1      …_NationalA_PP_20191014_CAV_PAL_00001-37480.ldf
+DS1:NationalA part 2/2   CAV  picture #39001  …_NationalA_PP_20191014_CAV_PAL_39000-54000.ldf
+DS1:NationalB            CLV  picture #1      …_NationalB_PP_20191014_CLV_PAL_00-60.ldf
+```
+
+Part 2 begins at the very head of its capture, and the first frame ld-decode's
+CVBS writer will accept there is three frames in (see [Keeping the lead-in in
+the output](#keeping-the-lead-in-in-the-output)). A very short `--frames` never
+reaches it, and ld-decode then exits cleanly having written an empty file — so
+the scripts treat an empty video file as a failed decode and say so:
+
+```
+$ ./decode-domesday.sh -f 2 DS1:NationalA
+ld-decode wrote an empty …_39000-54000.cvbs: its writer never reached a frame it
+could open the file on. This side's output opens later than --frames 2 reaches;
+decode more frames.
+```
+
+Anything from `-f 10` up is clear of it, and the 1000-frame default is well
+clear.
+
+The "picture #" column is what the start search converges on — the first frame
+of that capture's content. It is 1 for a capture that begins at the head of the
+side, and the part's own first picture for one that picks up mid-disc. That
+number cannot be taken from the filename's frame range: the range on part 2
+reads `39000-54000`, but its first picture is 39001, and a search told to find
+39000 never lands on it. It is in the table instead.
+
+### Output layout
+
+Decodes go to `<output>/<set>/<decoder>/<capture basename>.*`:
+
+```
+/home/sdi/raid/decodes/domesday-decode-script/
+└── DS1/
+    └── ld-decode-12be078/
+        ├── Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.cvbs
+        ├── Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.start
+        ├── Domesday_DD86-DS1_NationalA_PP_20191014_CAV_PAL_00001-37480.cvbs
+        ├── Domesday_DD86-DS1_NationalA_PP_20191014_CAV_PAL_39000-54000.cvbs
+        └── decoder.txt
+```
+
+The capture basename already names the set and the side, and both parts of a
+split side keep their own frame ranges, so nothing collides.
+
+### Flags
+
+`decode-domesday.sh` takes the same flags and environment variables as
+`decode-ggv.sh` — see [Configuration](#configuration) — with `--side` added and
+`--frames` defaulting to 1000. `--start N` still applies to a single capture, so
+the selectors have to choose exactly one.
+
+### Start points
+
+Starts are resolved by `find-disc-start.sh`, the same helper the calibration
+discs use, and cached beside the decode as `<basename>.start`. Nothing is taken
+from the `--start` values in the library's `Domesday_AIV_DiscSet_Notes.txt`;
+those are recorded by hand against a different ld-decode and are not what this
+build wants.
+
+The 49 starts are resolved before any decode begins, and at the same `--jobs`
+concurrency as the decodes — unlike `decode-ggv.sh`, which resolves its two
+serially. A start search is several short ld-decode probes that spend most of
+their wall clock seeking into the `.ldf` rather than working, so run one at a
+time the whole library takes well over an hour before the first frame is
+decoded. Nothing is contended for: the resolve phase finishes before any decode
+is launched.
+
+## How the decodes work
+
+The rest of this applies to both scripts: they share `find-disc-start.sh`, the
+decoder check, the output format and the concurrency machinery.
+
 ### Which ld-decode made a decode
 
 These are pre-release branch builds, and two of them do not agree frame for
@@ -181,32 +310,61 @@ test is wrong in both directions on these captures:
   nearly five minutes — and still fails.
 
 `find-disc-start.sh` uses the arithmetic instead. Jump well past spin-up into
-settled playback (`--probe`, default file frame 800), read the CAV picture
-number there, and compute where the target frame must be. A capture-relative
-file frame is a nominal-length approximation, so the file-frame to
-picture-number offset drifts slightly across the disc — on GGV1011 it is 229 at
-file frame 800 but 225 at file frame 226 — and the estimate is therefore
-re-probed until it lands on CAV #1 exactly. Both discs converge in three probes,
-about 20 seconds:
+settled playback (`--probe`, default file frame 800), read the picture number
+there, and compute where the target frame must be. A capture-relative file frame
+is a nominal-length approximation, so the file-frame to picture-number offset
+drifts slightly across the disc — on GGV1011 it is 229 at file frame 800 but 225
+at file frame 226 — and the estimate is therefore re-probed until it lands on
+picture #1 exactly. Both calibration discs converge in three probes, about 20
+seconds:
 
 ```
 $ ./find-disc-start.sh --pal -v GGV1011_….ldf
-probe 1: frame 800 -> file frame 800, CAV 571
-probe 2: frame 230 -> file frame 230, CAV 5
-probe 3: frame 226 -> file frame 226, CAV 1
+probe 1: start 800 (offset 0) -> 800 571;801 572
+probe 2: start 228 (offset 0) -> 228 3;229 4 230 5
+probe 3: start 224 (offset 0) -> 224 leadin;226 1
+converged after 3 probe(s)
 226
 ```
 
-Two guards keep it from repeating ld-find-start's mistake:
+Each probe reports every reading it trusted, and the search takes the target
+from anywhere in that window rather than only from its head — so a window that
+straddles the answer converges there instead of going round again.
+
+**CAV and CLV are both handled**, which is what National B needs. ld-decode
+reports a picture number either way: on CAV it is the VBI address, and on CLV it
+derives one from the timecode, printed after it.
+
+```
+File Frame 801: CAV Frame #39801
+File Frame 205: CLV Timecode 0:00.02 Frame #2
+File Frame 203: CAV Lead In
+```
+
+Both count up by one a frame, which is all the arithmetic needs. Lead-in carries
+no format — nothing has been decoded yet to tell CAV from CLV — so it is
+reported as `CAV Lead In` even at the head of a CLV capture, and is matched
+under either label. A pre-1985 *early CLV* disc, whose timecode carries only the
+minute, yields no picture number at all; none of these discs is one, and the
+search reports that it found none rather than guessing.
+
+Three guards keep it from repeating ld-find-start's mistake:
 
 * A probe reading is only trusted when two successive frames advance together
-  (file frame *n*→*n*+1 alongside CAV *m*→*m*+1). A lone address in a spin-up
-  region can be a misread, and it is that kind of misread that sends the
+  (file frame *n*→*n*+1 alongside picture *m*→*m*+1). A lone address in a
+  spin-up region can be a misread, and it is that kind of misread that sends the
   arithmetic to the wrong part of the disc.
 * An estimate landing before the head of the capture means the probe was itself
   inside spin-up, so the search moves deeper rather than clamping to zero and
   inventing an answer. It recovers from a badly chosen `--probe` this way, and
   gives up with a diagnostic rather than guessing if it cannot.
+* **The seek offset is measured, not assumed.** The file frame a run reports
+  first is not a fixed distance from the `--start` it was given: on the
+  calibration discs `--start 800` reports file frame 800, and on the Domesday
+  captures the same start reports 801. Aiming a start at a frame therefore reads
+  that offset back out of the probe (the `offset` in the trace above) instead of
+  taking it as a constant — otherwise the search re-probes the same spot until it
+  gives up, or lands a frame short and keeps no lead-in.
 
 ### Keeping the lead-in in the output
 
@@ -237,18 +395,35 @@ at each candidate and reads back which frame the writer actually opened the file
 on, walking back until the candidate itself is accepted.
 
 ```
-lead-in trial: start 225 -> writer skipped ahead to 227
-lead-in trial: start 224 -> writer skipped ahead to 227
-lead-in trial: start 223 -> writer skipped ahead to 227
-lead-in trial: start 222 -> output opens at 222 (accepted)
+lead-in trial: start 225 -> writer skipped ahead to file frame 227
+lead-in trial: start 224 -> writer skipped ahead to file frame 227
+lead-in trial: start 223 -> writer skipped ahead to file frame 227
+lead-in trial: start 222 -> output opens at file frame 222 (accepted)
 ```
 
 The output therefore opens with *at least* the requested lead-in, not exactly it:
 
-| Disc | CAV #1 at file frame | `--start` | frames before CAV #1 in the output |
-| --- | --- | --- | --- |
-| GGV1011 (PAL) | 226 | 222 | 4 |
-| GGV1069 (NTSC) | 283 | 280 | 3 |
+| Disc | picture #1 at file frame | `--start` | output opens at | frames before picture #1 |
+| --- | --- | --- | --- | --- |
+| GGV1011 (PAL) | 226 | 222 | 222 | 4 |
+| GGV1069 (NTSC) | 283 | 280 | 280 | 3 |
+| DS1 National B (CLV) | 207 | 203 | 204 | 3 |
+
+Where the output opens is measured, not inferred from the start: it is the start
+that ld-decode is told, and the opening frame that says what the writer did with
+it. `--report` prints both, as `opens=`.
+
+**A capture that begins mid-disc may have no aligned frame at or before its
+first picture at all.** `DS1`'s National A part 2 starts at picture 39001, and
+the first frame its writer will accept is file frame 4 — picture 39004. No start
+can write the three frames in front of it, from any `--start`, so the search
+takes the earliest-opening start and says what that costs rather than failing:
+
+```
+start 0 opens the output at file frame 4, which is 3 frame(s) after picture
+#39001: the frames before it are off the colour sequence and no start can
+write them
+```
 
 The resolved values are cached next to the decode as `<basename>.start`, along
 with the lead-in they were resolved for — change `--lead-in` and the search
@@ -329,11 +504,13 @@ the sum of the two. Roughly three concurrent decodes will use a 16-core host.
 
 With `-j` above 1:
 
-* **Starts are resolved for every disc first, serially,** before any decode
-  starts. The start search runs short ld-decode probe decodes of its own, so
-  running those concurrently would only make them contend for the cores the real
-  decodes are about to want — and resolving up front means a missing source or
-  an existing output is reported in seconds rather than after hours of decoding.
+* **Starts are resolved for every disc first,** before any decode starts, so a
+  missing source or an existing output is reported in seconds rather than after
+  hours of decoding. `decode-ggv.sh` resolves its two serially;
+  `decode-domesday.sh` resolves at the same `-j` concurrency, because with 49
+  sides to get through the serial version costs over an hour before the first
+  frame is decoded. Either way nothing is contended for: the resolve phase
+  finishes before any decode is launched.
 * **`--threads` auto is divided between the jobs** rather than claimed in full
   by each: `clamp(max(ncpu - 2, 1) / jobs, 1, 10)`, so `-j 2` on 16 cores gives 7
   workers per decode. Since a decode's workers are bounded by its serial loop

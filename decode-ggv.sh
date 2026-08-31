@@ -455,18 +455,30 @@ resolve_disc() {
       [ "$DRY_RUN" = 1 ] || printf '%s\n' "$report" > "$cache"
     fi
 
-    content=""; start=""
+    content=""; start=""; opens=""
     for kv in $report; do
       case "$kv" in
         content=*) content="${kv#content=}" ;;
         start=*)   start="${kv#start=}" ;;
+        opens=*)   opens="${kv#opens=}" ;;
       esac
     done
     [ -n "$content" ] && [ -n "$start" ] \
       || die "could not parse the start report: $report"
 
-    printf '   start: %s (opens %s frame(s) before CAV #1; %s requested)\n' \
-      "$start" "$(( content - start ))" "$LEAD_IN"
+    # opens is the file frame the output really begins on, which is what says
+    # how much lead-in was kept -- the start is only what ld-decode was told,
+    # and how far the writer then moved on from it is not a fixed distance. A
+    # cache written before that field existed does not carry it, and it cannot
+    # be worked out from the other two, so that case says nothing rather than
+    # guessing.
+    if [ -n "$opens" ]; then
+      printf '   start: %s (output opens at file frame %s, %s frame(s) before CAV #1; %s requested)\n' \
+        "$start" "$opens" "$(( content - opens ))" "$LEAD_IN"
+    else
+      printf '   start: %s (cached before the opening frame was recorded; %s lead-in frame(s) requested, --refresh-start to measure)\n' \
+        "$start" "$LEAD_IN"
+    fi
   fi
 
   R_ID+=("$id");     R_STD+=("$std");   R_SRC+=("$src")
@@ -480,6 +492,7 @@ decode_one() {
   local id="${R_ID[$i]}" std="${R_STD[$i]}" src="${R_SRC[$i]}"
   local dest="${R_DEST[$i]}" base="${R_BASE[$i]}"
   local start="${R_START[$i]}"
+  local product
   local -a cmd
 
   cmd=(ld-decode)
@@ -510,8 +523,13 @@ decode_one() {
 
   run_ld_decode "$prefix" "${cmd[@]}"
 
-  existing_product "$dest" "$base" >/dev/null \
+  # An empty video file is a failed decode, not a finished one: ld-decode exits
+  # cleanly when its writer never reached a frame it could open on.
+  product=$(existing_product "$dest" "$base") \
     || die "ld-decode wrote no video file at $dest/$base.*"
+  [ -s "$product" ] \
+    || die "ld-decode wrote an empty $product: its writer never reached a frame \
+it could open the file on. Decode more frames."
 }
 
 # --- main ------------------------------------------------------------------
