@@ -400,8 +400,13 @@ resolve_disc() {
   local dest="$OUTPUT/$id/$DECODER"
   local base name content start cache product report kv
 
+  # The decode is named after the capture, minus its extension and with spaces
+  # turned into dashes: one capture in the library has a space in its name, and
+  # every path built from it -- the .cvbs, the sidecars, the progress log --
+  # would then need quoting by hand in every command that touched it afterwards.
   name="${rel##*/}"
   base="${name%.ldf}"
+  base="${base// /-}"
 
   log "$id ($std)"
   printf '   source: %s\n' "$src"

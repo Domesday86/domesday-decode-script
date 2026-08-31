@@ -69,6 +69,16 @@ Output goes to `<output root>/<disc id>/<decoder>/<capture basename>.*`, where
 `<decoder>` names the ld-decode commit that produced the decode — see [Which
 ld-decode made a decode](#which-ld-decode-made-a-decode).
 
+The decode is named after the capture, minus its `.ldf` and with spaces turned
+into dashes, so nothing downstream has to quote it:
+
+```
+Pioneer GGV1069_CAV_NTSC_side1_dup1_2019-09-12_21-11-38.ldf   # capture
+Pioneer-GGV1069_CAV_NTSC_side1_dup1_2019-09-12_21-11-38.cvbs  # decode
+```
+
+The captures in the library keep their own names; only the decode is renamed.
+
 ### Configuration
 
 Both roots, the frame limit and everything else are configurable by flag or by
