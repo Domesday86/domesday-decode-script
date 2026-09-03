@@ -208,6 +208,10 @@ the ld-decode commit flake.lock pins. Decoding a side again after updating
 ld-decode therefore writes a new directory rather than overwriting the earlier
 decode; re-running the same commit still needs --force.
 
+Every side is decoded with --V4300D_coherent_subtract: the whole library was
+captured on an LD-V4300D, so its ~8.5MHz spur is in the RF of every set, and
+subtracting the tone coherently removes its leakage skirts as well as the tone.
+
 A single decode uses only about a third of a 16-core machine, because
 ld-decode's decode loop is serial and its demodulation workers wait on it.
 Raising --threads does not help; -j does, by decoding several sides at once.
@@ -745,6 +749,14 @@ decode_one() {
   # silently flipped default would fail a finished decode as "wrote no video
   # file" -- after the hours it took to make it.
   if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs); else cmd+=(--tbc); fi
+  # Every capture in the library came off an LD-V4300D, whose ~8.5MHz spur sits
+  # in the RF band on every side of every set, so the coherent subtraction is
+  # asked for unconditionally rather than per set. It estimates the tone and
+  # subtracts it in the time domain, which -- unlike the old FFT-bin notch --
+  # takes the spectral-leakage skirts with it. On the pinned build it costs no
+  # concurrency: its no-video guard makes it safe from the first block, so it
+  # neither defers to sync acquisition nor forces demodulation serial.
+  cmd+=(--V4300D_coherent_subtract)
   cmd+=(--start "$start")
   [ "$FRAMES" = all ] || cmd+=(--length "$FRAMES")
   cmd+=(--threads "$DECODE_THREADS" "$src" "$dest/$base")

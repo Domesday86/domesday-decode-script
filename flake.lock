@@ -24,11 +24,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1788182530,
-        "narHash": "sha256-WOJLokx/XaLuVT7XQ8JiPIP6bX/hO3t6koqBDydXSSM=",
+        "lastModified": 1788415465,
+        "narHash": "sha256-D1GHZ6ckcuTNQ9Ktzpy+ALuIZhNy3JuFQpYnksA9avw=",
         "owner": "happycube",
         "repo": "ld-decode",
-        "rev": "12be07821333f53e04d96f3aa0f8724a9c8ca39b",
+        "rev": "173a4f7f2fdc4a5e0a63961ef741f361211164c1",
         "type": "github"
       },
       "original": {

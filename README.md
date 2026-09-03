@@ -207,7 +207,32 @@ split side keep their own frame ranges, so nothing collides.
 `decode-domesday.sh` takes the same flags and environment variables as
 `decode-ggv.sh` — see [Configuration](#configuration) — with `--side` added and
 `--frames` defaulting to 1000. `--start N` still applies to a single capture, so
-the selectors have to choose exactly one.
+the selectors have to choose exactly one. It also passes
+`--V4300D_coherent_subtract` on every side — see [Player spur
+removal](#player-spur-removal).
+
+### Player spur removal
+
+Every Domesday side is decoded with `--V4300D_coherent_subtract`. The whole
+library was captured on an LD-V4300D, whose ~8.5MHz spur is therefore in the RF
+of every side of every set, so the flag is passed unconditionally rather than
+per set. Rather than notching the spur's FFT bin, it estimates the tone and
+subtracts it in the time domain, which takes the spur's spectral-leakage skirts
+and the clock's satellites with it instead of leaving a hole around them. It is
+PAL-only, which the whole Domesday library is; `decode-ggv.sh` does not pass it,
+since the calibration discs are NTSC.
+
+Parallel demodulation stays available with it: on the pinned build the filter's
+own no-video guard makes it safe from the first block, so it no longer defers
+until sync acquisition and no longer forces serial demod. `--V4300D_no_defer`,
+which used to control that, is obsolete on this build — accepted and ignored.
+`--V4300D_notch_filter` is now a legacy alias for the same coherent subtract
+rather than the older FFT-bin notch.
+
+Nothing already in the output tree carries the spur subtraction: the decodes
+under `ld-decode-12be078` and `ld-decode-8596be3` were made before the flag was
+passed. Decodes made from here land under the newly pinned commit's own
+directory, so they sit beside those rather than on top of them.
 
 ### Start points
 
