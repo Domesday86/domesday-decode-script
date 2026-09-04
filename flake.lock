@@ -24,16 +24,16 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1788415465,
-        "narHash": "sha256-D1GHZ6ckcuTNQ9Ktzpy+ALuIZhNy3JuFQpYnksA9avw=",
-        "owner": "happycube",
+        "lastModified": 1788544516,
+        "narHash": "sha256-dkblCGZnWazjPa/yE4GJgUAVrKC+UxFBb60doQZkcfs=",
+        "owner": "simoninns",
         "repo": "ld-decode",
-        "rev": "173a4f7f2fdc4a5e0a63961ef741f361211164c1",
+        "rev": "5a838365d247d564e51f985e21bcfd8261479b58",
         "type": "github"
       },
       "original": {
-        "owner": "happycube",
-        "ref": "chad-2026.07.04-prev8-parallel",
+        "owner": "simoninns",
+        "ref": "prev8-parallel-dev",
         "repo": "ld-decode",
         "type": "github"
       }

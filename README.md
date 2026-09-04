@@ -6,8 +6,8 @@ Scripts for automatically decoding the Domesday LaserDisc sets through
 ## Environment
 
 The toolchain is provided by a Nix flake, so the exact `ld-decode` build used
-for a decode is pinned and reproducible. It tracks the
-`chad-2026.07.04-prev8-parallel` branch of ld-decode.
+for a decode is pinned and reproducible. It tracks the `prev8-parallel-dev`
+branch of my own [ld-decode fork](https://github.com/simoninns/ld-decode).
 
 Requires Nix with flakes enabled:
 
@@ -264,7 +264,7 @@ Decodes are therefore filed under the pinned commit:
 ```
 /home/sdi/raid/decodes/domesday-decode-script/
 └── GGV1011/
-    ├── ld-decode-12be078/          # chad-2026.07.04-prev8-parallel
+    ├── ld-decode-12be078/          # prev8-parallel-dev
     │   ├── GGV1011_….cvbs
     │   ├── GGV1011_….start
     │   └── decoder.txt

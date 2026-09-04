@@ -2,8 +2,8 @@
   description = "Scripts for automatically decoding Domesday LaserDisc images through ld-decode";
 
   inputs = {
-    # ld-decode is itself a flake; pinned to the parallel-decode branch.
-    ld-decode.url = "github:happycube/ld-decode/chad-2026.07.04-prev8-parallel";
+    # ld-decode is itself a flake; pinned to my fork's parallel-decode branch.
+    ld-decode.url = "github:simoninns/ld-decode/prev8-parallel-dev";
 
     # Take nixpkgs from ld-decode rather than pinning a second copy, so the
     # tools in the dev shell are the same builds ld-decode itself was tested
