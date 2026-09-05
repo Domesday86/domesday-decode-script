@@ -19,7 +19,12 @@
 # its 10 auto-selected workers running at about a third of a core each, with the
 # capture read at 4 MB/s over a 10Gb link and iowait at 0.1% -- so it is that
 # serial loop, not I/O and not the worker count, that bounds a decode. --jobs
-# runs several decodes at once, which is what actually fills the cores.
+# runs several decodes at once, which does fill the cores -- but full-side
+# timings show that filling them does not buy frames. Two sides decoded together
+# came out about 1% ahead of the same two run one after the other, and cutting
+# the worker pool from ten to six costs nothing either. Something shared, most
+# likely memory bandwidth, is the real ceiling; iowait was 0% throughout. The
+# measurements are in docs/performance.md.
 #
 # Decodes are filed under the ld-decode commit that produced them, so decoding a
 # side again with a different build lands beside the earlier decode instead of
@@ -61,13 +66,19 @@ LEAD_IN="${DD_LEAD_IN:-1}"
 # by file frame 450 or so, and 800 clears that.
 PROBE="${DD_PROBE:-800}"
 
-# Sides to decode concurrently. One decode cannot saturate the machine (see the
-# note at the top), so this is the setting that fills the cores. About three
-# decodes will use a 16-core host.
+# Sides to decode concurrently. One decode cannot saturate the machine (see
+# the note at the top), so this is the setting that fills the cores -- though on
+# the 16-core test host it returned about 1% of total throughput rather than a
+# multiple of it. Its real value is keeping every side advancing, so one that
+# crawls through damaged media does not hold up the rest of the queue.
 JOBS="${DD_JOBS:-1}"
 
 # ld-decode worker threads (0 = auto, divided between concurrent jobs).
 THREADS="${DD_THREADS:-0}"
+
+# What auto aims for, per decode. Measured, not guessed -- see
+# docs/performance.md.
+DECODE_THREADS_TARGET="${DD_THREADS_TARGET:-6}"
 
 # Write .tbc instead of CVBS.
 USE_CVBS="${DD_CVBS:-1}"
@@ -193,7 +204,8 @@ Options:
       --start N         force the ld-decode --start frame (one capture only)
       --refresh-start   re-run the start search, ignoring the cached value
   -j, --jobs N          decode N sides concurrently (default: $JOBS)
-  -t, --threads N       ld-decode worker threads per decode, 0 = auto (default: $THREADS)
+  -t, --threads N       ld-decode worker threads per decode, 0 = auto
+                        (default: $THREADS; auto aims for $DECODE_THREADS_TARGET each, shared between --jobs)
       --tbc             write .tbc output instead of CVBS
       --force           overwrite an existing decode
   -n, --dry-run         resolve starts and print the commands, decode nothing
@@ -201,7 +213,7 @@ Options:
   -h, --help            this message
 
 Environment: DD_LIBRARY DD_OUTPUT DD_DECODER DD_VERIFY_DECODER DD_FRAMES
-             DD_LEAD_IN DD_PROBE DD_JOBS DD_THREADS DD_CVBS
+             DD_LEAD_IN DD_PROBE DD_JOBS DD_THREADS DD_THREADS_TARGET DD_CVBS
 
 Decodes go to <output>/<set>/<decoder>/<capture basename>.*, where <decoder> is
 the ld-decode commit flake.lock pins. Decoding a side again after updating
@@ -214,9 +226,11 @@ subtracting the tone coherently removes its leakage skirts as well as the tone.
 
 A single decode uses only about a third of a 16-core machine, because
 ld-decode's decode loop is serial and its demodulation workers wait on it.
-Raising --threads does not help; -j does, by decoding several sides at once.
-With -j above 1 the console progress of each decode is prefixed with its side
-id, since the decodes interleave.
+Neither flag buys much more of it: --threads is flat past about six workers, and
+-j 2 finished around 1% ahead of decoding the two sides in turn. Reach for -j to
+keep every side advancing rather than to go faster. With -j above 1 the console
+progress of each decode is prefixed with its side id, since the decodes
+interleave.
 
 ld-decode writes its own timestamped progress log to <output>.log for each
 side; tail that to follow a long decode.
@@ -563,15 +577,23 @@ fi
 # --- worker threads --------------------------------------------------------
 #
 # ld-decode's own auto is min(max(ncpu - 2, 1), 10) worker processes, chosen for
-# a decode running alone. Concurrent decodes would each claim that many, so
-# divide the same budget between them instead. A decode's workers are only ever
-# partly busy -- the in-order decode loop is what bounds them -- so a smaller
-# pool per decode still keeps up, and the cores go to the extra decodes.
+# a decode running alone. It is more than the work needs: throughput is flat
+# from about four workers upward, and beyond that the curve is not even
+# monotonic -- 6.46, 6.61, 6.43 and 6.47 FPS at 4, 6, 8 and 10 workers on a
+# single PAL decode, a 2.8% spread with 8 below both its neighbours. Two
+# concurrent decodes behave the same way, and adding a second decode raises
+# total throughput by about 1%. Whatever bounds this, it is not worker CPU;
+# iowait was 0% throughout. docs/performance.md has the measurements.
 #
-# With one job the choice is left to ld-decode (--threads 0), so its own formula
-# stays authoritative for the single-decode case. This runs after side selection
-# because JOBS is clamped to the number of sides there: asking for more jobs than
-# there are sides must not shrink the pool of the decodes that do run.
+# So auto aims for DECODE_THREADS_TARGET workers per decode rather than as many
+# as the host will hold. Six is the highest measured point both alone and at two
+# concurrent decodes, and it matches ld-decode's own ten while spawning 40%
+# fewer processes.
+#
+# The budget is still shared between concurrent decodes, so a large --jobs
+# thins the pools rather than oversubscribing the host. This runs after side
+# selection because JOBS is clamped to the number of sides there: asking for more
+# jobs than there are sides must not shrink the pool of the decodes that do run.
 
 auto_threads() {
   local ncpu budget
@@ -580,11 +602,11 @@ auto_threads() {
   [ "$budget" -ge 1 ] || budget=1
   budget=$(( budget / JOBS ))
   [ "$budget" -ge 1 ] || budget=1
-  [ "$budget" -le 10 ] || budget=10
+  [ "$budget" -le "$DECODE_THREADS_TARGET" ] || budget="$DECODE_THREADS_TARGET"
   printf '%s\n' "$budget"
 }
 
-if [ "$THREADS" = 0 ] && [ "$JOBS" -gt 1 ]; then
+if [ "$THREADS" = 0 ]; then
   DECODE_THREADS=$(auto_threads)
 else
   DECODE_THREADS="$THREADS"
