@@ -15,15 +15,18 @@
 # One decode does not fill a modern machine. ld-decode fans block demodulation
 # out to worker processes, but the decode loop that consumes them is strictly
 # in-order on the main thread, so the workers spend most of their time waiting
-# on it. Measured on a 16-core host: a single decode keeps about 5.4 cores busy,
-# its 10 auto-selected workers running at about a third of a core each, with the
-# capture read at 4 MB/s over a 10Gb link and iowait at 0.1% -- so it is that
-# serial loop, not I/O and not the worker count, that bounds a decode. --jobs
-# runs several decodes at once, which does fill the cores -- but full-side
-# timings show that filling them does not buy frames. Two sides decoded together
-# came out about 1% ahead of the same two run one after the other, and cutting
-# the worker pool from ten to six costs nothing either. Something shared, most
-# likely memory bandwidth, is the real ceiling; iowait was 0% throughout. The
+# on it. Measured on a 16-core host: a single decode at its best setting keeps
+# about five of the sixteen cores busy, and workers added past that draw CPU
+# without returning frames -- 38% of the host at ten workers against 32% at
+# four, for 7% fewer frames. The capture is read over a 10Gb link with iowait
+# under 0.5%, so it is that serial loop, not I/O, that bounds one decode.
+#
+# What bounds the host is reached at about two decodes. Four workers per decode
+# is the measured peak, and past it throughput falls away rather than levelling
+# off: ld-decode's own choice of ten is 7% slower than four for 20% more CPU. A
+# second concurrent decode is worth about 8.6% over running the two in turn; a
+# third is worth nothing at all, and takes the host to 90% CPU to return it.
+# Something shared, most likely memory bandwidth, is the real ceiling. The
 # measurements are in docs/performance.md.
 #
 # Decodes are filed under the ld-decode commit that produced them, so decoding a
@@ -66,11 +69,12 @@ LEAD_IN="${DD_LEAD_IN:-1}"
 # by file frame 450 or so, and 800 clears that.
 PROBE="${DD_PROBE:-800}"
 
-# Sides to decode concurrently. One decode cannot saturate the machine (see
-# the note at the top), so this is the setting that fills the cores -- though on
-# the 16-core test host it returned about 1% of total throughput rather than a
-# multiple of it. Its real value is keeping every side advancing, so one that
-# crawls through damaged media does not hold up the rest of the queue.
+# Sides to decode concurrently. One decode cannot saturate the machine (see the
+# note at the top), and two is where the machine tops out: on the 16-core test
+# host -j 2 finished 8.6% ahead of the same two sides decoded in turn, while
+# -j 3 finished level with three in turn. Its other value is keeping every side
+# advancing, so one that crawls through damaged media does not hold up the rest
+# of the queue.
 JOBS="${DD_JOBS:-1}"
 
 # ld-decode worker threads (0 = auto, divided between concurrent jobs).
@@ -78,7 +82,7 @@ THREADS="${DD_THREADS:-0}"
 
 # What auto aims for, per decode. Measured, not guessed -- see
 # docs/performance.md.
-DECODE_THREADS_TARGET="${DD_THREADS_TARGET:-6}"
+DECODE_THREADS_TARGET="${DD_THREADS_TARGET:-4}"
 
 # Write .tbc instead of CVBS.
 USE_CVBS="${DD_CVBS:-1}"
@@ -226,11 +230,12 @@ subtracting the tone coherently removes its leakage skirts as well as the tone.
 
 A single decode uses only about a third of a 16-core machine, because
 ld-decode's decode loop is serial and its demodulation workers wait on it.
-Neither flag buys much more of it: --threads is flat past about six workers, and
--j 2 finished around 1% ahead of decoding the two sides in turn. Reach for -j to
-keep every side advancing rather than to go faster. With -j above 1 the console
-progress of each decode is prefixed with its side id, since the decodes
-interleave.
+--threads will not recover the rest: four workers per decode is the measured
+peak and more is slower. -j 2 does recover some, finishing about 8.6% ahead of
+decoding the two sides in turn, but -j 3 finishes level with three in turn. So
+reach for -j to keep every side advancing as much as to go faster, and do not
+expect a third job to pay. With -j above 1 the console progress of each decode
+is prefixed with its side id, since the decodes interleave.
 
 ld-decode writes its own timestamped progress log to <output>.log for each
 side; tail that to follow a long decode.
@@ -577,18 +582,17 @@ fi
 # --- worker threads --------------------------------------------------------
 #
 # ld-decode's own auto is min(max(ncpu - 2, 1), 10) worker processes, chosen for
-# a decode running alone. It is more than the work needs: throughput is flat
-# from about four workers upward, and beyond that the curve is not even
-# monotonic -- 6.46, 6.61, 6.43 and 6.47 FPS at 4, 6, 8 and 10 workers on a
-# single PAL decode, a 2.8% spread with 8 below both its neighbours. Two
-# concurrent decodes behave the same way, and adding a second decode raises
-# total throughput by about 1%. Whatever bounds this, it is not worker CPU;
-# iowait was 0% throughout. docs/performance.md has the measurements.
+# a decode running alone. It is more than the work needs, and the surplus is not
+# merely idle -- past the peak the curve turns down: 4.07, 5.42, 5.32, 5.16 and
+# 5.03 FPS at 2, 4, 6, 8 and 10 workers on a single PAL decode, so ld-decode's
+# ten comes out 7% behind four while drawing 20% more CPU. The sweep was run
+# twice in opposite order and the two passes agree within 1%, so that is a curve
+# rather than noise. Whatever bounds it is not worker CPU; iowait stayed under
+# 0.5%. docs/performance.md has the measurements.
 #
 # So auto aims for DECODE_THREADS_TARGET workers per decode rather than as many
-# as the host will hold. Six is the highest measured point both alone and at two
-# concurrent decodes, and it matches ld-decode's own ten while spawning 40%
-# fewer processes.
+# as the host will hold. Four is the measured peak, and it spawns 60% fewer
+# processes than ld-decode's own ten.
 #
 # The budget is still shared between concurrent decodes, so a large --jobs
 # thins the pools rather than oversubscribing the host. This runs after side

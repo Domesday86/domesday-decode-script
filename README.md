@@ -94,7 +94,7 @@ environment variable:
 | `--lead-in` | `DD_LEAD_IN` | `1` | frames of lead-in to keep before CAV #1 |
 | `--probe` | `DD_PROBE` | `800` | first frame the start search probes |
 | `-j, --jobs` | `DD_JOBS` | `1` | discs decoded concurrently |
-| `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 6 each |
+| `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
 
 Disc source paths in the table are relative to the library root, so pointing
@@ -514,27 +514,47 @@ first row, and it cannot ask for blocks fast enough to keep ten workers busy.
 ld-decode's own auto-threads formula already knows this and caps the pool at
 ten, "diminishing returns past that on the shared read path".
 
-It is not I/O either. Decoding from the NFS library reads at about 4 MB/s over a
-10Gb link, and system-wide iowait sits at 0.1%.
+Ten is still too many. Sweeping the pool on a single PAL decode puts the peak at
+**four** workers, and the curve turns down past it rather than levelling off:
 
-So the spare cores are only reachable by running more than one decode. `--jobs`
+| workers | FPS | CPU busy |
+| --- | --- | --- |
+| 2 | 4.07 | 20% |
+| **4** | **5.42** | 32% |
+| 6 | 5.32 | 34% |
+| 8 | 5.16 | 36% |
+| 10 (ld-decode's own choice) | 5.03 | 38% |
+
+So ld-decode's ten is 7% slower than four while drawing 20% more CPU, and two is
+genuinely starved. It is not I/O: decoding from the NFS library reads at about
+4 MB/s over a 10Gb link, and system-wide iowait stays under 0.5%.
+
+The spare cores are only reachable by running more than one decode. `--jobs`
 does that:
 
 ```sh
 ./decode-ggv.sh --frames all -j 2       # both discs at once
 ```
 
-Roughly three concurrent decodes will use a 16-core host — but *using* the cores
-and *finishing sooner* turned out to be different things. Timed over two full
-54,000-frame sides, `-j 2` came out about **1% ahead** of decoding the two in
-turn, not twice as fast, and the worker pool per decode can be cut from ten to
-six with no measurable loss. Whatever bounds this is shared between the decodes
-rather than private to each — most likely memory bandwidth — and `iowait` was 0%
-for the whole run. [docs/performance.md](docs/performance.md) has the numbers.
+A second decode pays; a third does not. Timed on three National A sides at
+`-t 4`:
 
-So reach for `-j` to keep every side advancing — a side that crawls through
-damaged media then does not hold up the queue behind it — rather than as a way
-to make the library run finish sooner.
+| arrangement | wall | CPU busy |
+| --- | --- | --- |
+| two sides, one after the other | 377.6 s | ~32% |
+| **two sides, `-j 2`** | **347.8 s** | 66% |
+| three sides, one after the other | 553.4 s | ~32% |
+| three sides, `-j 3` | 555.3 s | 90% |
+
+`-j 2` finishes **8.6% ahead**. `-j 3` finishes level, having spent 90% of the
+host to do it — so the ceiling sits at about two decodes' worth of work, and it
+is shared between the decodes rather than private to each. Memory bandwidth is
+the leading suspect; it has not been measured directly.
+[docs/performance.md](docs/performance.md) has the numbers.
+
+So `-j 2` is worth reaching for on both counts: a little more throughput, and
+every side advancing, so a side that crawls through damaged media does not hold
+up the queue behind it. Past two it is only the second of those.
 
 With `-j` above 1:
 
@@ -545,17 +565,16 @@ With `-j` above 1:
   sides to get through the serial version costs over an hour before the first
   frame is decoded. Either way nothing is contended for: the resolve phase
   finishes before any decode is launched.
-* **`--threads` auto aims for six workers per decode** and divides the host
+* **`--threads` auto aims for four workers per decode** and divides the host
   between the jobs rather than letting each claim it in full:
-  `clamp(max(ncpu - 2, 1) / jobs, 1, 6)`, so 16 cores gives 6 workers each at
-  `-j 1` and `-j 2`, 4 at `-j 3`, 3 at `-j 4`. Six is where the measured curve
-  goes flat — 6.46, 6.61, 6.43 and 6.47 FPS at 4, 6, 8 and 10 workers on one PAL
-  decode, a spread small enough that 8 landed below both its neighbours — so a
-  larger pool only spawns processes that wait. Unlike the earlier formula this
-  applies at `-j 1` too, in place of ld-decode's own choice of ten. The target is
-  `DD_THREADS_TARGET` if you want to move it. An explicit `-t N` is always used
-  exactly as given. `-j` is first clamped to the number of discs selected, so the
-  budget is never split more ways than there are decodes to run.
+  `clamp(max(ncpu - 2, 1) / jobs, 1, 4)`, so 16 cores gives 4 workers each at
+  `-j 1`, `-j 2` and `-j 3`, 3 at `-j 4`. Four is the peak of the measured curve
+  above, and past it throughput falls, so a larger pool is not merely idle — it
+  is slower. Unlike the earlier formula this applies at `-j 1` too, in place of
+  ld-decode's own choice of ten. The target is `DD_THREADS_TARGET` if you want
+  to move it. An explicit `-t N` is always used exactly as given. `-j` is first
+  clamped to the number of discs selected, so the budget is never split more
+  ways than there are decodes to run.
 * **Console progress is prefixed with the disc id**, since the decodes
   interleave.
 

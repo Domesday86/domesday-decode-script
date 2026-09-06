@@ -24,11 +24,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1788632479,
-        "narHash": "sha256-fCpg+tF7K3txAu6+4TTp7p4Xwpbym/adYghkCoA1dtg=",
+        "lastModified": 1788709521,
+        "narHash": "sha256-7zY17LsJvOkNmBGLzy/zkid3vvJZ1OUVL5ZsV4hy6vo=",
         "owner": "simoninns",
         "repo": "ld-decode",
-        "rev": "c02a4ecdf84d550ddc5c57ba4ab7d28b7d4ce980",
+        "rev": "2454ee6b68aa1a71f05d81ca9b2813b8ceb8b687",
         "type": "github"
       },
       "original": {
