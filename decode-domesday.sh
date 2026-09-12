@@ -87,6 +87,13 @@ DECODE_THREADS_TARGET="${DD_THREADS_TARGET:-4}"
 # Write .tbc instead of CVBS.
 USE_CVBS="${DD_CVBS:-1}"
 
+# Run ld-decode's EFM front end on the CLV sides too. The National B sides are
+# the library's only CLV sides, and they carry no EFM: decoding it there spends
+# the front end's time to write a file of noise -- 1.4GB of it on the DS1
+# National B decode made before this was switched off. 1 forces it back on, for
+# checking that claim on a side or for a CLV capture that does carry EFM.
+FORCE_EFM="${DD_EFM:-0}"
+
 FORCE=0
 DRY_RUN=0
 REFRESH_START=0
@@ -211,6 +218,7 @@ Options:
   -t, --threads N       ld-decode worker threads per decode, 0 = auto
                         (default: $THREADS; auto aims for $DECODE_THREADS_TARGET each, shared between --jobs)
       --tbc             write .tbc output instead of CVBS
+      --efm             decode EFM on CLV sides too (off: National B has none)
       --force           overwrite an existing decode
   -n, --dry-run         resolve starts and print the commands, decode nothing
       --list            list the sides the selectors chose and exit
@@ -218,6 +226,7 @@ Options:
 
 Environment: DD_LIBRARY DD_OUTPUT DD_DECODER DD_VERIFY_DECODER DD_FRAMES
              DD_LEAD_IN DD_PROBE DD_JOBS DD_THREADS DD_THREADS_TARGET DD_CVBS
+             DD_EFM
 
 Decodes go to <output>/<set>/<decoder>/<capture basename>.*, where <decoder> is
 the ld-decode commit flake.lock pins. Decoding a side again after updating
@@ -302,6 +311,7 @@ while [ $# -gt 0 ]; do
     -j|--jobs)       JOBS="${2:?--jobs needs a count}"; shift 2 ;;
     -t|--threads)    THREADS="${2:?--threads needs a value}"; shift 2 ;;
     --tbc)           USE_CVBS=0; shift ;;
+    --efm)           FORCE_EFM=1; shift ;;
     --cvbs)          USE_CVBS=1; shift ;;
     --force)         FORCE=1; shift ;;
     -n|--dry-run)    DRY_RUN=1; shift ;;
@@ -629,7 +639,7 @@ fi
 # to get through before the first frame is decoded. Nothing is contended for:
 # the resolve phase finishes before any decode is launched.
 
-R_ID=(); R_SRC=(); R_DEST=(); R_BASE=(); R_START=()
+R_ID=(); R_FMT=(); R_SRC=(); R_DEST=(); R_BASE=(); R_START=()
 
 # The decoded video file, if one is there. CVBS output is .cvbs on the pinned
 # build and was .composite on earlier ones.
@@ -751,24 +761,30 @@ resolve_one() {
     fi
   fi
 
-  printf 'id=%s\nsrc=%s\ndest=%s\nbase=%s\nstart=%s\n' \
-    "$id" "$src" "$dest" "$base" "$start" > "$WORK/start.$i"
+  printf 'id=%s\nfmt=%s\nsrc=%s\ndest=%s\nbase=%s\nstart=%s\n' \
+    "$id" "$fmt" "$src" "$dest" "$base" "$start" > "$WORK/start.$i"
 }
 
 # --- decoding --------------------------------------------------------------
 
 decode_one() {
   local i="$1" prefix="$2"
-  local id="${R_ID[$i]}" src="${R_SRC[$i]}"
+  local id="${R_ID[$i]}" fmt="${R_FMT[$i]}" src="${R_SRC[$i]}"
   local dest="${R_DEST[$i]}" base="${R_BASE[$i]}"
   local start="${R_START[$i]}"
   local product
   local -a cmd
 
-  # Every Domesday capture in the library is PAL. CLV is not flagged: ld-decode
-  # reads the disc format out of the VBI itself, and the table's CAV/CLV column
-  # is there to describe the side, not to steer the decoder.
+  # Every Domesday capture in the library is PAL. The disc format is not flagged:
+  # ld-decode reads CAV or CLV out of the VBI itself. The table's CAV/CLV column
+  # describes the side rather than steering the demodulator -- but what is on the
+  # side is a fact about it, and the EFM below is decided from it.
   cmd=(ld-decode --pal)
+  # The National B sides are the library's only CLV sides and carry no EFM, so
+  # the EFM front end is switched off for them: run on a side that has none it
+  # spends its time writing a file of noise (1.4GB on the DS1 National B decode
+  # made before this). --efm forces it back on.
+  if [ "$fmt" = CLV ] && [ "$FORCE_EFM" != 1 ]; then cmd+=(--noEFM); fi
   # Ask for the format wanted either way rather than leaning on the default:
   # CVBS is the default on the pinned build but was not on earlier ones, and
   # the extension `existing_product` then looks for follows the flag, so a
@@ -857,6 +873,7 @@ done
 # holds paths from the table, and sourcing would run whatever they contained.
 for i in "${!ids[@]}"; do
   R_ID+=(  "$(sed -n 's/^id=//p'    "$WORK/start.$i")")
+  R_FMT+=( "$(sed -n 's/^fmt=//p'   "$WORK/start.$i")")
   R_SRC+=( "$(sed -n 's/^src=//p'   "$WORK/start.$i")")
   R_DEST+=("$(sed -n 's/^dest=//p'  "$WORK/start.$i")")
   R_BASE+=("$(sed -n 's/^base=//p'  "$WORK/start.$i")")

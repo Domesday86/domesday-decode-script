@@ -96,6 +96,7 @@ environment variable:
 | `-j, --jobs` | `DD_JOBS` | `1` | discs decoded concurrently |
 | `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
+| `--efm` | `DD_EFM=1` | off on CLV | decode EFM on CLV sides too |
 
 Disc source paths in the table are relative to the library root, so pointing
 `--library` at another copy of the library is all that is needed to decode from
@@ -209,7 +210,31 @@ split side keep their own frame ranges, so nothing collides.
 `--frames` defaulting to 1000. `--start N` still applies to a single capture, so
 the selectors have to choose exactly one. It also passes
 `--V4300D_coherent_subtract` on every side — see [Player spur
-removal](#player-spur-removal).
+removal](#player-spur-removal) — and `--noEFM` on the CLV ones — see [EFM and the
+National B sides](#efm-and-the-national-b-sides).
+
+### EFM and the National B sides
+
+**National B carries no EFM**, and it is the only CLV side in every set, so the
+EFM front end is switched off on exactly the CLV sides:
+
+```
+ld-decode --pal --noEFM --cvbs --V4300D_coherent_subtract ...   # National B
+ld-decode --pal --cvbs --V4300D_coherent_subtract ...           # the CAV sides
+```
+
+Run against a side that has none, the front end spends its time demodulating
+noise and writes it out: the DS1 National B decode made before this was switched
+off carries a 1.4GB `.efm` of nothing. The CAV sides do carry EFM and keep it.
+
+This is the one place the table's CAV/CLV column reaches the decoder. It does
+not steer the demodulator — ld-decode reads CAV or CLV out of the VBI itself —
+but what is recorded on a side is a fact about that side, and within this
+library CLV means National B means no EFM. `--efm` (`DD_EFM=1`) forces it back
+on, for checking that claim on a side or for a CLV capture that does carry EFM.
+
+Decodes made before this land under their own decoder directory and still have
+their `.efm` files; nothing already decoded changes.
 
 ### Player spur removal
 
