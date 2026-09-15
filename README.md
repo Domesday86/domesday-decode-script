@@ -1,7 +1,7 @@
 # domesday-decode-script
 
-Scripts for automatically decoding the BBC Domesday, Volcanoes and EcoDisc
-AIV LaserDisc sets, and the GGV calibration discs, through
+Scripts for automatically decoding the BBC Domesday, Volcanoes, EcoDisc and
+City AIV LaserDisc sets, and the GGV calibration discs, through
 [ld-decode](https://github.com/happycube/ld-decode).
 
 ## Environment
@@ -324,7 +324,7 @@ lost and had to be captured in more than one pass, whose later part picks up
 mid-disc; the Domesday library has one such side, and this one has none.
 
 Everything else — the two roots, the frame limit, lead-in, probe, jobs and
-threads — works exactly as it does for the other two scripts, by the same flags
+threads — works exactly as it does for the other scripts, by the same flags
 and the same `DD_*` environment variables, with `DD_OUTPUT` defaulting to the
 Volcanoes output root. Starts are resolved by the shared `find-disc-start.sh`,
 in parallel at the `--jobs` concurrency, and cached beside the decode as
@@ -454,9 +454,134 @@ in the library's `EcoDisc_Notes.txt`; those were made against a different
 ld-decode and are not what this build wants, though they agree closely enough to
 be a useful sanity check.
 
+## Decoding the City Disc set
+
+`decode-city.sh` decodes the PAL BBC AIV **City Disc** set (BBC, 1990), an
+interactive videodisc set about the City of London — the "square mile" —
+covering its history, its customs and its role as a modern financial market
+place.
+
+Unlike the other AIV titles here, a City "set" is **four discs**: Culture 1,
+Culture 2, Financial 1 and Financial 2. All four are single-sided except
+**Culture 1, which carries the same content on both of its sides**. So a *side*
+in this script names a disc *and* a side of it:
+
+| Side | Short name |
+| --- | --- |
+| `Culture1-Side1` | `C1S1` |
+| `Culture1-Side2` | `C1S2` |
+| `Culture2-Side1` | `C2S1` |
+| `Financial1-Side1` | `F1S1` |
+| `Financial2-Side1` | `F2S1` |
+
+The library holds two sets, and they are not equally complete: **DS2 has all
+five captures, DS1 has no Financial 1** — that disc was missing when the set was
+captured. That makes **nine captures across the two sets, not ten**, so
+`Financial1-Side1` selects one capture rather than two and `DS1:F1S1` is an
+error rather than an omission.
+
+```sh
+nix develop
+./decode-city.sh                        # all nine captures, first 1000 frames each
+./decode-city.sh --frames 30            # quick smoke test
+./decode-city.sh --frames all DS2:F1S1  # one side in full
+./decode-city.sh --frames all C1S1 -j 2 # both Culture 1 first sides
+./decode-city.sh --frames all -j 2      # the whole set, two at a time
+./decode-city.sh --list
+```
+
+Selectors work as they do for Domesday and EcoDisc: `DS1` is every side of a
+set, `DS2:Culture2-Side1` one side of one set, `Culture2-Side1` (or `C2S1`) that
+side of every set that has one, and they add together. `--side` narrows whatever
+the selectors chose. Set and side names are matched regardless of case. Output
+goes to `<output root>/<set>/<decoder>/<capture basename>.*`, with the output
+root defaulting to `/Volumes/Domesday86_Decodes/citydisc-decode-script`.
+
+### What the script asserts
+
+Every capture is PAL, is CAV, was made on an LD-V4300D, and carries EFM digital
+audio. Those are facts about the discs and the captures rather than choices, so
+they are asserted in the script instead of offered as flags:
+
+```sh
+ld-decode --pal --cvbs --V4300D_coherent_subtract ...
+```
+
+EFM is therefore decoded on **every** side, and the side table carries no `efm`
+column and the script no `--efm` / `--no-efm` — there is nothing per-side to
+decide. EcoDisc needs that column because its two sides differ; the Domesday
+**National B** sides are the other place in this library where the front end is
+switched off, because they are CLV and carry none. See [EFM and the National B
+sides](#efm-and-the-national-b-sides). Player spur removal is the same coherent
+subtraction the other sides get, for the same reason — see [Player spur
+removal](#player-spur-removal). The disc format is deliberately *not* passed:
+`ld-decode` reads CAV or CLV from the VBI itself, and the table's format column
+records what it will find rather than telling it.
+
+### One capture that needs a different start target
+
+The table's "first picture" column is `1` for eight of the nine captures. The
+exception is **DS1's `Culture2-Side1`, which is `4`** — and that is a fact about
+the *capture*, not about the disc.
+
+Picture #1 is there, at file frame 332, directly behind the lead-in at 330–331.
+But that capture reports a **duplicated file frame** just after it: pictures #2
+and #3 both land on file frame 334. `find-disc-start.sh` only trusts a reading
+its successor confirms by advancing one file frame and one picture together (see
+[Finding the start of the disc](#finding-the-start-of-the-disc)), so picture #1
+can never be confirmed there and the search runs out of probes:
+
+```
+probe 2: start 330 (offset 0) -> 330 leadin
+probe 3: start 335 (offset 0) -> 335 4;336 5
+start search kept estimating file frame 332 without reading picture #1 there
+```
+
+Picture #4, at file frame 335, *is* confirmed — by #5 at 336 — and converges on
+the second probe.
+
+**Nothing is lost by aiming at #4.** The start that keeps the lead-in has to
+land on the colour-sequence lattice `ld-decode`'s CVBS writer opens on, and the
+nearest one below 335 opens the output at file frame **332 — picture #1
+itself**. The start report says so on every run:
+
+```
+content=335 leadin=1 start=332 opens=332
+start: 332 (output opens at file frame 332, 3 frame(s) before picture #4; 1 requested)
+```
+
+### Everything else
+
+The two roots, the frame limit, lead-in, probe, jobs and threads work exactly as
+they do for the other scripts, by the same flags and the same `DD_*` environment
+variables, with `DD_OUTPUT` defaulting to the City output root. Starts are
+resolved by the shared `find-disc-start.sh`, in parallel at the `--jobs`
+concurrency, and cached beside the decode as `<basename>.start`. Nothing is
+taken from the `--start` values recorded by hand in the library's
+`City_Disc_Notes.txt`; those were made against a different ld-decode and are not
+what this build wants, though they agree with it to within a few frames and are
+a useful sanity check:
+
+| Capture | notes | resolved |
+| --- | --- | --- |
+| DS1 `Culture1-Side1` | 384 | 382 |
+| DS1 `Culture1-Side2` | 290 | 282 |
+| DS1 `Culture2-Side1` | 331 | 332 |
+| DS1 `Financial2-Side1` | 303 | 303 |
+| DS2 `Culture1-Side1` | 298 | 296 |
+| DS2 `Culture1-Side2` | 357 | 355 |
+| DS2 `Culture2-Side1` | 380 | 381 |
+| DS2 `Financial1-Side1` | 338 | 338 |
+| DS2 `Financial2-Side1` | 368 | 368 |
+
+Note that one quick smoke test differs from the other scripts: `--frames 2` is
+too short here. DS1's `Culture1-Side2` has no colour-sequence-aligned start at
+its content frame, so its output opens nine frames into the decode; `--frames
+30` is the smallest round number that clears it on every capture.
+
 ## How the decodes work
 
-The rest of this applies to all four scripts: they share
+The rest of this applies to all five scripts: they share
 `find-disc-start.sh`, the decoder check, the output format and the
 concurrency machinery.
 
