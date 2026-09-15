@@ -7,8 +7,8 @@ LaserDisc sets, and the GGV calibration discs, through
 ## Environment
 
 The toolchain is provided by a Nix flake, so the exact `ld-decode` build used
-for a decode is pinned and reproducible. It tracks the `prev8-parallel-dev`
-branch of my own [ld-decode fork](https://github.com/simoninns/ld-decode).
+for a decode is pinned and reproducible. It tracks the `8.0.0dev` (rev8)
+branch of [ld-decode](https://github.com/happycube/ld-decode/tree/8.0.0dev).
 
 Requires Nix with flakes enabled:
 
@@ -87,8 +87,8 @@ environment variable:
 
 | Flag | Variable | Default | Meaning |
 | --- | --- | --- | --- |
-| `-l, --library` | `DD_LIBRARY` | `/home/sdi/raid/library` | capture library root |
-| `-o, --output` | `DD_OUTPUT` | `/home/sdi/raid/decodes/domesday-decode-script` | decode output root |
+| `-l, --library` | `DD_LIBRARY` | `/Volumes/Domesday86_Library` | capture library root |
+| `-o, --output` | `DD_OUTPUT` | `/Volumes/Domesday86_Decodes/domesday-decode-script` | decode output root |
 | `--decoder` | `DD_DECODER` | from `flake.lock` | decoder directory name |
 | `--no-verify-decoder` | `DD_VERIFY_DECODER=0` | check | skip the ld-decode/`flake.lock` check |
 | `-f, --frames` | `DD_FRAMES` | `1000` | frames per disc, or `all` |
@@ -191,7 +191,7 @@ reads `39000-54000`, but its first picture is 39001, and a search told to find
 Decodes go to `<output>/<set>/<decoder>/<capture basename>.*`:
 
 ```
-/home/sdi/raid/decodes/domesday-decode-script/
+/Volumes/Domesday86_Decodes/domesday-decode-script/
 └── DS1/
     └── ld-decode-12be078/
         ├── Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.cvbs
@@ -298,7 +298,7 @@ nix develop
 Sets are named `DS1`, `DS2` and `DS3`, matched regardless of case. With none
 named, all three are decoded. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/home/sdi/raid/decodes/volcanoes-decode-script`.
+defaulting to `/Volumes/Domesday86_Decodes/volcanoes-decode-script`.
 
 ### What the script asserts
 
@@ -345,9 +345,9 @@ frame — so a decode is only meaningful alongside the ld-decode that produced i
 Decodes are therefore filed under the pinned commit:
 
 ```
-/home/sdi/raid/decodes/domesday-decode-script/
+/Volumes/Domesday86_Decodes/domesday-decode-script/
 └── GGV1011/
-    ├── ld-decode-12be078/          # prev8-parallel-dev
+    ├── ld-decode-634a128/          # 8.0.0dev
     │   ├── GGV1011_….cvbs
     │   ├── GGV1011_….start
     │   └── decoder.txt
@@ -675,7 +675,7 @@ ld-decode writes a timestamped, line-oriented log of its own beside each decode,
 at `<basename>.log`. That is the thing to follow:
 
 ```sh
-tail -f "/home/sdi/raid/decodes/domesday-decode-script/GGV1011/ld-decode-12be078/GGV1011_….log"
+tail -f "/Volumes/Domesday86_Decodes/domesday-decode-script/GGV1011/ld-decode-634a128/GGV1011_….log"
 ```
 
 ld-decode has no non-interactive output mode — it draws progress with carriage

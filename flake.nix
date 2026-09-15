@@ -2,8 +2,8 @@
   description = "Scripts for automatically decoding Domesday LaserDisc images through ld-decode";
 
   inputs = {
-    # ld-decode is itself a flake; pinned to my fork's parallel-decode branch.
-    ld-decode.url = "github:simoninns/ld-decode/prev8-parallel-dev";
+    # ld-decode is itself a flake; pinned to upstream's rev8 development branch.
+    ld-decode.url = "github:happycube/ld-decode/8.0.0dev";
 
     # Take nixpkgs from ld-decode rather than pinning a second copy, so the
     # tools in the dev shell are the same builds ld-decode itself was tested
@@ -27,6 +27,24 @@
           pkgs.ffmpeg
           pkgs.flac
         ];
+
+        # The decode scripts are bash 4+ (associative arrays, ${var,,}, wait -n)
+        # and call coreutils with GNU options (date -Is). macOS ships bash 3.2
+        # and BSD coreutils in /bin, so both are named here rather than left to
+        # whatever the stdenv happens to put on PATH ahead of the system ones.
+        #
+        # git is here for the same reason from the other direction: on macOS
+        # /usr/bin/git is a stub that execs whatever DEVELOPER_DIR points at,
+        # and the stdenv sets DEVELOPER_DIR to a Nix apple-sdk that holds no
+        # git -- so the stub fails with "tool 'git' not found" inside the
+        # shell. A real git on PATH ahead of it settles that.
+        shellTools = [
+          pkgs.bashInteractive
+          pkgs.coreutils
+          pkgs.git
+          pkgs.jq
+          pkgs.shellcheck
+        ];
       in
       {
         packages = {
@@ -40,9 +58,7 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = decodeTools ++ [
-            pkgs.shellcheck
-          ];
+          packages = decodeTools ++ shellTools;
 
           shellHook = ''
             echo "domesday-decode-script environment"

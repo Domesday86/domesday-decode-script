@@ -39,11 +39,11 @@ FIND_START="$SELF_DIR/find-disc-start.sh"
 # ---------------------------------------------------------------------------
 
 # Root of the capture library. Disc source paths are relative to this.
-LIBRARY="${DD_LIBRARY:-/home/sdi/raid/library}"
+LIBRARY="${DD_LIBRARY:-/Volumes/Domesday86_Library}"
 
 # Root of the decode output tree. Decodes are filed under
 # <root>/<disc id>/<decoder>/, where <decoder> names the ld-decode build.
-OUTPUT="${DD_OUTPUT:-/home/sdi/raid/decodes/domesday-decode-script}"
+OUTPUT="${DD_OUTPUT:-/Volumes/Domesday86_Decodes/domesday-decode-script}"
 
 # Name of the decoder directory. Empty means work it out from flake.lock (see
 # "identifying the decoder" below); set it to label a decode by hand.
