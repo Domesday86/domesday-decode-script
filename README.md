@@ -93,32 +93,47 @@ names; only the decode is renamed.
 
 ## Verifying the source captures
 
-`SHA256SUMS` records the SHA-256 of every capture the scripts decode — 82 of
-them, 4.56 TB. Each line is a hash and the capture's path relative to the
-library root, exactly as it appears in the scripts' tables, so a capture is
-identified by its content rather than by where it happens to be kept.
-
-Check the library in place (GNU `sha256sum`, which the dev shell provides):
-
-```sh
-cd /Volumes/Domesday86_Library
-sha256sum -c ~/Coding/domesday-decode-script/SHA256SUMS        # every capture
-grep Countryside ~/Coding/domesday-decode-script/SHA256SUMS | sha256sum -c   # one disc
-```
-
-Reading the whole library back takes hours: it is bound by how fast the capture
-store can be read, about 95 MB/s over the network here, not by hashing.
-
-If a capture has been renamed or moved, hash it and look the hash up — the line
-that matches names the capture it is, and so the table entry to update:
+`sources.sha256` fingerprints every capture the scripts decode — 82 of them —
+by its exact size in bytes and the SHA-256 of its **first 16 MiB**. Each line is
+keyed by the capture's path relative to the library root, spelled exactly as in
+the scripts' tables, so a line says both what a capture is and where the scripts
+expect it. `verify-sources.sh` checks against it:
 
 ```sh
-sha256sum "/somewhere/else/renamed.ldf"
-grep <hash> SHA256SUMS
+./verify-sources.sh                  # every capture, in about a minute
+./verify-sources.sh Countryside DS1_ # only paths containing one of these
 ```
 
-A capture whose hash matches no line is not one these scripts were written
-against, whatever it is called.
+```
+OK       BBC_AIV/North_Polar_Expedition/NPE_DS1/North_Polar_Expedition_DD86-DS1_Side1_20210103_CAV_PAL_00001-51437.ldf
+MISSING  BBC_AIV/Volcanoes/Volcanoes_DS2/Volcanoes_DD86-DS2_Side1_20200126_CAV_PAL_00001-54000.ldf
+SIZE     BBC_AIV/City_Disc/… (1 bytes, expected 42148664852)
+
+1 ok, 2 failed
+```
+
+If a capture has been renamed or moved, `--identify` fingerprints it wherever
+it is and names the capture it is, which is the table entry to update:
+
+```sh
+$ ./verify-sources.sh --identify /somewhere/else/renamed.ldf
+/somewhere/else/renamed.ldf: is BBC_AIV/North_Polar_Expedition/NPE_DS2/North_Polar_Expedition_DD86-DS2_Side1_20210103_CAV_PAL_00001-54348.ldf
+```
+
+A file whose head matches but whose size does not is reported as an incomplete
+or altered copy, and one that matches nothing is not a capture these scripts
+were written against, whatever it is called.
+
+This is a verification, not a full checksum. Hashing the whole of every capture
+means reading 4.56 TB back from the capture store, the best part of a day at the
+~95 MB/s it serves; the heads are read in under a minute. The head hash tells
+the captures apart — each is FLAC-compressed RF of a different disc or pass, and
+`--generate` refuses to write a file in which any two share a fingerprint — and
+the size catches a copy that stopped short. What it will not catch is damage
+inside a file that leaves its size unchanged.
+
+`./verify-sources.sh --generate` rewrites `sources.sha256` from the paths in the
+decode scripts' tables, so a capture added to a table cannot be left out.
 
 ## Decoding the Domesday discs
 
