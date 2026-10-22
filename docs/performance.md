@@ -1,8 +1,9 @@
 # Decode performance
 
-Measurements from `decode-ggv.sh` and `decode-domesday.sh` on the pinned
-`ld-decode-c02a4ec` build, taken 2026-09-05/06: the flag sweeps, and then a
-six-side National A run of 321,954 frames that put the chosen flags to work.
+Measurements from `decode-ggv.sh` (since removed) and `decode-domesday.sh` on
+the pinned `ld-decode-c02a4ec` build, taken 2026-09-05/06: the flag sweeps, and
+then a six-side National A run of 321,954 frames that put the chosen flags to
+work.
 A few figures from the earlier `ld-decode-5a83836` build are kept for
 comparison and are labelled where they appear.
 

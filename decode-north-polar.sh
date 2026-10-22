@@ -1,20 +1,32 @@
 #!/usr/bin/env bash
 #
-# Decode the PAL and NTSC LaserDisc calibration discs through ld-decode.
+# Decode the PAL North Polar Expedition LaserDisc through ld-decode.
 #
-# Each disc is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
-# configurable number of lead-in frames before CAV picture number 1, so the
+# North Polar Expedition (Virgin Publishing, 1989) is a single-sided CAV
+# interactive videodisc, a team-building exercise in which a group plays the
+# members of an expedition to the North Pole. It is not a BBC title, but it is an
+# AIV-era disc captured the same way as the rest of the library. Being
+# single-sided, a disc set here is one capture rather than the four a Domesday
+# set holds. The library has two sets -- two independent captures of two
+# different copies of the disc, both made in January 2021 -- and each is decoded
+# in its own right, so they can be compared against each other or combined.
+#
+# The disc carries no EFM digital audio -- its sound is analogue only -- so the
+# EFM front end is switched off; see the note above FORCE_EFM.
+#
+# Each side is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
+# configurable number of lead-in frames before its first picture, so the
 # disc-spin-up region at the head of the capture is skipped.
 #
 # One decode does not fill a modern machine. ld-decode fans block demodulation
 # out to worker processes, but the decode loop that consumes them is strictly
 # in-order on the main thread, so the workers spend most of their time waiting
-# on it. Measured on a 16-core host, on PAL Domesday sides -- the engine is the
-# same one these discs go through: a single decode at its best setting keeps
-# about five of the sixteen cores busy, and workers added past that draw CPU
-# without returning frames -- 38% of the host at ten workers against 32% at
-# four, for 7% fewer frames. The capture is read over a 10Gb link with iowait
-# under 0.5%, so it is that serial loop, not I/O, that bounds one decode.
+# on it. Measured on a 16-core host, on PAL Domesday sides -- the same engine
+# these captures go through: a single decode at its best setting keeps about
+# five of the sixteen cores busy, and workers added past that draw CPU without
+# returning frames -- 38% of the host at ten workers against 32% at four, for 7%
+# fewer frames. The capture is read over a 10Gb link with iowait under 0.5%, so
+# it is that serial loop, not I/O, that bounds one decode.
 #
 # What bounds the host is reached at about two decodes. Four workers per decode
 # is the measured peak, and past it throughput falls away rather than levelling
@@ -25,9 +37,9 @@
 # measurements are in docs/performance.md.
 #
 # Decodes are filed under the ld-decode commit that produced them, so decoding a
-# disc again with a different build lands beside the earlier decode instead of
-# on top of it: only a re-run of the same commit can overwrite, and only then
-# with --force.
+# set again with a different build lands beside the earlier decode instead of on
+# top of it: only a re-run of the same commit can overwrite, and only then with
+# --force.
 #
 set -euo pipefail
 
@@ -38,12 +50,12 @@ FIND_START="$SELF_DIR/find-disc-start.sh"
 # Configuration (override with environment variables or the flags below)
 # ---------------------------------------------------------------------------
 
-# Root of the capture library. Disc source paths are relative to this.
+# Root of the capture library. Set source paths are relative to this.
 LIBRARY="${DD_LIBRARY:-/Volumes/Domesday86_Library}"
 
 # Root of the decode output tree. Decodes are filed under
-# <root>/<disc id>/<decoder>/, where <decoder> names the ld-decode build.
-OUTPUT="${DD_OUTPUT:-/Volumes/Domesday86_Decodes/domesday-decode-script}"
+# <root>/<set>/<decoder>/, where <decoder> names the ld-decode build.
+OUTPUT="${DD_OUTPUT:-/Volumes/Domesday86_Decodes/north-polar-decode-script}"
 
 # Name of the decoder directory. Empty means work it out from flake.lock (see
 # "identifying the decoder" below); set it to label a decode by hand.
@@ -53,20 +65,21 @@ DECODER="${DD_DECODER:-}"
 # writing a decode under that commit's name. 0 skips the check.
 VERIFY_DECODER="${DD_VERIFY_DECODER:-1}"
 
-# Frames to decode per disc: a number, or "all" for the whole side.
+# Frames to decode per set: a number, or "all" for the whole side.
 FRAMES="${DD_FRAMES:-1000}"
 
-# Frames of lead-in to include before CAV picture number 1.
+# Frames of lead-in to include before the side's first picture.
 LEAD_IN="${DD_LEAD_IN:-1}"
 
 # Where the start search first probes, in file frames. This needs to be past
-# disc spin-up and into settled playback; 800 clears it on these captures.
+# disc spin-up and into settled playback; on these captures the content starts
+# by file frame 360 or so, and 800 clears that.
 PROBE="${DD_PROBE:-800}"
 
-# Discs to decode concurrently. One decode cannot saturate the machine (see the
+# Sets to decode concurrently. One decode cannot saturate the machine (see the
 # note at the top), and two is where the machine tops out: on the 16-core test
-# host -j 2 finished 8.6% ahead of the same two decodes run in turn, while -j 3
-# finished level with three in turn. Its other value is keeping every disc
+# host -j 2 finished 8.6% ahead of the same two sides decoded in turn, while
+# -j 3 finished level with three in turn. Its other value is keeping every set
 # advancing, so one that crawls through damaged media does not hold up the rest
 # of the queue.
 JOBS="${DD_JOBS:-1}"
@@ -81,28 +94,48 @@ DECODE_THREADS_TARGET="${DD_THREADS_TARGET:-4}"
 # Write .tbc instead of CVBS.
 USE_CVBS="${DD_CVBS:-1}"
 
+# Run ld-decode's EFM front end anyway. North Polar Expedition carries no EFM
+# digital audio, so by default the front end is off: run on a disc that has none
+# it spends its time demodulating noise into an .efm file no one can use. That
+# was measured rather than assumed -- probes every 500 pictures across DS1 and
+# every 1000 across DS2, scored for frame sync with lddecode.efm_score, found no
+# T11-T11 sync pairs anywhere on either capture, where the AIV discs that do
+# carry EFM frame up at a sync rate of 1.000 with near-full demodulator
+# confidence. 1 forces it back on, for checking that claim.
+FORCE_EFM="${DD_EFM:-0}"
+
 FORCE=0
 DRY_RUN=0
 REFRESH_START=0
 START_OVERRIDE=""
 
 # ---------------------------------------------------------------------------
-# Disc table: id | standard | source path relative to LIBRARY
+# Set table: set | first picture | source path relative to LIBRARY
+#
+# Every capture is PAL CAV and covers the disc's one content-bearing side.
+#
+# "first picture" is the picture number the start search converges on -- the
+# first frame of the side's content. It is 1 for every capture here, each of
+# which begins at the head of the side; the column exists for a side the player
+# lost and had to be captured in more than one pass, whose later part picks up
+# mid-disc (the Domesday library has one such side).
 # ---------------------------------------------------------------------------
 
-DISCS=(
-  "GGV1011|PAL|Calibration/GGV1011/GGV1011_CAV_PAL_side1_DD1_2019-06-12_20-18-21.ldf"
-  "GGV1069|NTSC|Calibration/GGV1069/Pioneer GGV1069_CAV_NTSC_side1_dup1_2019-09-12_21-11-38.ldf"
+SETS=(
+  "DS1|1|BBC_AIV/North_Polar_Expedition/NPE_DS1/North_Polar_Expedition_DD86-DS1_Side1_20210103_CAV_PAL_00001-51437.ldf"
+  "DS2|1|BBC_AIV/North_Polar_Expedition/NPE_DS2/North_Polar_Expedition_DD86-DS2_Side1_20210103_CAV_PAL_00001-54348.ldf"
 )
 
 # ---------------------------------------------------------------------------
 
 usage() {
   cat <<EOF
-Usage: ${0##*/} [options] [disc ...]
+Usage: ${0##*/} [options] [set ...]
 
-Decode the calibration discs through ld-decode. With no disc named, every disc
-in the table is decoded.
+Decode the North Polar Expedition LaserDisc through ld-decode. With no set
+named, every set in the table is decoded. North Polar Expedition is
+single-sided, so a set is one capture.
+Set names are matched regardless of case.
 
 Options:
   -l, --library DIR     capture library root (default: $LIBRARY)
@@ -110,45 +143,57 @@ Options:
       --decoder NAME    decoder directory name (default: from flake.lock)
       --no-verify-decoder
                         skip the check that ld-decode matches flake.lock
-  -f, --frames N|all    frames to decode per disc (default: $FRAMES)
-      --lead-in N       frames of lead-in to keep before CAV #1 (default: $LEAD_IN)
+  -f, --frames N|all    frames to decode per set (default: $FRAMES)
+      --lead-in N       frames of lead-in to keep before the first picture (default: $LEAD_IN)
       --probe N         first frame the start search probes (default: $PROBE)
-      --start N         force the ld-decode --start frame (single disc only)
+      --start N         force the ld-decode --start frame (one set only)
       --refresh-start   re-run the start search, ignoring the cached value
-  -j, --jobs N          decode N discs concurrently (default: $JOBS)
+  -j, --jobs N          decode N sets concurrently (default: $JOBS)
   -t, --threads N       ld-decode worker threads per decode, 0 = auto
                         (default: $THREADS; auto aims for $DECODE_THREADS_TARGET each, shared between --jobs)
       --tbc             write .tbc output instead of CVBS
+      --efm             decode EFM anyway (off: the disc has none)
       --force           overwrite an existing decode
   -n, --dry-run         resolve starts and print the commands, decode nothing
-      --list            list the discs in the table and exit
+      --list            list the sets in the table and exit
   -h, --help            this message
 
 Environment: DD_LIBRARY DD_OUTPUT DD_DECODER DD_VERIFY_DECODER DD_FRAMES
              DD_LEAD_IN DD_PROBE DD_JOBS DD_THREADS DD_THREADS_TARGET DD_CVBS
+             DD_EFM
 
-Decodes go to <output>/<disc id>/<decoder>/<capture basename>.*, where
-<decoder> is the ld-decode commit flake.lock pins. Decoding a disc again after
-updating ld-decode therefore writes a new directory rather than overwriting the
-earlier decode; re-running the same commit still needs --force.
+Decodes go to <output>/<set>/<decoder>/<capture basename>.*, where <decoder> is
+the ld-decode commit flake.lock pins. Decoding a set again after updating
+ld-decode therefore writes a new directory rather than overwriting the earlier
+decode; re-running the same commit still needs --force.
+
+Every set is decoded with --V4300D_coherent_subtract: both captures were made
+on an LD-V4300D, so its ~8.5MHz clock spur is in their RF, and subtracting
+the tone coherently removes its leakage skirts as well as the tone.
+
+EFM is not decoded. North Polar Expedition carries no digital audio -- probes
+right across both captures found no EFM frame sync at all -- so the front end
+would only demodulate noise. --efm (DD_EFM=1) turns it back on, for checking
+that claim.
 
 A single decode uses only about a third of a 16-core machine, because
 ld-decode's decode loop is serial and its demodulation workers wait on it.
 --threads will not recover the rest: four workers per decode is the measured
 peak and more is slower. -j 2 does recover some, finishing about 8.6% ahead of
-decoding the two discs in turn, but -j 3 finishes level with three in turn. So
-reach for -j to keep every disc advancing as much as to go faster, and do not
+decoding the two sets in turn, but -j 3 finishes level with three in turn. So
+reach for -j to keep every set advancing as much as to go faster, and do not
 expect a third job to pay. With -j above 1 the console progress of each decode
-is prefixed with its disc id, since the decodes interleave.
+is prefixed with its set id, since the decodes interleave.
 
-ld-decode writes its own timestamped progress log to <output>.log for each
-disc; tail that to follow a long decode.
+ld-decode writes its own timestamped progress log to <output>.log for each set;
+tail that to follow a long decode.
 
 Examples:
-  ${0##*/} --frames 2                       # quick smoke test of both discs
-  ${0##*/} --frames all GGV1069             # full decode of the NTSC disc
-  ${0##*/} --frames all -j 2                # both discs at once
-  ${0##*/} -l /mnt/library -o /mnt/decodes  # different library and output roots
+  ${0##*/} --list                  # what would be decoded
+  ${0##*/} -f 30 DS1               # quick smoke test of one set
+  ${0##*/} DS1                     # set 1, first 1000 frames
+  ${0##*/} --frames all DS2        # one set in full
+  ${0##*/} --frames all -j 2       # both sets at once
 EOF
 }
 
@@ -163,7 +208,7 @@ log() { printf '\n== %s\n' "$*"; }
 # on. Pass it through unchanged on a terminal, where redrawing in place is what
 # you want, and split it into lines when it is not.
 #
-# Concurrent decodes are always split into lines and prefixed with the disc id:
+# Concurrent decodes are always split into lines and prefixed with the set id:
 # several streams redrawing in place on one terminal would overwrite each other,
 # and unlabelled interleaved progress could not be told apart.
 #
@@ -180,13 +225,14 @@ run_ld_decode() {
   fi
 }
 
-# Prefix a block of our own output the same way, so a disc's banner stays with
+# Prefix a block of our own output the same way, so a set's banner stays with
 # its progress when decodes interleave.
 prefixed() { awk -v p="$1" '{ print p $0 }'; }
 
 # --- argument parsing ------------------------------------------------------
 
 wanted=()
+LIST=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -l|--library)    LIBRARY="${2:?--library needs a directory}"; shift 2 ;;
@@ -201,14 +247,11 @@ while [ $# -gt 0 ]; do
     -j|--jobs)       JOBS="${2:?--jobs needs a count}"; shift 2 ;;
     -t|--threads)    THREADS="${2:?--threads needs a value}"; shift 2 ;;
     --tbc)           USE_CVBS=0; shift ;;
+    --efm)           FORCE_EFM=1; shift ;;
     --cvbs)          USE_CVBS=1; shift ;;
     --force)         FORCE=1; shift ;;
     -n|--dry-run)    DRY_RUN=1; shift ;;
-    --list)          for d in "${DISCS[@]}"; do
-                       IFS='|' read -r id std rel <<< "$d"
-                       printf '%-10s %-5s %s\n' "$id" "$std" "$rel"
-                     done
-                     exit 0 ;;
+    --list)          LIST=1; shift ;;
     -h|--help)       usage; exit 0 ;;
     -*)              die "unknown option: $1" ;;
     *)               wanted+=("$1"); shift ;;
@@ -223,15 +266,71 @@ case "$LEAD_IN" in *[!0-9]*|"") die "--lead-in must be a number" ;; esac
 case "$PROBE" in *[!0-9]*|"") die "--probe must be a number" ;; esac
 case "$THREADS" in *[!0-9]*|"") die "--threads must be a number" ;; esac
 case "$JOBS" in *[!0-9]*|"") die "--jobs must be a number" ;; esac
+case "$FORCE_EFM" in 0|1) ;; *) die "DD_EFM must be 0 or 1 (got \"$FORCE_EFM\")" ;; esac
 [ "$JOBS" -ge 1 ] || die "--jobs must be at least 1"
 if [ -n "$START_OVERRIDE" ]; then
   case "$START_OVERRIDE" in *[!0-9]*) die "--start must be a frame number" ;; esac
-  [ "${#wanted[@]}" -eq 1 ] || die "--start applies to one disc; name exactly one"
 fi
 
-command -v ld-decode >/dev/null 2>&1 || die "ld-decode not on PATH (run: nix develop)"
-[ -x "$FIND_START" ] || die "missing helper: $FIND_START"
 [ -d "$LIBRARY" ] || die "library not found: $LIBRARY"
+if [ "$LIST" != 1 ]; then
+  command -v ld-decode >/dev/null 2>&1 || die "ld-decode not on PATH (run: nix develop)"
+  [ -x "$FIND_START" ] || die "missing helper: $FIND_START"
+fi
+
+# --- selecting sets --------------------------------------------------------
+#
+# Selectors are collected into a set of ids rather than filtering the table once
+# per selector, so naming the same set twice decodes it once, and so the table's
+# order is what the decodes come out in whatever order the selectors were
+# written.
+
+canonical_set() {
+  local want="${1,,}" d id
+  for d in "${SETS[@]}"; do
+    IFS='|' read -r id _ _ <<< "$d"
+    if [ "$want" = "${id,,}" ]; then printf '%s\n' "$id"; return 0; fi
+  done
+  return 1
+}
+
+declare -A picked=()
+
+if [ "${#wanted[@]}" -eq 0 ]; then
+  for d in "${SETS[@]}"; do
+    IFS='|' read -r id _ _ <<< "$d"
+    picked["$id"]=1
+  done
+  [ "${#picked[@]}" -gt 0 ] || die "the set table is empty"
+else
+  for want in "${wanted[@]}"; do
+    s=$(canonical_set "$want") || die "unknown disc set: $want (try --list)"
+    picked["$s"]=1
+  done
+fi
+
+selected=()
+for d in "${SETS[@]}"; do
+  IFS='|' read -r id _ _ <<< "$d"
+  [ -n "${picked[$id]+x}" ] || continue
+  selected+=("$d")
+done
+
+[ "${#selected[@]}" -gt 0 ] || die "nothing selected"
+
+if [ "$LIST" = 1 ]; then
+  for d in "${selected[@]}"; do
+    IFS='|' read -r id target rel <<< "$d"
+    printf '%-5s CAV PAL  picture #%-6s %s\n' "$id" "$target" "$rel"
+  done
+  exit 0
+fi
+
+# --start names one ld-decode start frame, which can only belong to one capture.
+[ -z "$START_OVERRIDE" ] || [ "${#selected[@]}" -eq 1 ] \
+  || die "--start applies to one set; name exactly one"
+
+command -v ld-decode >/dev/null 2>&1 || die "ld-decode not on PATH (run: nix develop)"
 
 # --- identifying the decoder -----------------------------------------------
 #
@@ -340,25 +439,6 @@ build, or pass --no-verify-decoder to decode with the one you have."
   fi
 fi
 
-# --- disc selection --------------------------------------------------------
-
-selected=()
-if [ "${#wanted[@]}" -eq 0 ]; then
-  selected=("${DISCS[@]}")
-else
-  for want in "${wanted[@]}"; do
-    hit=""
-    for d in "${DISCS[@]}"; do
-      IFS='|' read -r id _ _ <<< "$d"
-      if [ "$id" = "$want" ]; then hit="$d"; break; fi
-    done
-    [ -n "$hit" ] || die "unknown disc: $want (try --list)"
-    selected+=("$hit")
-  done
-fi
-
-[ "$JOBS" -le "${#selected[@]}" ] || JOBS="${#selected[@]}"
-
 # --- worker threads --------------------------------------------------------
 #
 # ld-decode's own auto is min(max(ncpu - 2, 1), 10) worker processes, chosen for
@@ -374,10 +454,12 @@ fi
 # as the host will hold. Four is the measured peak, and it spawns 60% fewer
 # processes than ld-decode's own ten.
 #
-# The budget is still shared between concurrent decodes, so a large --jobs
-# thins the pools rather than oversubscribing the host. This runs after disc
-# selection because JOBS is clamped to the number of discs there: asking for more
-# jobs than there are discs must not shrink the pool of the decodes that do run.
+# The budget is still shared between concurrent decodes, so a large --jobs thins
+# the pools rather than oversubscribing the host. This runs after set selection
+# because JOBS is clamped to the number of sets there: asking for more jobs than
+# there are sets must not shrink the pool of the decodes that do run.
+
+[ "$JOBS" -le "${#selected[@]}" ] || JOBS="${#selected[@]}"
 
 auto_threads() {
   local ncpu budget
@@ -398,13 +480,17 @@ fi
 
 # --- resolving starts ------------------------------------------------------
 #
-# Every selected disc is resolved first, serially, before any decode starts.
-# The start search runs short ld-decode probe decodes of its own, so running
-# those concurrently would only make them contend for the same cores the real
-# decodes are about to want; and resolving up front means a missing source or an
-# existing output is reported in seconds rather than after hours of decoding.
+# Every selected set is resolved before any decode starts, so a missing source
+# or an existing output is reported in minutes rather than after hours of
+# decoding.
+#
+# The resolves run at the same concurrency as the decodes. A start search is
+# several short ld-decode probes, each of which spends most of its wall clock
+# seeking into the .ldf rather than working, so run one at a time they are
+# nearly all waiting. Nothing is contended for: the resolve phase finishes
+# before any decode is launched.
 
-R_ID=(); R_STD=(); R_SRC=(); R_DEST=(); R_BASE=(); R_START=()
+R_ID=(); R_SRC=(); R_DEST=(); R_BASE=(); R_START=()
 
 # The decoded video file, if one is there. CVBS output is .cvbs on the pinned
 # build and was .composite on earlier ones.
@@ -421,25 +507,33 @@ existing_product() {
   return 1
 }
 
-resolve_disc() {
-  local id="$1" std="$2" rel="$3"
+# resolve_one <index> <id> <target> <relative path> <prefix>
+#
+# Prints its own banner and writes the resolved start to $WORK/start.<index>, so
+# it can be run in a subshell: the caller reads the starts back afterwards
+# rather than relying on assignments that a subshell could not export.
+resolve_one() {
+  local i="$1" id="$2" target="$3" rel="$4" prefix="$5"
   local src="$LIBRARY/$rel"
   local dest="$OUTPUT/$id/$DECODER"
-  local base name content start cache product report kv
+  local base name content start opens cache product report kv
 
   # The decode is named after the capture, minus its extension and with spaces
-  # turned into dashes: one capture in the library has a space in its name, and
-  # every path built from it -- the .cvbs, the sidecars, the progress log --
-  # would then need quoting by hand in every command that touched it afterwards.
+  # turned into dashes: a capture name with a space in it would otherwise need
+  # quoting by hand in every command that touched the .cvbs, the sidecars or the
+  # progress log afterwards.
   name="${rel##*/}"
   base="${name%.ldf}"
   base="${base// /-}"
 
-  log "$id ($std)"
-  printf '   source: %s\n' "$src"
+  {
+    printf '\n== %s (CAV)\n' "$id"
+    printf '   source: %s\n' "$src"
+    printf '   output: %s/%s\n' "$dest" "$base"
+  } | prefixed "$prefix"
+
   [ -f "$src" ] || die "source not found: $src"
 
-  printf '   output: %s/%s\n' "$dest" "$base"
   # The CVBS writer has been renamed between branch builds (.composite before
   # .cvbs), so a decode is looked for under either name rather than only the one
   # the pinned build happens to use: an existing decode must be recognised
@@ -463,22 +557,28 @@ resolve_disc() {
 
   if [ -n "$START_OVERRIDE" ]; then
     start="$START_OVERRIDE"
-    printf '   start: %s (forced by --start)\n' "$start"
+    printf '   start: %s (forced by --start)\n' "$start" | prefixed "$prefix"
   else
     report=""
     if [ "$REFRESH_START" != 1 ] && [ -s "$cache" ]; then
       report=$(cat "$cache")
       case "$report" in
         # the cached start is only valid for the lead-in it was resolved for
-        *"content="*"leadin=$LEAD_IN "*) printf '   %s (cached in %s)\n' "$report" "$cache" ;;
+        *"content="*"leadin=$LEAD_IN "*)
+          printf '   %s (cached in %s)\n' "$report" "$cache" | prefixed "$prefix" ;;
         *) report="" ;;
       esac
     fi
     if [ -z "$report" ]; then
-      printf '   locating CAV frame #1 and a start that keeps the lead-in...\n'
-      report=$("$FIND_START" "--${std,,}" --probe "$PROBE" --lead-in "$LEAD_IN" \
-                 --report --verbose "$src" 2> >(sed 's/^/     /' >&2))
-      printf '   %s\n' "$report"
+      printf '   locating picture #%s and a start that keeps the lead-in...\n' \
+        "$target" | prefixed "$prefix"
+      # The trace is indented and labelled through prefixed(), not sed: the
+      # label is data, and sed would read any character in it as part of the
+      # s/// expression.
+      report=$("$FIND_START" --pal --probe "$PROBE" --target "$target" \
+                 --lead-in "$LEAD_IN" --report --verbose "$src" \
+                 2> >(prefixed "     $prefix" >&2))
+      printf '   %s\n' "$report" | prefixed "$prefix"
       [ "$DRY_RUN" = 1 ] || printf '%s\n' "$report" > "$cache"
     fi
 
@@ -494,45 +594,58 @@ resolve_disc() {
       || die "could not parse the start report: $report"
 
     # opens is the file frame the output really begins on, which is what says
-    # how much lead-in was kept -- the start is only what ld-decode was told,
-    # and how far the writer then moved on from it is not a fixed distance. A
-    # cache written before that field existed does not carry it, and it cannot
-    # be worked out from the other two, so that case says nothing rather than
+    # how much lead-in was kept -- the start is only what ld-decode was told, and
+    # how far the writer then moved on from it is not a fixed distance. A cache
+    # written before that field existed does not carry it, and it cannot be
+    # worked out from the other two, so that case says nothing rather than
     # guessing.
-    if [ -n "$opens" ]; then
-      printf '   start: %s (output opens at file frame %s, %s frame(s) before CAV #1; %s requested)\n' \
-        "$start" "$opens" "$(( content - opens ))" "$LEAD_IN"
-    else
+    if [ -z "$opens" ]; then
       printf '   start: %s (cached before the opening frame was recorded; %s lead-in frame(s) requested, --refresh-start to measure)\n' \
-        "$start" "$LEAD_IN"
+        "$start" "$LEAD_IN" | prefixed "$prefix"
+    elif [ "$opens" -le "$content" ]; then
+      printf '   start: %s (output opens at file frame %s, %s frame(s) before picture #%s; %s requested)\n' \
+        "$start" "$opens" "$(( content - opens ))" "$target" "$LEAD_IN" | prefixed "$prefix"
+    else
+      printf '   start: %s (output opens at file frame %s, %s frame(s) AFTER picture #%s: the head of this capture is off the colour sequence and cannot be written)\n' \
+        "$start" "$opens" "$(( opens - content ))" "$target" | prefixed "$prefix"
     fi
   fi
 
-  R_ID+=("$id");     R_STD+=("$std");   R_SRC+=("$src")
-  R_DEST+=("$dest"); R_BASE+=("$base"); R_START+=("$start")
+  printf 'id=%s\nsrc=%s\ndest=%s\nbase=%s\nstart=%s\n' \
+    "$id" "$src" "$dest" "$base" "$start" > "$WORK/start.$i"
 }
 
 # --- decoding --------------------------------------------------------------
 
 decode_one() {
   local i="$1" prefix="$2"
-  local id="${R_ID[$i]}" std="${R_STD[$i]}" src="${R_SRC[$i]}"
+  local id="${R_ID[$i]}" src="${R_SRC[$i]}"
   local dest="${R_DEST[$i]}" base="${R_BASE[$i]}"
   local start="${R_START[$i]}"
   local product
   local -a cmd
 
-  cmd=(ld-decode)
-  case "$std" in
-    PAL) cmd+=(--pal) ;;
-    *)   cmd+=(--ntsc) ;;
-  esac
+  # Every North Polar Expedition capture is PAL. The disc format is not flagged: ld-decode
+  # reads CAV or CLV out of the VBI itself, and every capture here is CAV.
+  #
+  # EFM is off unless --efm asked for it: the disc carries none, so the front
+  # end would only demodulate noise (see the note above FORCE_EFM).
+  cmd=(ld-decode --pal)
+  [ "$FORCE_EFM" = 1 ] || cmd+=(--noEFM)
   # Ask for the format wanted either way rather than leaning on the default:
-  # CVBS is the default on the pinned build but was not on earlier ones, and
-  # the extension `existing_product` then looks for follows the flag, so a
-  # silently flipped default would fail a finished decode as "wrote no video
-  # file" -- after the hours it took to make it.
+  # CVBS is the default on the pinned build but was not on earlier ones, and the
+  # extension `existing_product` then looks for follows the flag, so a silently
+  # flipped default would fail a finished decode as "wrote no video file" --
+  # after the hours it took to make it.
   if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs); else cmd+=(--tbc); fi
+  # Both captures came off an LD-V4300D, whose ~8.5MHz digital-audio clock
+  # spur sits in the RF band, so the coherent subtraction is asked for
+  # unconditionally. It estimates the tone and subtracts it in the time domain,
+  # which -- unlike the old FFT-bin notch -- takes the spectral-leakage skirts
+  # with it. On the pinned build it costs no concurrency: its no-video guard
+  # makes it safe from the first block, so it neither defers to sync acquisition
+  # nor forces demodulation serial.
+  cmd+=(--V4300D_coherent_subtract)
   cmd+=(--start "$start")
   [ "$FRAMES" = all ] || cmd+=(--length "$FRAMES")
   cmd+=(--threads "$DECODE_THREADS" "$src" "$dest/$base")
@@ -551,23 +664,64 @@ decode_one() {
   run_ld_decode "$prefix" "${cmd[@]}"
 
   # An empty video file is a failed decode, not a finished one: ld-decode exits
-  # cleanly when its writer never reached a frame it could open on.
+  # cleanly when its writer never reached a frame it could open on, which is
+  # what happens on a capture whose output opens past the frames --frames
+  # covers (see the start report's "output opens at").
   product=$(existing_product "$dest" "$base") \
     || die "ld-decode wrote no video file at $dest/$base.*"
   [ -s "$product" ] \
     || die "ld-decode wrote an empty $product: its writer never reached a frame \
-it could open the file on. Decode more frames."
+it could open the file on. This capture's output opens later than --frames \
+$FRAMES reaches; decode more frames."
 }
 
 # --- main ------------------------------------------------------------------
 
-printf 'library: %s\noutput:  %s\ndecoder: %s (%s)\nframes:  %s\njobs:    %s\nthreads: %s\n' \
-  "$LIBRARY" "$OUTPUT" "$DECODER" "$DECODER_SOURCE" "$FRAMES" "$JOBS" \
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/decode-north-polar.XXXXXX")
+trap 'rm -rf -- "$WORK"' EXIT
+
+printf 'library: %s\noutput:  %s\ndecoder: %s (%s)\nframes:  %s\nsets:    %s\njobs:    %s\nthreads: %s\n' \
+  "$LIBRARY" "$OUTPUT" "$DECODER" "$DECODER_SOURCE" "$FRAMES" "${#selected[@]}" "$JOBS" \
   "$([ "$DECODE_THREADS" = 0 ] && echo "auto (ld-decode)" || echo "$DECODE_THREADS per decode")"
 
+# Resolve the starts. Each resolve records its own exit status in a file, seeded
+# as failed, so a resolve that dies is still attributed to its set -- and so
+# every set's result is kept, rather than only the last one reaped.
+log "resolving starts for ${#selected[@]} set(s)"
+
+ids=(); targets=(); rels=()
 for d in "${selected[@]}"; do
-  IFS='|' read -r id std rel <<< "$d"
-  resolve_disc "$id" "$std" "$rel"
+  IFS='|' read -r id target rel <<< "$d"
+  ids+=("$id"); targets+=("$target"); rels+=("$rel")
+done
+
+resolve_prefix() { [ "$JOBS" -gt 1 ] && printf '[%s] ' "${ids[$1]}"; }
+
+for i in "${!ids[@]}"; do
+  while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n || true; done
+  (
+    echo 1 > "$WORK/rc.$i"
+    resolve_one "$i" "${ids[$i]}" "${targets[$i]}" "${rels[$i]}" \
+      "$(resolve_prefix "$i")"
+    echo 0 > "$WORK/rc.$i"
+  ) &
+done
+wait
+
+failed=()
+for i in "${!ids[@]}"; do
+  [ "$(cat "$WORK/rc.$i" 2>/dev/null || echo 1)" = 0 ] || failed+=("${ids[$i]}")
+done
+[ "${#failed[@]}" -eq 0 ] || die "could not resolve a start for: ${failed[*]}"
+
+# Read the resolved values back. Each record is parsed rather than sourced: it
+# holds paths from the table, and sourcing would run whatever they contained.
+for i in "${!ids[@]}"; do
+  R_ID+=(   "$(sed -n 's/^id=//p'    "$WORK/start.$i")")
+  R_SRC+=(  "$(sed -n 's/^src=//p'   "$WORK/start.$i")")
+  R_DEST+=( "$(sed -n 's/^dest=//p'  "$WORK/start.$i")")
+  R_BASE+=( "$(sed -n 's/^base=//p'  "$WORK/start.$i")")
+  R_START+=("$(sed -n 's/^start=//p' "$WORK/start.$i")")
 done
 
 if [ "$JOBS" -le 1 ]; then
@@ -576,32 +730,24 @@ if [ "$JOBS" -le 1 ]; then
     decode_one "$i" ""
   done
 else
-  # Each decode records its own exit status in a file, seeded as failed: a
-  # decode_one that dies exits its subshell without reaching the success line,
-  # so the seeded value stands and the failure is still attributed to its disc.
-  # Collecting statuses this way (rather than from `wait -n`) keeps every disc's
-  # result, instead of only the last one reaped.
-  statusdir=$(mktemp -d "${TMPDIR:-/tmp}/decode-ggv.XXXXXX")
-  trap 'rm -rf -- "$statusdir"' EXIT
-
-  log "decoding ${#R_ID[@]} disc(s), $JOBS at a time"
+  log "decoding ${#R_ID[@]} set(s), $JOBS at a time"
 
   for i in "${!R_ID[@]}"; do
     while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n || true; done
     (
-      echo 1 > "$statusdir/$i"
+      echo 1 > "$WORK/rc.$i"
       decode_one "$i" "[${R_ID[$i]}] "
-      echo 0 > "$statusdir/$i"
+      echo 0 > "$WORK/rc.$i"
     ) &
   done
   wait
 
   failed=()
   for i in "${!R_ID[@]}"; do
-    [ "$(cat "$statusdir/$i" 2>/dev/null || echo 1)" = 0 ] || failed+=("${R_ID[$i]}")
+    [ "$(cat "$WORK/rc.$i" 2>/dev/null || echo 1)" = 0 ] || failed+=("${R_ID[$i]}")
   done
   if [ "${#failed[@]}" -gt 0 ]; then
-    die "decode failed for: ${failed[*]} (see each disc's .log)"
+    die "decode failed for: ${failed[*]} (see each set's .log)"
   fi
 fi
 

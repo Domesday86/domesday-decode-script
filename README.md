@@ -1,7 +1,7 @@
 # domesday-decode-script
 
-Scripts for automatically decoding the BBC Domesday, Volcanoes, EcoDisc and
-City AIV LaserDisc sets, and the GGV calibration discs, through
+Scripts for automatically decoding the BBC Domesday, Volcanoes, EcoDisc, City
+and Countryside AIV LaserDisc sets, and the North Polar Expedition disc, through
 [ld-decode](https://github.com/happycube/ld-decode).
 
 ## Environment
@@ -53,55 +53,72 @@ nix flake update ld-decode
 `flake.lock` is committed; commit it again after updating so decodes stay
 reproducible.
 
-## Decoding the calibration discs
+## Configuration
 
-`decode-ggv.sh` decodes the PAL (GGV1011) and NTSC (GGV1069) calibration discs.
-
-```sh
-nix develop
-./decode-ggv.sh                 # both discs, first 1000 frames each
-./decode-ggv.sh --frames 2      # quick smoke test
-./decode-ggv.sh --frames all GGV1069
-./decode-ggv.sh --frames all -j 2   # both discs at once
-./decode-ggv.sh --list
-```
-
-Output goes to `<output root>/<disc id>/<decoder>/<capture basename>.*`, where
-`<decoder>` names the ld-decode commit that produced the decode — see [Which
-ld-decode made a decode](#which-ld-decode-made-a-decode).
-
-The decode is named after the capture, minus its `.ldf` and with spaces turned
-into dashes, so nothing downstream has to quote it:
-
-```
-Pioneer GGV1069_CAV_NTSC_side1_dup1_2019-09-12_21-11-38.ldf   # capture
-Pioneer-GGV1069_CAV_NTSC_side1_dup1_2019-09-12_21-11-38.cvbs  # decode
-```
-
-The captures in the library keep their own names; only the decode is renamed.
-
-### Configuration
-
-Both roots, the frame limit and everything else are configurable by flag or by
-environment variable:
+Every script takes the same core flags and environment variables:
 
 | Flag | Variable | Default | Meaning |
 | --- | --- | --- | --- |
 | `-l, --library` | `DD_LIBRARY` | `/Volumes/Domesday86_Library` | capture library root |
-| `-o, --output` | `DD_OUTPUT` | `/Volumes/Domesday86_Decodes/domesday-decode-script` | decode output root |
+| `-o, --output` | `DD_OUTPUT` | per script, under `/Volumes/Domesday86_Decodes/` | decode output root |
 | `--decoder` | `DD_DECODER` | from `flake.lock` | decoder directory name |
 | `--no-verify-decoder` | `DD_VERIFY_DECODER=0` | check | skip the ld-decode/`flake.lock` check |
-| `-f, --frames` | `DD_FRAMES` | `1000` | frames per disc, or `all` |
-| `--lead-in` | `DD_LEAD_IN` | `1` | frames of lead-in to keep before CAV #1 |
+| `-f, --frames` | `DD_FRAMES` | `1000` | frames per capture, or `all` |
+| `--lead-in` | `DD_LEAD_IN` | `1` | frames of lead-in to keep before the first picture |
 | `--probe` | `DD_PROBE` | `800` | first frame the start search probes |
-| `-j, --jobs` | `DD_JOBS` | `1` | discs decoded concurrently |
+| `--start` | | resolved | force the ld-decode `--start` frame (one capture only) |
+| `--refresh-start` | | use cache | re-run the start search |
+| `-j, --jobs` | `DD_JOBS` | `1` | captures decoded concurrently |
 | `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
-| `--efm` | `DD_EFM=1` | off on CLV | decode EFM on CLV sides too |
+| `--force` | | refuse | overwrite an existing decode |
+| `-n, --dry-run` | | | resolve starts and print the commands, decode nothing |
+| `--list` | | | list what the selectors chose and exit |
 
-Disc source paths in the table are relative to the library root, so pointing
+The scripts for multi-sided discs add `--side`. The ones that switch the EFM
+front end off anywhere add `--efm` (`DD_EFM=1`) to force it back on, and
+EcoDisc, whose table decides EFM side by side, adds `--no-efm` too; each disc's
+section below says which. `--help` on any script gives its full usage.
+
+Source paths in the tables are relative to the library root, so pointing
 `--library` at another copy of the library is all that is needed to decode from
 somewhere else.
+
+Output goes to `<output root>/<set>/<decoder>/<capture basename>.*`, where
+`<decoder>` names the ld-decode commit that produced the decode — see [Which
+ld-decode made a decode](#which-ld-decode-made-a-decode). The decode is named
+after the capture, minus its `.ldf` and with any spaces turned into dashes, so
+nothing downstream has to quote it. The captures in the library keep their own
+names; only the decode is renamed.
+
+## Verifying the source captures
+
+`SHA256SUMS` records the SHA-256 of every capture the scripts decode — 82 of
+them, 4.56 TB. Each line is a hash and the capture's path relative to the
+library root, exactly as it appears in the scripts' tables, so a capture is
+identified by its content rather than by where it happens to be kept.
+
+Check the library in place (GNU `sha256sum`, which the dev shell provides):
+
+```sh
+cd /Volumes/Domesday86_Library
+sha256sum -c ~/Coding/domesday-decode-script/SHA256SUMS        # every capture
+grep Countryside ~/Coding/domesday-decode-script/SHA256SUMS | sha256sum -c   # one disc
+```
+
+Reading the whole library back takes hours: it is bound by how fast the capture
+store can be read, about 95 MB/s over the network here, not by hashing.
+
+If a capture has been renamed or moved, hash it and look the hash up — the line
+that matches names the capture it is, and so the table entry to update:
+
+```sh
+sha256sum "/somewhere/else/renamed.ldf"
+grep <hash> SHA256SUMS
+```
+
+A capture whose hash matches no line is not one these scripts were written
+against, whatever it is called.
 
 ## Decoding the Domesday discs
 
@@ -206,9 +223,8 @@ split side keep their own frame ranges, so nothing collides.
 
 ### Flags
 
-`decode-domesday.sh` takes the same flags and environment variables as
-`decode-ggv.sh` — see [Configuration](#configuration) — with `--side` added and
-`--frames` defaulting to 1000. `--start N` still applies to a single capture, so
+`decode-domesday.sh` takes the common flags and environment variables — see
+[Configuration](#configuration) — with `--side` and `--efm` added. `--start N` still applies to a single capture, so
 the selectors have to choose exactly one. It also passes
 `--V4300D_coherent_subtract` on every side — see [Player spur
 removal](#player-spur-removal) — and `--noEFM` on the CLV ones — see [EFM and the
@@ -245,8 +261,7 @@ of every side of every set, so the flag is passed unconditionally rather than
 per set. Rather than notching the spur's FFT bin, it estimates the tone and
 subtracts it in the time domain, which takes the spur's spectral-leakage skirts
 and the clock's satellites with it instead of leaving a hole around them. It is
-PAL-only, which the whole Domesday library is; `decode-ggv.sh` does not pass it,
-since the calibration discs are NTSC.
+PAL-only, which the whole Domesday library is.
 
 Parallel demodulation stays available with it: on the pinned build the filter's
 own no-video guard makes it safe from the first block, so it no longer defers
@@ -262,15 +277,14 @@ directory, so they sit beside those rather than on top of them.
 
 ### Start points
 
-Starts are resolved by `find-disc-start.sh`, the same helper the calibration
-discs use, and cached beside the decode as `<basename>.start`. Nothing is taken
+Starts are resolved by `find-disc-start.sh`, the same helper every script uses,
+and cached beside the decode as `<basename>.start`. Nothing is taken
 from the `--start` values in the library's `Domesday_AIV_DiscSet_Notes.txt`;
 those are recorded by hand against a different ld-decode and are not what this
 build wants.
 
 The 49 starts are resolved before any decode begins, and at the same `--jobs`
-concurrency as the decodes — unlike `decode-ggv.sh`, which resolves its two
-serially. A start search is several short ld-decode probes that spend most of
+concurrency as the decodes. A start search is several short ld-decode probes that spend most of
 their wall clock seeking into the `.ldf` rather than working, so run one at a
 time the whole library takes well over an hour before the first frame is
 decoded. Nothing is contended for: the resolve phase finishes before any decode
@@ -579,9 +593,163 @@ too short here. DS1's `Culture1-Side2` has no colour-sequence-aligned start at
 its content frame, so its output opens nine frames into the decode; `--frames
 30` is the smallest round number that clears it on every capture.
 
+## Decoding the Countryside disc
+
+`decode-countryside.sh` decodes the PAL BBC AIV **Countryside** disc (BBC,
+1988), a double-sided interactive videodisc about agriculture, the environment
+and the rural community.
+
+The library holds five sets — five independent captures of the disc, made
+between 2019 and 2021 — and every one has **both sides**, so there are **ten
+captures**. Each is decoded in its own right, so they can be compared against
+each other or combined.
+
+```sh
+nix develop
+./decode-countryside.sh                       # all ten captures, first 1000 frames each
+./decode-countryside.sh --frames 30 DS1       # quick smoke test
+./decode-countryside.sh --frames all DS1:Side2  # one side in full
+./decode-countryside.sh --frames all S1 -j 2  # every first side, two at a time
+./decode-countryside.sh --frames all -j 2     # the whole disc, two at a time
+./decode-countryside.sh --list
+```
+
+Selectors work as they do for the other multi-sided scripts: `DS4` is every
+side of a set, `DS4:Side2` one side of one set, `Side2` (or `S2`) that side of
+every set, and they add together. `--side` narrows whatever the selectors chose.
+Set and side names are matched regardless of case. Output goes to
+`<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
+defaulting to `/Volumes/Domesday86_Decodes/countryside-decode-script`.
+
+### What the script asserts
+
+Every capture is PAL, is CAV on both sides, was made on an LD-V4300D, and
+carries EFM digital audio. Those are facts about the disc and the captures, so
+they are asserted in the script instead of offered as flags:
+
+```sh
+ld-decode --pal --cvbs --V4300D_coherent_subtract ...
+```
+
+Each was checked rather than assumed:
+
+- **CAV.** Probes every 1,000 pictures across both sides of DS1 and DS5 — 208
+  in all — read back exactly the CAV picture number aimed at, end to end. The format is still not passed: `ld-decode` reads it from the
+  VBI, and the table's format column records what it will find.
+- **LD-V4300D.** All ten captures carry the player's 8.4672MHz clock spur,
+  29–49 dB above the local noise floor against 7–11 dB at neighbouring
+  frequencies, so the coherent subtraction has something to remove — see
+  [Player spur removal](#player-spur-removal).
+- **EFM on both sides.** Scored with `lddecode.efm_score` from those same
+  probes, as for [EcoDisc](#efm). As on the other AIV discs the digital audio is
+  localised: it spans roughly pictures **#9000–#11000 on the first side and
+  #9000–#21000 on the second**, identically on both sets, with no syncs
+  anywhere else. Within those spans
+  the stream frames up perfectly — sync rate and frame-588 fraction 1.000,
+  demodulator confidence 248–251 — and outside them it scores 0.000 at
+  confidence 31–41, the signature of a section with none.
+
+Since both sides carry some EFM, the front end runs on every side: the table has
+no `efm` column, and the script no `--efm` / `--no-efm`. That is the City
+Disc's arrangement rather than EcoDisc's, whose second side carries none.
+
+### Everything else
+
+The roots, the frame limit, lead-in, probe, jobs and threads work exactly as
+they do for the other scripts — see [Configuration](#configuration). Starts are
+resolved by `find-disc-start.sh` and cached beside the decode as
+`<basename>.start`. Every capture begins at the head of its side, so the "first
+picture" column is `1` throughout. The `--start` values recorded by hand in the
+library's `Countryside_Notes.txt` are not used, but they agree with what this
+build resolves to within a few frames:
+
+| Capture | notes | picture #1 at | `--start` | output opens at |
+| --- | --- | --- | --- | --- |
+| DS1 `Side1` | 334 | 335 | 326 | 334 |
+| DS1 `Side2` | 337 | 338 | 335 | 335 |
+| DS2 `Side1` | 295 | 296 | 292 | 292 |
+| DS2 `Side2` | 373 | 376 | 371 | 372 |
+| DS3 `Side1` | 330 | 331 | 330 | 330 |
+| DS3 `Side2` | 295 | 297 | 290 | 291 |
+| DS4 `Side1` | 379 | 380 | 376 | 376 |
+| DS4 `Side2` | 350 | 351 | 348 | 348 |
+| DS5 `Side1` | 301 | 303 | 293 | 302 |
+| DS5 `Side2` | 363 | 365 | 358 | 359 |
+
+As on the City Disc, `--frames 2` is too short a smoke test. On DS1 and DS5's
+first sides the nearest colour-sequence-aligned start lies well before the
+content, so the output opens eight and nine frames into the decode, and a
+two-frame run writes an empty file — which the script reports as a failure
+rather than a decode. `--frames 30` clears it on every capture.
+
+## Decoding the North Polar Expedition disc
+
+`decode-north-polar.sh` decodes the PAL **North Polar Expedition** disc (Virgin
+Publishing, 1989), an interactive videodisc in which a group takes on the roles
+of the members of an expedition to the North Pole. It is not a BBC title, but it
+is an AIV-era disc captured the same way as the rest of the library.
+
+North Polar Expedition is **single-sided**, so a disc set here is one capture.
+The library has two sets — two different copies of the disc, both captured in
+January 2021 — and each is decoded in its own right.
+
+```sh
+nix develop
+./decode-north-polar.sh                   # both sets, first 1000 frames each
+./decode-north-polar.sh --frames 30 DS1   # quick smoke test
+./decode-north-polar.sh --frames all DS2  # one set in full
+./decode-north-polar.sh --frames all -j 2 # both sets at once
+./decode-north-polar.sh --list
+```
+
+Sets are named `DS1` and `DS2`, matched regardless of case. Output goes to
+`<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
+defaulting to `/Volumes/Domesday86_Decodes/north-polar-decode-script`.
+
+### What the script asserts
+
+Every capture is PAL CAV, was made on an LD-V4300D, and carries **no EFM**:
+
+```sh
+ld-decode --pal --noEFM --cvbs --V4300D_coherent_subtract ...
+```
+
+**No EFM** is the one that differs from the BBC AIV discs, and it was measured.
+Probes every 500 pictures right across DS1 and every 1,000 across DS2 — 156 in
+all — were scored with `lddecode.efm_score` as for [EcoDisc](#efm), and not one
+found a single T11–T11 frame-sync pair: sync rate 0.000 throughout, demodulator
+confidence 29–41, the signature of a section with no EFM. The BBC discs' EFM is
+localised, but every block found on them spans a thousand pictures or more,
+which probes 500 apart cannot step over. So the front end is switched off, as
+it is on the Domesday National B sides, rather than left to write an `.efm` of
+noise. `--efm` (`DD_EFM=1`) turns it back on, for checking that claim.
+
+The other two were checked too. The same probes read back exactly the CAV
+picture number aimed at, end to end on both captures. Both carry the
+LD-V4300D's 8.4672MHz clock spur, 41 and 33 dB above the local noise floor, so
+the coherent subtraction has something to remove — see [Player spur
+removal](#player-spur-removal).
+
+### Everything else
+
+The roots, the frame limit, lead-in, probe, jobs and threads work exactly as
+they do for the other scripts — see [Configuration](#configuration). Both
+captures begin at the head of the side, so the "first picture" column is `1`.
+The `--start` values in the library's `NPE_Notes.txt` are not used, but agree
+with what this build resolves:
+
+| Capture | notes | picture #1 at | `--start` | output opens at |
+| --- | --- | --- | --- | --- |
+| DS1 | 359 | 360 | 350 | 358 |
+| DS2 | 303 | 304 | 300 | 300 |
+
+DS1's output opens eight frames after its `--start`, so as with Countryside and
+the City Disc, `--frames 2` is too short to smoke-test it; `--frames 30` clears
+it.
+
 ## How the decodes work
 
-The rest of this applies to all five scripts: they share
+The rest of this applies to all six scripts: they share
 `find-disc-start.sh`, the decoder check, the output format and the
 concurrency machinery.
 
@@ -592,11 +760,11 @@ frame — so a decode is only meaningful alongside the ld-decode that produced i
 Decodes are therefore filed under the pinned commit:
 
 ```
-/Volumes/Domesday86_Decodes/domesday-decode-script/
-└── GGV1011/
-    ├── ld-decode-634a128/          # 8.0.0dev
-    │   ├── GGV1011_….cvbs
-    │   ├── GGV1011_….start
+/Volumes/Domesday86_Decodes/volcanoes-decode-script/
+└── DS1/
+    ├── ld-decode-16dc70f/          # 8.0.0dev
+    │   ├── Volcanoes_DD86-DS1_….cvbs
+    │   ├── Volcanoes_DD86-DS1_….start
     │   └── decoder.txt
     └── ld-decode-<next rev>/       # after nix flake update
 ```
@@ -614,8 +782,8 @@ ld-decode that will actually run, so it is checked before anything is decoded �
 with the store warm) against the ld-decode in the environment:
 
 ```
-$ ./decode-ggv.sh --frames all
-decode-ggv.sh: the ld-decode that would run is not the build flake.lock pins, so
+$ ./decode-volcanoes.sh --frames all
+decode-volcanoes.sh: the ld-decode that would run is not the build flake.lock pins, so
 the decode would be filed under a commit that did not produce it:
     on PATH:       /nix/store/1g064rx9…-python3.12-ld-decode-7.2.0/bin/ld-decode
     on PYTHONPATH: /nix/store/1g064rx9…/lib/python3.12/site-packages/lddecode
@@ -653,7 +821,8 @@ to be told where to start. `find-disc-start.sh` works that out.
 
 It replaces ld-decode's own `ld-find-start`, which scans forward from the head
 of the capture looking for the first run of 30 contiguous CAV addresses. That
-test is wrong in both directions on these captures:
+test is wrong in both directions, as the library's two calibration-disc captures
+— the ones `find-disc-start.sh` was developed against — show:
 
 * On **GGV1069 (NTSC)** it answers confidently and wrongly. Spin-up yields
   addresses that advance for long enough to pass, so it reports file frame 145
@@ -863,7 +1032,7 @@ The spare cores are only reachable by running more than one decode. `--jobs`
 does that:
 
 ```sh
-./decode-ggv.sh --frames all -j 2       # both discs at once
+./decode-volcanoes.sh --frames all -j 2   # two sets at once
 ```
 
 A second decode pays; a third does not. Timed on three National A sides at
@@ -890,11 +1059,11 @@ With `-j` above 1:
 
 * **Starts are resolved for every disc first,** before any decode starts, so a
   missing source or an existing output is reported in seconds rather than after
-  hours of decoding. `decode-ggv.sh` resolves its two serially;
-  `decode-domesday.sh` resolves at the same `-j` concurrency, because with 49
-  sides to get through the serial version costs over an hour before the first
-  frame is decoded. Either way nothing is contended for: the resolve phase
-  finishes before any decode is launched.
+  hours of decoding. The resolves run at the same `-j` concurrency as the
+  decodes, because a start search spends most of its time seeking, and with
+  `decode-domesday.sh`'s 49 sides to get through the serial version costs over
+  an hour before the first frame is decoded. Nothing is contended for: the
+  resolve phase finishes before any decode is launched.
 * **`--threads` auto aims for four workers per decode** and divides the host
   between the jobs rather than letting each claim it in full:
   `clamp(max(ncpu - 2, 1) / jobs, 1, 4)`, so 16 cores gives 4 workers each at
@@ -913,7 +1082,7 @@ recorded separately, the discs that succeed are still finished and renamed, and
 the run ends by naming the ones that failed:
 
 ```
-decode-ggv.sh: decode failed for: GGV1069 (see each disc's .log)
+decode-domesday.sh: decode failed for: DS3:NationalB (see each side's .log)
 ```
 
 ### Following a long decode
@@ -922,18 +1091,18 @@ ld-decode writes a timestamped, line-oriented log of its own beside each decode,
 at `<basename>.log`. That is the thing to follow:
 
 ```sh
-tail -f "/Volumes/Domesday86_Decodes/domesday-decode-script/GGV1011/ld-decode-634a128/GGV1011_….log"
+tail -f "/Volumes/Domesday86_Decodes/volcanoes-decode-script/DS1/ld-decode-16dc70f/Volcanoes_DD86-DS1_….log"
 ```
 
 ld-decode has no non-interactive output mode — it draws progress with carriage
 returns and no newlines whatever it is writing to, so redirecting its console
 output to a file gives one enormous line that `tail`, `grep` and `less` are all
-useless on. `decode-ggv.sh` therefore passes that stream through unchanged on a
-terminal, where redrawing in place is what you want, and splits it into lines
+useless on. The scripts therefore pass that stream through unchanged on a
+terminal, where redrawing in place is what you want, and split it into lines
 when stdout is not a terminal:
 
 ```sh
-./decode-ggv.sh --frames 1000 > decode.log 2>&1   # decode.log is line-oriented
+./decode-volcanoes.sh --frames 1000 > decode.log 2>&1   # decode.log is line-oriented
 ```
 
 ## Notes
