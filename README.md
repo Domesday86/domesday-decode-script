@@ -33,7 +33,15 @@ This puts `ld-decode` and its sibling tools on `PATH`:
 | `ld-ldf-reader-py` | Read `.ldf` files |
 | `ld-lds-converter-py` | Convert `.lds` files |
 
-`ffmpeg`, `flac` and `shellcheck` are in the shell too.
+`ffmpeg`, `flac` and `shellcheck` are in the shell too, along with the tools
+that turn decodes into a VP415e pack (see [Building a VP415e
+pack](#building-a-vp415e-pack)):
+
+| Command | From | Purpose |
+| --- | --- | --- |
+| `orc-cli` | [decode-orc](https://github.com/simoninns/decode-orc) | Map, align and stack decodes; EFM images; the `.mkv` |
+| `vfs-stacker`, `vfs-verifier` | [vfs-verifier](https://github.com/Domesday86/vfs-verifier) | Stack and check the VFS data images |
+| `sqlite3`, `yq` | nixpkgs | Read `.meta` databases and the disc metadata YAML |
 
 With [direnv](https://direnv.net/) installed, `direnv allow` enters the shell
 automatically on `cd`.
@@ -44,11 +52,15 @@ automatically on `cd`.
 nix run . -- --pal --start 310 capture.ldf output-basename
 ```
 
-### Updating the pinned ld-decode
+### Updating the pinned tools
 
 ```sh
 nix flake update ld-decode
+nix flake update decode-orc vfs-verifier
 ```
+
+decode-orc and vfs-verifier are pinned at whatever their `main` was when they
+were last updated.
 
 `flake.lock` is committed; commit it again after updating so decodes stay
 reproducible.
@@ -59,8 +71,10 @@ Every script takes the same core flags and environment variables:
 
 | Flag | Variable | Default | Meaning |
 | --- | --- | --- | --- |
-| `-l, --library` | `DD_LIBRARY` | `/Volumes/Domesday86_Library` | capture library root |
-| `-o, --output` | `DD_OUTPUT` | `/Volumes/Domesday86_Decodes/decode-script/<disc>` | decode output root |
+| `-l, --library` | `DD_LIBRARY` | from `shares.conf` | capture library root (a mount point) |
+| | `DD_DECODES` | from `shares.conf` | decodes share root (a mount point) |
+| | `DD_NO_MOUNT=1` | mount | check the shares but do not mount them |
+| `-o, --output` | `DD_OUTPUT` | `$DD_DECODES/decode-script/<disc>` | decode output root; must be on the decodes share |
 | `--decoder` | `DD_DECODER` | from `flake.lock` | decoder directory name |
 | `--no-verify-decoder` | `DD_VERIFY_DECODER=0` | check | skip the ld-decode/`flake.lock` check |
 | `-f, --frames` | `DD_FRAMES` | `1000` | frames per capture, or `all` |
@@ -80,12 +94,14 @@ front end off anywhere add `--efm` (`DD_EFM=1`) to force it back on, and
 EcoDisc, whose table decides EFM side by side, adds `--no-efm` too; each disc's
 section below says which. `--help` on any script gives its full usage.
 
-Source paths in the tables are relative to the library root, so pointing
-`--library` at another copy of the library is all that is needed to decode from
-somewhere else.
+Source paths in the tables are relative to the library root, so decoding from
+another copy of the library takes only pointing at it. Because the library is
+checked as a share before anything reads it (see [The network
+shares](#the-network-shares)), that copy is named in `shares.local.conf` rather
+than with `--library` alone.
 
 Every script's output root sits under one folder,
-`/Volumes/Domesday86_Decodes/decode-script/`, in a subfolder named after the
+`/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/`, in a subfolder named after the
 script's disc: `domesday`, `volcanoes`, `ecodisc`, `city`, `countryside` and
 `north-polar`.
 
@@ -95,6 +111,56 @@ ld-decode made a decode](#which-ld-decode-made-a-decode). The decode is named
 after the capture, minus its `.ldf` and with any spaces turned into dashes, so
 nothing downstream has to quote it. The captures in the library keep their own
 names; only the decode is renamed.
+
+## The network shares
+
+Every script reads from two shares and writes to one:
+
+- **library**: the capture library. It is read-only, and nothing ever writes
+  to it.
+- **decodes**: everything the scripts produce, including their temporary and
+  scratch files, which go in `decode-script/.work/` (the scripts point
+  `TMPDIR` there).
+
+Both platforms mount the shares over NFS from `10.0.1.4:/volume1/`. On macOS
+they go under `/Users/Shared/Domesday86/`; on Linux, under `/home/sdi/raid/`.
+`shares.conf` holds the mount points, sources and options, and a git-ignored
+`shares.local.conf` overrides any of them for one host. Any SMB mounts of the
+same shares under `/Volumes` are ignored, since a share is identified by its
+mount source rather than by its path.
+
+macOS lets only root make an NFS mount, so on a Mac the shares are mounted
+once after each boot with:
+
+```sh
+sudo ./mac-nfs-mount.sh             # library and sftp read-only, decodes read-write
+sudo ./mac-nfs-mount.sh --unmount
+```
+
+The library is mounted read-only, so the rule that it is never written holds
+at the mount as well as in the scripts. The SFTP upload share is mounted
+beside it; no script reads it.
+
+Before doing anything else, every script checks that each share it uses:
+
+1. is a mount;
+2. is the right mount (the configured source and type, so the share mounted somewhere else, or another share at its path, is caught);
+3. answers within a timeout (a hung NFS mount fails in seconds);
+4. holds the right content (a capture from `sources.sha256` at its recorded
+   size; a `.domesday86-decodes` marker at the root of the decodes share);
+5. allows the access needed (the library readable, decodes writable).
+
+A script that finds a share missing does not call sudo. On macOS it names
+`mac-nfs-mount.sh`. On Linux it brings up a mount the host already defines, and
+otherwise prints the `sudo mount` command. Every output path is checked too: one that is not on the
+decodes share, or is in the library, is refused.
+
+```sh
+./mount-shares.sh                # check both (and, on Linux, mount what is missing)
+./mount-shares.sh --check        # check only
+./mount-shares.sh --mark-decodes # once, on a new decodes share: write its marker
+tests/shares-test.sh             # (macOS) check the refusals, against a scratch disk image
+```
 
 ## Verifying the source captures
 
@@ -228,7 +294,7 @@ reads `39000-54000`, but its first picture is 39001, and a search told to find
 Decodes go to `<output>/<set>/<decoder>/<capture basename>.*`:
 
 ```
-/Volumes/Domesday86_Decodes/decode-script/domesday/
+/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/domesday/
 └── DS1/
     └── ld-decode-12be078/
         ├── Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.cvbs
@@ -332,7 +398,7 @@ nix develop
 Sets are named `DS1` to `DS5`, matched regardless of case. With none named,
 all five are decoded. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Volumes/Domesday86_Decodes/decode-script/volcanoes`.
+defaulting to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/volcanoes`.
 
 ### What the script asserts
 
@@ -408,7 +474,7 @@ Selectors work as they do for Domesday: `DS4` is every side of a set,
 has one, and they add together. `--side` narrows whatever the selectors chose.
 Set and side names are matched regardless of case. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Volumes/Domesday86_Decodes/decode-script/ecodisc`.
+defaulting to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/ecodisc`.
 
 ### Both sides are CAV
 
@@ -544,7 +610,7 @@ set, `DS2:Culture2-Side1` one side of one set, `Culture2-Side1` (or `C2S1`) that
 side of every set that has one, and they add together. `--side` narrows whatever
 the selectors chose. Set and side names are matched regardless of case. Output
 goes to `<output root>/<set>/<decoder>/<capture basename>.*`, with the output
-root defaulting to `/Volumes/Domesday86_Decodes/decode-script/city`.
+root defaulting to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/city`.
 
 ### What the script asserts
 
@@ -654,7 +720,7 @@ side of a set, `DS4:Side2` one side of one set, `Side2` (or `S2`) that side of
 every set, and they add together. `--side` narrows whatever the selectors chose.
 Set and side names are matched regardless of case. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Volumes/Domesday86_Decodes/decode-script/countryside`.
+defaulting to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/countryside`.
 
 ### What the script asserts
 
@@ -739,7 +805,7 @@ nix develop
 
 Sets are named `DS1` and `DS2`, matched regardless of case. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Volumes/Domesday86_Decodes/decode-script/north-polar`.
+defaulting to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/north-polar`.
 
 ### What the script asserts
 
@@ -782,6 +848,25 @@ DS1's output opens eight frames after its `--start`, so as with Countryside and
 the City Disc, `--frames 2` is too short to smoke-test it; `--frames 30` clears
 it.
 
+## Building a VP415e pack
+
+`build-pack.sh <disc>` will take a disc from its captures to the `<stem>.mkv`,
+`<stem>.dat` and `<stem>.dat.bsm` the [VP415e](https://github.com/Domesday86/vp415e)
+emulator loads. It works stage by stage, and each stage keeps a stamp of its
+inputs, so a re-run with nothing changed does nothing.
+[docs/emulator-pack-plan.md](docs/emulator-pack-plan.md) has the plan. Phase 0
+is in place: the pinned tools, the share checks, the stamps (`lib/stage.sh`,
+tested by `tests/stage-test.sh`) and the driver. The stages themselves arrive
+phase by phase. Until then a build stops at the first stage not yet written.
+
+```sh
+./build-pack.sh volcanoes status   # each stage: up to date, or stale and why
+./build-pack.sh volcanoes          # build what is stale
+```
+
+Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read
+from its decode script's `SETS` table, so there is one list of captures.
+
 ## How the decodes work
 
 The rest of this applies to all six scripts: they share
@@ -795,7 +880,7 @@ frame — so a decode is only meaningful alongside the ld-decode that produced i
 Decodes are therefore filed under the pinned commit:
 
 ```
-/Volumes/Domesday86_Decodes/decode-script/volcanoes/
+/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/volcanoes/
 └── DS1/
     ├── ld-decode-16dc70f/          # 8.0.0dev
     │   ├── Volcanoes_DD86-DS1_….cvbs
@@ -1126,7 +1211,7 @@ ld-decode writes a timestamped, line-oriented log of its own beside each decode,
 at `<basename>.log`. That is the thing to follow:
 
 ```sh
-tail -f "/Volumes/Domesday86_Decodes/decode-script/volcanoes/DS1/ld-decode-16dc70f/Volcanoes_DD86-DS1_….log"
+tail -f "/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/volcanoes/DS1/ld-decode-16dc70f/Volcanoes_DD86-DS1_….log"
 ```
 
 ld-decode has no non-interactive output mode — it draws progress with carriage

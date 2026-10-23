@@ -10,14 +10,32 @@
     # and wrapped against.
     nixpkgs.follows = "ld-decode/nixpkgs";
     flake-utils.follows = "ld-decode/flake-utils";
+
+    # decode-orc (orc-cli) maps, aligns and stacks the decodes into the video
+    # and writes the per-set EFM images; vfs-verifier supplies vfs-stacker
+    # and vfs-verifier for the VFS image. Both are pinned at whatever main
+    # was when flake.lock was last updated. Each keeps its own nixpkgs: they
+    # are built and tested against those, and nothing here links against
+    # them, so sharing one would save closure size at the cost of building
+    # them against a nixpkgs neither project has tried.
+    decode-orc = {
+      url = "github:simoninns/decode-orc";
+      inputs.flake-utils.follows = "ld-decode/flake-utils";
+    };
+    vfs-verifier = {
+      url = "github:Domesday86/vfs-verifier";
+      inputs.flake-utils.follows = "ld-decode/flake-utils";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, ld-decode }:
+  outputs = { self, nixpkgs, flake-utils, ld-decode, decode-orc, vfs-verifier }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
         lddecode = ld-decode.packages.${system}.ld-decode;
+        decodeorc = decode-orc.packages.${system}.decode-orc;
+        vfstools = vfs-verifier.packages.${system}.vfs-tools;
 
         # Everything the decode scripts shell out to. ld-decode wraps its own
         # copies of ffmpeg and flac onto its PATH; these are here so the
@@ -26,6 +44,16 @@
           lddecode
           pkgs.ffmpeg
           pkgs.flac
+        ];
+
+        # The pack stages: orc-cli (decode-orc ships it beside orc-gui),
+        # vfs-stacker and vfs-verifier, and sqlite and yq for reading the
+        # .meta databases and the disc metadata YAML.
+        packTools = [
+          decodeorc
+          vfstools
+          pkgs.sqlite
+          pkgs.yq-go
         ];
 
         # The decode scripts are bash 4+ (associative arrays, ${var,,}, wait -n)
@@ -49,6 +77,8 @@
       {
         packages = {
           ld-decode = lddecode;
+          decode-orc = decodeorc;
+          vfs-tools = vfstools;
           default = lddecode;
         };
 
@@ -58,11 +88,13 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = decodeTools ++ shellTools;
+          packages = decodeTools ++ packTools ++ shellTools;
 
           shellHook = ''
             echo "domesday-decode-script environment"
-            echo "  ld-decode $(ld-decode --version 2>/dev/null || echo '(not found)')"
+            echo "  ld-decode    $(ld-decode --version 2>/dev/null || echo '(not found)')"
+            echo "  orc-cli      decode-orc ${decode-orc.shortRev or "(dirty)"}"
+            echo "  vfs-stacker  vfs-verifier ${vfs-verifier.shortRev or "(dirty)"}"
           '';
         };
       }

@@ -1,5 +1,46 @@
 {
   "nodes": {
+    "decode-orc": {
+      "inputs": {
+        "ezpwd": "ezpwd",
+        "flake-utils": [
+          "ld-decode",
+          "flake-utils"
+        ],
+        "nixpkgs": "nixpkgs",
+        "qtnodes": "qtnodes"
+      },
+      "locked": {
+        "lastModified": 1792766158,
+        "narHash": "sha256-44iEp5Iib42rHQhO5z86pXLOcwrL/Vy5MCxZEpLxupM=",
+        "owner": "simoninns",
+        "repo": "decode-orc",
+        "rev": "31d22e647398183122e3f1ad7194ce465fbd22dd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "simoninns",
+        "repo": "decode-orc",
+        "type": "github"
+      }
+    },
+    "ezpwd": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1729810798,
+        "narHash": "sha256-GKStalynr6nRTnr63ekna4thd/bayPHZ6MG81iz+MP0=",
+        "owner": "pjkundert",
+        "repo": "ezpwd-reed-solomon",
+        "rev": "62a490c13f6e057fbf2dc6777fde234c7a19098e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pjkundert",
+        "repo": "ezpwd-reed-solomon",
+        "rev": "62a490c13f6e057fbf2dc6777fde234c7a19098e",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -21,7 +62,7 @@
     "ld-decode": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs_2"
       },
       "locked": {
         "lastModified": 1792642288,
@@ -40,6 +81,22 @@
     },
     "nixpkgs": {
       "locked": {
+        "lastModified": 1781216227,
+        "narHash": "sha256-9mUW6gNwoN2SWc/l0fW4svPNOulXLl8ijqKyeSOGgJE=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "a0374025a863d007d98e3297f6aa46cc3141c2f0",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-26.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
         "lastModified": 1774799055,
         "narHash": "sha256-Tsq9BCz0q47ej1uFF39m4tuhcwru/ls6vCCJzutEpaw=",
         "owner": "NixOS",
@@ -54,8 +111,42 @@
         "type": "github"
       }
     },
+    "nixpkgs_3": {
+      "locked": {
+        "lastModified": 1788531059,
+        "narHash": "sha256-hLD4l3QOGBQhkVp3mQ2lJ/YbEi99qUgKapb40KovZ88=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "801bef6abd86b91e51083066b83fb354a11fc640",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "qtnodes": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1780937735,
+        "narHash": "sha256-32kZxqrWlqmgYw6hWhiu47Y5ulSPpbmThYka1A6ia+c=",
+        "owner": "paceholder",
+        "repo": "nodeeditor",
+        "rev": "1b173f885b52e4fd9616f663ea288435ccf1d0d8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "paceholder",
+        "repo": "nodeeditor",
+        "rev": "1b173f885b52e4fd9616f663ea288435ccf1d0d8",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
+        "decode-orc": "decode-orc",
         "flake-utils": [
           "ld-decode",
           "flake-utils"
@@ -64,7 +155,8 @@
         "nixpkgs": [
           "ld-decode",
           "nixpkgs"
-        ]
+        ],
+        "vfs-verifier": "vfs-verifier"
       }
     },
     "systems": {
@@ -79,6 +171,28 @@
       "original": {
         "owner": "nix-systems",
         "repo": "default",
+        "type": "github"
+      }
+    },
+    "vfs-verifier": {
+      "inputs": {
+        "flake-utils": [
+          "ld-decode",
+          "flake-utils"
+        ],
+        "nixpkgs": "nixpkgs_3"
+      },
+      "locked": {
+        "lastModified": 1789050143,
+        "narHash": "sha256-0En1pYhHmeKKKMF+Py5sNt8de7RFuPBUem9lYuzwkoU=",
+        "owner": "Domesday86",
+        "repo": "vfs-verifier",
+        "rev": "41ab10c4eec1f52f3c70b69b33d053c6c3aeb8a3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Domesday86",
+        "repo": "vfs-verifier",
         "type": "github"
       }
     }

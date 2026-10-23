@@ -1,7 +1,7 @@
 # Plan: from captures to a VP415e disc pack
 
-Status: **draft. Nothing below is built yet.** Volcanoes is the pilot disc; the
-other discs follow once the process is proven on it.
+Status: **phase 0 is built; phases 1–8 are not.** Volcanoes is the pilot
+disc; the other discs follow once the process is proven on it.
 
 ## Goal
 
@@ -417,6 +417,54 @@ is a rare and deliberate change that shows in review.
   - an unresponsive mount;
   - a read-only decodes share.
 - `build-pack.sh volcanoes status` on an empty tree lists every stage as stale.
+
+**As built.** All the exit criteria are met.
+- `tests/shares-test.sh` (macOS) checks each refusal against a real
+  read-only mount made from a scratch disk image.
+- `tests/stage-test.sh` checks the write guard, the stamps and pruning.
+
+Where the build settles something the text above left open:
+
+- **Layout** under `decode-script/volcanoes/`:
+
+  | Stage | Directory |
+  | --- | --- |
+  | `decode:<DS>` | `<DS>/ld-decode-<rev>/` |
+  | `set:<DS>` | `orc-<rev>/sets/<DS>/` |
+  | `map` | `orc-<rev>/map/` |
+  | `video` | `orc-<rev>/video/` |
+  | `vfs` | `vfs-<rev>/` |
+  | `pack` | `pack-<key>/` |
+
+  Each directory holds a `stage.stamp`. An `orc-<rev>` version counts as
+  complete once `video/stage.stamp` exists; the other directories are
+  complete once their own stamp exists.
+- **`select`** has no stamp of its own. It is decided once
+  `discs/<disc>/selection.yaml` exists. `video`, `vfs` and `pack` take that
+  file's content as an input, and read their sets from `.video.sets[]` and
+  `.vfs.sets[]`. Phase 4 can add to that format, but should keep those two
+  lists.
+- **Project files** are expected at `discs/<disc>/stack.orcprj` and
+  `discs/<disc>/sets/<DS>.orcprj`. None is written yet, so the `set`, `map`
+  and `video` stamps currently record them as missing.
+- **Linux mount points** default to `/home/sdi/raid/Domesday86_{Library,Decodes}`
+  in `shares.conf`. A host that differs sets them in `shares.local.conf`.
+- **Scratch.** Once the decodes share passes its check, `ensure_shares`
+  points `TMPDIR` at `decode-script/.work/`. That catches every `mktemp` in
+  the decode scripts and in `find-disc-start.sh` without changing them.
+- **macOS uses NFS, not SMB.** The table above has changed for the Mac,
+  which now mounts the same NFS exports as the Linux host. Its own mount
+  points are under `/Users/Shared/Domesday86/`, and the SMB mounts in
+  `/Volumes` are ignored. An ordinary user cannot make an NFS mount on macOS,
+  so the osascript route is gone. Instead `sudo ./mac-nfs-mount.sh` mounts
+  the shares once after each boot. It mounts the library and the SFTP share
+  read-only (`resvport`, `nfc`), so the never-written rule holds at the mount.
+  A script that finds a share missing names that command rather than calling
+  sudo.
+- **The share tests on NFS.** `tests/shares-test.sh` keeps its disk image on
+  the decodes share. Its mount point is an empty directory in `/tmp`, because
+  macOS attaches an image only at a directory the user owns, and on NFS
+  every directory belongs to the server's user.
 
 ### Phase 1: Decode every set with ld-decode rev8
 

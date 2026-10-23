@@ -22,8 +22,11 @@ set -euo pipefail
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SUMS="$SELF_DIR/sources.sha256"
+# shellcheck source=lib/shares.sh
+. "$SELF_DIR/lib/shares.sh"
+shares_load || exit 1
 
-LIBRARY="${DD_LIBRARY:-/Volumes/Domesday86_Library}"
+LIBRARY="$DD_LIBRARY"
 
 # Bytes hashed from the head of each capture. Recorded in sources.sha256 too,
 # and read back from it when verifying, so a file generated with a different
@@ -51,29 +54,14 @@ Options:
                         the decode scripts' tables
   -h, --help            this message
 
-Environment: DD_LIBRARY
+Environment: DD_LIBRARY, DD_NO_MOUNT=1 (check the library share but do not
+             mount it)
 
 Exits non-zero if any capture is missing or does not match.
 EOF
 }
 
 die() { printf '%s: %s\n' "${0##*/}" "$*" >&2; exit 1; }
-
-# sha256 of standard input, as bare hex. GNU sha256sum is in the dev shell;
-# shasum is the fallback on a stock macOS.
-sha256_stdin() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum | cut -d' ' -f1
-  else
-    shasum -a 256 | cut -d' ' -f1
-  fi
-}
-
-file_size() {
-  # GNU stat first, then BSD stat: the two disagree on the flag. -L sizes the
-  # file a symlink points at, since head reads through the link too.
-  stat -L -c %s -- "$1" 2>/dev/null || stat -L -f %z -- "$1"
-}
 
 # fingerprint <file> -> "<sha256> <size>"
 fingerprint() {
@@ -112,6 +100,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# The library is checked as a share (lib/shares.sh) before anything reads it:
+# mounted, the right one, answering. --identify reads only the files named.
+if [ "$MODE" != identify ]; then
+  DD_LIBRARY="${LIBRARY%/}"
+  ensure_shares library || die "the library is not ready (./mount-shares.sh says why)"
+fi
+
 # --- generate --------------------------------------------------------------
 #
 # The capture list is taken from the scripts themselves rather than kept by
@@ -119,11 +114,12 @@ done
 # sorted by path, so regenerating after a change produces a readable diff.
 
 if [ "$MODE" = generate ]; then
-  [ -d "$LIBRARY" ] || die "library not found: $LIBRARY"
   mapfile -t paths < <(grep -ohE '(BBC_AIV|Calibration)/[^"|]*\.ldf' "$SELF_DIR"/decode-*.sh | sort -u)
   [ "${#paths[@]}" -gt 0 ] || die "no capture paths found in the decode scripts"
 
-  tmp=$(mktemp "${TMPDIR:-/tmp}/sources.sha256.XXXXXX")
+  # Written beside sources.sha256 and renamed over it, rather than in TMPDIR,
+  # so the rename stays on one filesystem.
+  tmp=$(mktemp "$SUMS.XXXXXX")
   trap 'rm -f -- "$tmp"' EXIT
   {
     printf '# Fingerprints of the source captures the decode scripts read.\n'
@@ -177,8 +173,6 @@ if [ "$MODE" = identify ]; then
 fi
 
 # --- verify ----------------------------------------------------------------
-
-[ -d "$LIBRARY" ] || die "library not found: $LIBRARY"
 
 ok=0; bad=0
 while IFS= read -r line; do

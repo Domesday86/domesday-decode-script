@@ -38,17 +38,22 @@ set -euo pipefail
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 FIND_START="$SELF_DIR/find-disc-start.sh"
+# shellcheck source=lib/shares.sh
+. "$SELF_DIR/lib/shares.sh"
+# shellcheck source=lib/stage.sh
+. "$SELF_DIR/lib/stage.sh"
+shares_load || exit 1
 
 # ---------------------------------------------------------------------------
 # Configuration (override with environment variables or the flags below)
 # ---------------------------------------------------------------------------
 
 # Root of the capture library. Side source paths are relative to this.
-LIBRARY="${DD_LIBRARY:-/Volumes/Domesday86_Library}"
+LIBRARY="$DD_LIBRARY"
 
 # Root of the decode output tree. Decodes are filed under
 # <root>/<set>/<decoder>/, where <decoder> names the ld-decode build.
-OUTPUT="${DD_OUTPUT:-/Volumes/Domesday86_Decodes/decode-script/domesday}"
+OUTPUT="${DD_OUTPUT:-$DD_DECODES/decode-script/domesday}"
 
 # Name of the decoder directory. Empty means work it out from flake.lock (see
 # "identifying the decoder" below); set it to label a decode by hand.
@@ -224,7 +229,8 @@ Options:
       --list            list the sides the selectors chose and exit
   -h, --help            this message
 
-Environment: DD_LIBRARY DD_OUTPUT DD_DECODER DD_VERIFY_DECODER DD_FRAMES
+Environment: DD_LIBRARY DD_DECODES DD_NO_MOUNT DD_OUTPUT DD_DECODER
+             DD_VERIFY_DECODER DD_FRAMES
              DD_LEAD_IN DD_PROBE DD_JOBS DD_THREADS DD_THREADS_TARGET DD_CVBS
              DD_EFM
 
@@ -335,7 +341,12 @@ if [ -n "$START_OVERRIDE" ]; then
   case "$START_OVERRIDE" in *[!0-9]*) die "--start must be a frame number" ;; esac
 fi
 
-[ -d "$LIBRARY" ] || die "library not found: $LIBRARY"
+# Both shares are checked (and mounted if need be) before anything else, and
+# the output must lie on the decodes share: the library is never written to.
+# Scratch space moves to the decodes share with them (TMPDIR).
+DD_LIBRARY="${LIBRARY%/}"
+ensure_shares library decodes || die "the shares are not ready (./mount-shares.sh says why)"
+stage_guard "$OUTPUT" || exit 1
 if [ "$LIST" != 1 ]; then
   command -v ld-decode >/dev/null 2>&1 || die "ld-decode not on PATH (run: nix develop)"
   [ -x "$FIND_START" ] || die "missing helper: $FIND_START"
