@@ -4,7 +4,7 @@
 #
 # A capture is fingerprinted by its exact size in bytes and the SHA-256 of its
 # first 16 MiB. That is a verification, not a full checksum: hashing the whole of
-# all 82 captures means reading 4.56 TB back from the capture store, which takes
+# all 84 captures means reading 4.67 TB back from the capture store, which takes
 # the best part of a day at the ~95 MB/s it serves, while the head of each file
 # is read in about a minute for the lot. The two halves cover different failures.
 # The head hash tells one capture from another -- each is FLAC-compressed RF of a

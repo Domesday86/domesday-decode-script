@@ -59,7 +59,7 @@ LIBRARY="${DD_LIBRARY:-/Volumes/Domesday86_Library}"
 
 # Root of the decode output tree. Decodes are filed under
 # <root>/<set>/<decoder>/, where <decoder> names the ld-decode build.
-OUTPUT="${DD_OUTPUT:-/Volumes/Domesday86_Decodes/ecodisc-decode-script}"
+OUTPUT="${DD_OUTPUT:-/Volumes/Domesday86_Decodes/decode-script/ecodisc}"
 
 # Name of the decoder directory. Empty means work it out from flake.lock (see
 # "identifying the decoder" below); set it to label a decode by hand.

@@ -60,7 +60,7 @@ Every script takes the same core flags and environment variables:
 | Flag | Variable | Default | Meaning |
 | --- | --- | --- | --- |
 | `-l, --library` | `DD_LIBRARY` | `/Volumes/Domesday86_Library` | capture library root |
-| `-o, --output` | `DD_OUTPUT` | per script, under `/Volumes/Domesday86_Decodes/` | decode output root |
+| `-o, --output` | `DD_OUTPUT` | `/Volumes/Domesday86_Decodes/decode-script/<disc>` | decode output root |
 | `--decoder` | `DD_DECODER` | from `flake.lock` | decoder directory name |
 | `--no-verify-decoder` | `DD_VERIFY_DECODER=0` | check | skip the ld-decode/`flake.lock` check |
 | `-f, --frames` | `DD_FRAMES` | `1000` | frames per capture, or `all` |
@@ -84,6 +84,11 @@ Source paths in the tables are relative to the library root, so pointing
 `--library` at another copy of the library is all that is needed to decode from
 somewhere else.
 
+Every script's output root sits under one folder,
+`/Volumes/Domesday86_Decodes/decode-script/`, in a subfolder named after the
+script's disc: `domesday`, `volcanoes`, `ecodisc`, `city`, `countryside` and
+`north-polar`.
+
 Output goes to `<output root>/<set>/<decoder>/<capture basename>.*`, where
 `<decoder>` names the ld-decode commit that produced the decode — see [Which
 ld-decode made a decode](#which-ld-decode-made-a-decode). The decode is named
@@ -93,7 +98,7 @@ names; only the decode is renamed.
 
 ## Verifying the source captures
 
-`sources.sha256` fingerprints every capture the scripts decode — 82 of them —
+`sources.sha256` fingerprints every capture the scripts decode — 84 of them —
 by its exact size in bytes and the SHA-256 of its **first 16 MiB**. Each line is
 keyed by the capture's path relative to the library root, spelled exactly as in
 the scripts' tables, so a line says both what a capture is and where the scripts
@@ -125,7 +130,7 @@ or altered copy, and one that matches nothing is not a capture these scripts
 were written against, whatever it is called.
 
 This is a verification, not a full checksum. Hashing the whole of every capture
-means reading 4.56 TB back from the capture store, the best part of a day at the
+means reading 4.67 TB back from the capture store, the best part of a day at the
 ~95 MB/s it serves; the heads are read in under a minute. The head hash tells
 the captures apart — each is FLAC-compressed RF of a different disc or pass, and
 `--generate` refuses to write a file in which any two share a fingerprint — and
@@ -223,7 +228,7 @@ reads `39000-54000`, but its first picture is 39001, and a search told to find
 Decodes go to `<output>/<set>/<decoder>/<capture basename>.*`:
 
 ```
-/Volumes/Domesday86_Decodes/domesday-decode-script/
+/Volumes/Domesday86_Decodes/decode-script/domesday/
 └── DS1/
     └── ld-decode-12be078/
         ├── Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.cvbs
@@ -327,7 +332,7 @@ nix develop
 Sets are named `DS1` to `DS5`, matched regardless of case. With none named,
 all five are decoded. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Volumes/Domesday86_Decodes/volcanoes-decode-script`.
+defaulting to `/Volumes/Domesday86_Decodes/decode-script/volcanoes`.
 
 ### What the script asserts
 
@@ -346,6 +351,21 @@ carry none; see [EFM and the National B
 sides](#efm-and-the-national-b-sides). Player spur removal is the same coherent
 subtraction the Domesday sides get, for the same reason — see [Player spur
 removal](#player-spur-removal).
+
+DS4 and DS5 were captured in 2026, four years after the rest, on an LD-V4300D
+that may have been modified to quieten its EFM noise. They were checked rather
+than taken on trust, and they behave exactly like the earlier sets:
+
+- **The spur is still there.** At three points across the side the 8.4672MHz
+  tone stands 38–48 dB above the local noise floor, with both ±88.2kHz
+  satellites at 12–25 dB, against 6–10 dB at a neighbouring frequency. That is
+  as strong as on DS1–DS3, typically 3–9 dB stronger, so the coherent
+  subtraction has the same job to do on them.
+- **EFM is where it is on the others.** Probes every 1,000 pictures, scored with
+  `lddecode.efm_score`, find it from about picture #47000 to the end of the side
+  — sync rate 1.000, confidence 238–248 — and nowhere before it.
+- **CAV, end to end,** by the same probes, and both captures begin at picture #1,
+  at file frames 342 (DS4) and 363 (DS5).
 
 The table carries a "first picture" column that is `1` for all five captures,
 each of which begins at the head of the side. It exists for a side the player
@@ -388,7 +408,7 @@ Selectors work as they do for Domesday: `DS4` is every side of a set,
 has one, and they add together. `--side` narrows whatever the selectors chose.
 Set and side names are matched regardless of case. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Volumes/Domesday86_Decodes/ecodisc-decode-script`.
+defaulting to `/Volumes/Domesday86_Decodes/decode-script/ecodisc`.
 
 ### Both sides are CAV
 
@@ -524,7 +544,7 @@ set, `DS2:Culture2-Side1` one side of one set, `Culture2-Side1` (or `C2S1`) that
 side of every set that has one, and they add together. `--side` narrows whatever
 the selectors chose. Set and side names are matched regardless of case. Output
 goes to `<output root>/<set>/<decoder>/<capture basename>.*`, with the output
-root defaulting to `/Volumes/Domesday86_Decodes/citydisc-decode-script`.
+root defaulting to `/Volumes/Domesday86_Decodes/decode-script/city`.
 
 ### What the script asserts
 
@@ -634,7 +654,7 @@ side of a set, `DS4:Side2` one side of one set, `Side2` (or `S2`) that side of
 every set, and they add together. `--side` narrows whatever the selectors chose.
 Set and side names are matched regardless of case. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Volumes/Domesday86_Decodes/countryside-decode-script`.
+defaulting to `/Volumes/Domesday86_Decodes/decode-script/countryside`.
 
 ### What the script asserts
 
@@ -719,7 +739,7 @@ nix develop
 
 Sets are named `DS1` and `DS2`, matched regardless of case. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Volumes/Domesday86_Decodes/north-polar-decode-script`.
+defaulting to `/Volumes/Domesday86_Decodes/decode-script/north-polar`.
 
 ### What the script asserts
 
@@ -775,7 +795,7 @@ frame — so a decode is only meaningful alongside the ld-decode that produced i
 Decodes are therefore filed under the pinned commit:
 
 ```
-/Volumes/Domesday86_Decodes/volcanoes-decode-script/
+/Volumes/Domesday86_Decodes/decode-script/volcanoes/
 └── DS1/
     ├── ld-decode-16dc70f/          # 8.0.0dev
     │   ├── Volcanoes_DD86-DS1_….cvbs
@@ -1106,7 +1126,7 @@ ld-decode writes a timestamped, line-oriented log of its own beside each decode,
 at `<basename>.log`. That is the thing to follow:
 
 ```sh
-tail -f "/Volumes/Domesday86_Decodes/volcanoes-decode-script/DS1/ld-decode-16dc70f/Volcanoes_DD86-DS1_….log"
+tail -f "/Volumes/Domesday86_Decodes/decode-script/volcanoes/DS1/ld-decode-16dc70f/Volcanoes_DD86-DS1_….log"
 ```
 
 ld-decode has no non-interactive output mode — it draws progress with carriage
