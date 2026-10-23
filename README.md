@@ -311,21 +311,21 @@ is launched.
 
 Volcanoes is **single-sided**: the second side carries no content, so a disc set
 here is one capture rather than the four a Domesday set holds. The library has
-three sets — three independent captures of the same disc, made between 2019 and
-2022 — and each is decoded in its own right, so they can be compared against
+five sets — five independent captures of the same disc, made between 2019 and
+2026 — and each is decoded in its own right, so they can be compared against
 each other or combined.
 
 ```sh
 nix develop
-./decode-volcanoes.sh                  # all three sets, first 1000 frames each
+./decode-volcanoes.sh                  # all five sets, first 1000 frames each
 ./decode-volcanoes.sh --frames 2       # quick smoke test
 ./decode-volcanoes.sh --frames all DS3 # one set in full
-./decode-volcanoes.sh --frames all -j 2   # all three, two at a time
+./decode-volcanoes.sh --frames all -j 2   # all five, two at a time
 ./decode-volcanoes.sh --list
 ```
 
-Sets are named `DS1`, `DS2` and `DS3`, matched regardless of case. With none
-named, all three are decoded. Output goes to
+Sets are named `DS1` to `DS5`, matched regardless of case. With none named,
+all five are decoded. Output goes to
 `<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
 defaulting to `/Volumes/Domesday86_Decodes/volcanoes-decode-script`.
 
@@ -347,7 +347,7 @@ sides](#efm-and-the-national-b-sides). Player spur removal is the same coherent
 subtraction the Domesday sides get, for the same reason — see [Player spur
 removal](#player-spur-removal).
 
-The table carries a "first picture" column that is `1` for all three captures,
+The table carries a "first picture" column that is `1` for all five captures,
 each of which begins at the head of the side. It exists for a side the player
 lost and had to be captured in more than one pass, whose later part picks up
 mid-disc; the Domesday library has one such side, and this one has none.

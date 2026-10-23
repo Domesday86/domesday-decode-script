@@ -4,8 +4,8 @@
 #
 # Volcanoes (BBC, 1988) is a single-sided CAV disc: the second side carries no
 # content, so a disc set here is one capture rather than the four a Domesday set
-# holds. The library has three sets -- three independent captures of the same
-# disc, made between 2019 and 2022 -- and each is decoded in its own right, so
+# holds. The library has five sets -- five independent captures of the same
+# disc, made between 2019 and 2026 -- and each is decoded in its own right, so
 # they can be compared against each other or combined.
 #
 # Each side is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
@@ -109,6 +109,8 @@ SETS=(
   "DS1|1|BBC_AIV/Volcanoes/Volcanoes_DS1/Volcanoes_DD86-DS1_Side1_20191227_CAV_PAL_00001-54000.ldf"
   "DS2|1|BBC_AIV/Volcanoes/Volcanoes_DS2/Volcanoes_DD86-DS2_Side1_20200126_CAV_PAL_00001-54000.ldf"
   "DS3|1|BBC_AIV/Volcanoes/Volcanoes_DS3/Volcanoes_DD86-DS3_Side1_20220709_CAV_PAL_00001-54000.ldf"
+  "DS4|1|BBC_AIV/Volcanoes/Volcanoes_DS4/Volcanoes_DD86-DS4_Side1_20260517_CAV_PAL_00001-54000.ldf"
+  "DS5|1|BBC_AIV/Volcanoes/Volcanoes_DS5/Volcanoes_DD86-DS5_Side1_20260517_CAV_PAL_00001-54000.ldf"
 )
 
 # ---------------------------------------------------------------------------
@@ -149,7 +151,7 @@ the ld-decode commit flake.lock pins. Decoding a set again after updating
 ld-decode therefore writes a new directory rather than overwriting the earlier
 decode; re-running the same commit still needs --force.
 
-Every set is decoded with --V4300D_coherent_subtract: all three captures were
+Every set is decoded with --V4300D_coherent_subtract: all five captures were
 made on an LD-V4300D, so its ~8.5MHz clock spur is in their RF, and subtracting
 the tone coherently removes its leakage skirts as well as the tone.
 
@@ -176,7 +178,7 @@ Examples:
   ${0##*/} -f 2 DS1                # quick smoke test of one set
   ${0##*/} DS1                     # set 1, first 1000 frames
   ${0##*/} --frames all DS3        # one set in full
-  ${0##*/} --frames all -j 2       # all three sets, two at a time
+  ${0##*/} --frames all -j 2       # all five sets, two at a time
 EOF
 }
 
@@ -619,7 +621,7 @@ decode_one() {
   # flipped default would fail a finished decode as "wrote no video file" --
   # after the hours it took to make it.
   if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs); else cmd+=(--tbc); fi
-  # All three captures came off an LD-V4300D, whose ~8.5MHz digital-audio clock
+  # All five captures came off an LD-V4300D, whose ~8.5MHz digital-audio clock
   # spur sits in the RF band, so the coherent subtraction is asked for
   # unconditionally. It estimates the tone and subtracts it in the time domain,
   # which -- unlike the old FFT-bin notch -- takes the spectral-leakage skirts
