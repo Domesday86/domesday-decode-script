@@ -64,9 +64,9 @@ were last updated.
 
 decode-orc is built with the fixes in `patches/decode-orc-*.patch` that its
 pinned revision does not have yet. Each patch says what it fixes. Remove one
-from `flake.nix` once an update brings its fix. Today there is one:
-`decode-orc-efm-sync.patch` stops the EFM sink crashing in data mode on macOS.
-A patch is part of the stamp of every stage that runs decode-orc, so adding,
+from `flake.nix` once an update brings its fix. Today there are none. The
+last, `decode-orc-efm-sync.patch` (the EFM sink crashing in data mode on
+macOS), went when decode-orc `4d54969` brought its fix. A patch is part of the stamp of every stage that runs decode-orc, so adding,
 changing or removing one rebuilds those stages. A new patch file must be
 `git add`ed before Nix can see it.
 
@@ -1055,6 +1055,8 @@ inputs, so a re-run with nothing changed does nothing.
   - `<stem>.provenance.yaml`, which vp415e ignores. It records the captures'
     fingerprints, the tool revisions, the selection and the evidence behind
     it, the stacker's weights, the vfs verdict and every stage's checks;
+  - `<stem>.report.pdf`, the pack's report, made afresh with every pack build
+    (see below);
   - `pack.json` and `check.txt`.
 
   `pack` on the decodes share links to the current version.
@@ -1075,6 +1077,35 @@ inputs, so a re-run with nothing changed does nothing.
 
   The next build restamps the same pack as complete. A recorded `fail` fails
   the stage.
+- **The pack report.** Every pack build writes `<stem>.report.pdf` beside the
+  pack. It is a record of what the automation did, from the RF captures to
+  the pack, not instructions. It holds:
+  - the pipeline: every step from RF to pack, its tool and revision, what it
+    made for this pack, and how its checks came out;
+  - the exact tools: each one's full revision, source and Nix hash from
+    `flake.lock`, decode-orc's patches, and the store path and version of
+    every command that ran;
+  - the sources: each capture's date, size and fingerprint, its decode (the
+    ld-decode version, flags and start), and its mapping;
+  - each source's quality against the stack's: SNR, black PSNR, dropouts and
+    burst level along the disc, the stack's SNR gain over the best single set,
+    and the per-frame SNR distribution;
+  - the selection, quoted with its reasons;
+  - the stacker's weight for each set in each block it measured, and the
+    blocks it split into pressings;
+  - the mkv's container and disc metadata;
+  - the EFM decode of each set, where each set's unrecovered sectors fall
+    against the stack's, and the VFS stack and its verification;
+  - every stage's checks and stamp, and the compare stage's report.
+
+  The stack's figures come from the `quality` stage, which measures the
+  stacker's output with the same SNR and dropout analyses the set stage runs
+  on each set. It stacks the disc again for each analysis, so it takes about
+  as long as the video stage, but only once for each stack. The report is
+  drawn by `lib/pack-report.py` (Matplotlib) and set by `typst` from
+  `lib/pack-report.typ`, in IBM Plex from the dev shell rather than the host's
+  fonts. Its working files (the graphs as SVG, and `report.json`) stay in
+  `pack-<key>/report/`.
 
 ```sh
 ./build-pack.sh volcanoes status                 # each stage: up to date, or stale and why
@@ -1087,7 +1118,8 @@ inputs, so a re-run with nothing changed does nothing.
 ./build-pack.sh volcanoes --until compare        # ...then the report to decide selection.yaml from
 ./build-pack.sh volcanoes --until video          # ...then, once selection.yaml is written, the stacked mkv
 ./build-pack.sh volcanoes --until vfs            # ...then the stacked, verified VFS image
-./build-pack.sh volcanoes --until pack           # ...then the pack and its provenance (the default)
+./build-pack.sh volcanoes --until quality        # ...then the stack's SNR and dropouts, for the report
+./build-pack.sh volcanoes --until pack           # ...then the pack, its provenance and report (the default)
 ```
 
 ### Installing a pack on the player

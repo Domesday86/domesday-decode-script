@@ -633,9 +633,9 @@ quality JSON. A re-run does nothing.
     the bytes before a sync pattern, it counts the flags of a whole sector even
     when fewer than 2,352 bytes are left, reading past the end of two vectors.
     libstdc++ lets that read pass; macOS's hardened libc++ traps it.
-  - `patches/decode-orc-efm-sync.patch` waits for the rest of the sector
-    instead. `flake.nix` applies it to the pinned decode-orc until decode-orc
-    has the fix.
+  - `patches/decode-orc-efm-sync.patch` waited for the rest of the sector
+    instead, applied by `flake.nix` to the pinned decode-orc. It went when
+    decode-orc `4d54969` brought the same fix (decode-orc#342).
   - `stage_input_tool` adds each `patches/<input>-*.patch` to the tool's stamp
     line, so changing a patch makes the stages that use the tool stale.
 - **Two projects per set, not one.** `--process` triggers every sink in a

@@ -15,7 +15,10 @@
 #            VFS stacks. Decided by a person; nothing here writes it
 #   video    the stacked, dropout-corrected .mkv     orc-<rev>/video/
 #   vfs      the stacked, verified .dat and .bsm     vfs-<rev>/
-#   pack     the three files and their provenance    pack-<key>/
+#   quality  the stacked video's SNR and dropouts,   orc-<rev>/quality/
+#            measured as each set's are
+#   pack     the three files, their provenance and   pack-<key>/
+#            the pack's report (<stem>.report.pdf)
 #
 # Each stage keeps a stamp of its inputs (lib/stage.sh): the captures'
 # fingerprints, the locked tool revisions, its parameters and project files,
@@ -35,7 +38,7 @@ SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/decode.sh
 . "$SELF_DIR/lib/decode.sh"
 
-STAGES=(decode set map compare select video vfs pack)
+STAGES=(decode set map compare select video vfs quality pack)
 
 usage() {
   cat <<EOF
@@ -269,7 +272,7 @@ VFS_DIR=$(stage_tool_dir vfs-verifier) || die "flake.lock pins no vfs-verifier"
 stage_tool() {
   case "$1" in
     decode)         printf 'ld-decode|ld-decode|ld-decode\n' ;;
-    set|map|video)  printf 'decode-orc|decode-orc|orc-cli\n' ;;
+    set|map|video|quality) printf 'decode-orc|decode-orc|orc-cli\n' ;;
     compare)        printf 'decode-orc|decode-orc|orc-cli\nvfs-verifier|vfs-tools|vfs-stacker\n' ;;
     vfs)            printf 'vfs-verifier|vfs-tools|vfs-stacker\n' ;;
     pack)           printf 'vfs-verifier|vfs-tools|vfs-verifier\n' ;;
@@ -386,7 +389,8 @@ describe_video() {
     VIDEO_SETS+=("$id|$STAGE_DIR/${STAGE_OUTPUTS[0]}")
   done
   mapfile -t ids < <(selected_sets video)
-  VIDEO_EXPECT=$(jq -r --args '[ .sets[] | select(.set | IN($ARGS.positional[])) | .metadata
+  VIDEO_EXPECT=unknown
+  [ -f "$OUT/$ORC_DIR/compare/compare.json" ] && VIDEO_EXPECT=$(jq -r --args '[ .sets[] | select(.set | IN($ARGS.positional[])) | .metadata
       | if . == null then "unread" else "\(.user_code // "none") \(.amendment2.present // false | if . then "present" else "absent" end)" end ]
       | unique | if length == 1 and .[0] != "unread" then .[0] else "unknown" end' \
       "${ids[@]}" < "$OUT/$ORC_DIR/compare/compare.json" 2>/dev/null) || VIDEO_EXPECT="unknown"
@@ -433,19 +437,39 @@ describe_vfs() {
   stage_output check.txt
 }
 
+# The stacked video's SNR and dropouts, from the video stage's stack project
+# as it was processed and the disc's set quality project, whose sinks measure
+# the stack as they measure each set. QUALITY_VIDEO is left naming the video
+# stage's directory.
+describe_quality() {
+  describe_video; QUALITY_VIDEO="$STAGE_DIR"
+  stage_begin quality "$OUT/$ORC_DIR/quality"
+  stage_input_stamp video "$QUALITY_VIDEO"
+  stage_input_tool decode-orc
+  stage_input_file "quality project" "$DISC_DIR/set-quality.orcprj"
+  stage_output snr.csv
+  stage_output dropouts.csv
+  stage_output quality.json
+  stage_output check.txt
+}
+
 # The pack: the video and vfs stages' outputs, and the provenance of the
 # whole. Its directory is named after the key of what it holds (the two
 # stacks and the stem), so each distinct pack is a version of its own and the
 # newest two are kept. What only its provenance takes -- the compare stage's
 # evidence, the selection and the hand check on the player -- is stamped too,
 # but leaves the name alone, so recording the hand check restamps the same
-# pack. PACK_VIDEO, PACK_VFS and PACK_COMPARE are left naming those stages'
-# directories.
+# pack. So does what only its report takes: the quality stage's figures for
+# the stack, and the report's script and layout, by their bytes (the layout's
+# lines that start with # are code). PACK_VIDEO, PACK_VFS, PACK_COMPARE,
+# PACK_MAP and PACK_QUALITY are left naming those stages' directories, and
+# COMPARE_SETS each set's.
 describe_pack() {
   local key
-  describe_compare; PACK_COMPARE="$STAGE_DIR"
+  describe_compare; PACK_COMPARE="$STAGE_DIR"; PACK_MAP="$COMPARE_MAP"
   describe_video;   PACK_VIDEO="$STAGE_DIR"
   describe_vfs;     PACK_VFS="$STAGE_DIR"
+  describe_quality; PACK_QUALITY="$STAGE_DIR"
   stage_begin pack "$OUT/pack"
   stage_input_stamp video "$PACK_VIDEO"
   stage_input_stamp vfs "$PACK_VFS"
@@ -455,10 +479,13 @@ describe_pack() {
   stage_input_stamp compare "$PACK_COMPARE"
   stage_input_file "selection" "$SELECTION"
   stage_input_file "player check" "$PLAYER_CHECK"
+  stage_input_stamp quality "$PACK_QUALITY"
+  stage_input "report" "$(for f in "$SELF_DIR"/lib/pack-report.*; do printf '%s %s ' "${f##*/}" "$(sha256_stdin < "$f" | cut -c1-12)"; done)"
   stage_output "$STEM.mkv"
   stage_output "$STEM.dat"
   stage_output "$STEM.dat.bsm"
   stage_output "$STEM.provenance.yaml"
+  stage_output "$STEM.report.pdf"
   stage_output SHA256SUMS
   stage_output pack.json
   stage_output check.txt
@@ -505,7 +532,7 @@ unit_state() {
     return 1
   fi
   case "$unit" in
-    video|vfs|pack)
+    video|vfs|quality|pack)
       if [ ! -f "$SELECTION" ]; then
         printf 'stale: waits on select\n'; return 1
       fi ;;
@@ -593,6 +620,7 @@ run_stage() {
     select) die "select: decided by hand in ${SELECTION#"$SELF_DIR"/}; there is nothing to build" ;;
     video)  run_video "$@"; return ;;
     vfs)    run_vfs "$@"; return ;;
+    quality) run_quality "$@"; return ;;
     pack)   run_pack "$@"; return ;;
   esac
 }
@@ -1880,6 +1908,143 @@ vfs_coverage() {
         sets: map(. + { in_stack: (.set as $s | $stack | index($s) != null) }) }'
 }
 
+# --- quality: the stacked video, measured as each set is -------------------
+#
+# The set stage measures each set's SNR and dropouts; this measures the stack
+# the same way, so the pack's report can set the two side by side. The video
+# stage's stack.orcprj, as it was processed, keeps its stacker and everything
+# that feeds it; what came after (dropout correction and the video sink) is
+# replaced by the SNR and dropout sinks of the disc's set-quality.orcprj, so
+# both are measured with the same settings. The stacker's output is what
+# stacking gained (SNR), and what it left for dropout correction to conceal
+# (dropouts). Burst level is the capture's, not something stacking improves,
+# so it is not measured again.
+#
+# Each sink's tool is run as the set stage runs it, and each run stacks the
+# whole disc again: about two hours in all for Volcanoes. Its own stamp keeps
+# it to once per stack.
+
+# The set analyses this stage runs on the stack.
+QUALITY_ANALYSES=(snr dropouts)
+
+run_quality() {
+  local state
+  ( build_quality ) || die "quality: failed (above)"
+  state=$(unit_state quality) || die "quality: still $state after building"
+}
+
+# quality_project <stack project> <set quality project>: the stack project
+# cut back to its stacker and what feeds it, with the set quality project's
+# SNR and dropout sinks fed from the stacker. Which stages stay is worked out
+# from the project as JSON; the cut is made by yq on the YAML itself, since a
+# round trip through JSON loses the form of its numbers (version 2.0 is read
+# back as 2, which decode-orc refuses).
+quality_project() {
+  local plan
+  plan=$(jq -c -n --argjson stack "$(yq -o=json . "$1")" '
+    def feeds($ids): ([ $stack.dag.edges[] | select(.to | IN($ids[])) | .from ] - $ids | unique) as $new
+      | if ($new | length) == 0 then $ids else feeds($ids + $new) end;
+    [ $stack.dag.nodes[] | select(.stage == "stacker") | .id ] as $s
+    | if ($s | length) != 1 then error("the stack project has \($s | length) stacker stages, not one") else $s[0] end as $sid
+    | { stacker: $sid, keep: feeds([ $sid ]), top: ([ $stack.dag.nodes[].id ] | max) }') || return 1
+  # shellcheck disable=SC2016 # yq's own variables
+  PLAN="$plan" SINKS="$2" yq '
+    (strenv(PLAN) | from_json) as $p
+    | (load(strenv(SINKS)).dag.nodes | map(select(.stage == "snr_analysis_sink" or .stage == "dropout_analysis_sink"))) as $sinks
+    | .project.name += " quality"
+    | .dag.nodes |= map(select(.id as $i | $p.keep | any_c(. == $i)))
+    | .dag.edges |= map(select(.to as $i | $p.keep | any_c(. == $i)))
+    | .dag.nodes += ($sinks | to_entries | map(.value.id = $p.top + 1 + .key | .value))
+    | .dag.edges += ($sinks | to_entries | map({"from": $p.stacker, "to": $p.top + 1 + .key}))' "$1" || return 1
+  [ "$(yq '[.dag.nodes[] | select(.stage == "snr_analysis_sink" or .stage == "dropout_analysis_sink")] | length' "$2")" = 2 ] \
+    || { printf 'quality: %s has not one SNR and one dropout sink\n' "${2#"$SELF_DIR"/}" >&2; return 1; }
+}
+
+build_quality() {
+  local dir a tool node csv t
+  describe_quality
+  dir="$STAGE_DIR"
+
+  stage_mkdir "$dir" || return 1
+  stage_unstamp || return 1
+  rm -f -- "$dir"/*.csv* "$dir"/*.json* "$dir"/*.log "$dir"/*.orcprj \
+           "$dir"/check.txt* "$dir"/check.failed.txt "$dir"/crash_bundle_*.zip
+
+  # Beside the video stage's directory, so the sources' relative paths hold.
+  quality_project "$QUALITY_VIDEO/stack.orcprj" "$DISC_DIR/set-quality.orcprj" > "$dir/quality.orcprj" \
+    || { printf 'quality: could not make the project\n' >&2; return 1; }
+
+  cd -- "$dir" || return 1
+  for a in "${SET_ANALYSES[@]}"; do
+    IFS='|' read -r tool node csv <<< "$a"
+    [[ " ${QUALITY_ANALYSES[*]} " = *" $csv "* ]] || continue
+    printf 'quality: %s of the stack of %s; this stacks the whole disc again\n' "$node" "$(selected_sets video | paste -sd' ' -)"
+    t=$SECONDS
+    orc-cli tools run "$dir/quality.orcprj" "$tool" --node "$node" --json --quiet \
+      --csv "$(stage_tmp "$csv.csv")" > "$dir/$csv.json" 2> "$dir/$csv.log" || true
+    printf 'quality: %s analysed in %ss\n' "$node" "$(( SECONDS - t ))"
+  done
+
+  if ! check_quality "$dir"; then
+    cat -- "$dir/check.failed.txt" >&2
+    printf 'quality: failed its checks and is not stamped (see %s/check.failed.txt)\n' "$dir" >&2
+    return 1
+  fi
+  cat -- "$dir/check.txt.partial"
+  stage_commit || { printf 'quality: could not stamp the stage\n' >&2; return 1; }
+  printf 'quality: checked and stamped: %s\n' "$dir"
+}
+
+# check_quality <dir>: run the checks, write check.txt and quality.json to
+# their stage_tmp names, and return non-zero if any failed.
+check_quality() {
+  local dir="$1" out fails=0 a tool node csv status frames total rows expect
+  out=$(stage_tmp check.txt) || return 1
+  ok()   { printf 'ok    %s\n' "$*"; }
+  fail() { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
+  note() { printf 'note  %s\n' "$*"; }
+  expect=$(jq -r '.metadata.frame_count // empty' "$QUALITY_VIDEO/video.json" 2>/dev/null) || expect=""
+
+  {
+    printf 'stage:   quality\nvideo:   %s\nchecked: %s\n\n' "${QUALITY_VIDEO#"$OUT"/}" "$(date '+%F %T')"
+    # Each analysis ran, over every frame of the stack: the mkv's frames.
+    for a in "${SET_ANALYSES[@]}"; do
+      IFS='|' read -r tool node csv <<< "$a"
+      [[ " ${QUALITY_ANALYSES[*]} " = *" $csv "* ]] || continue
+      status=$(jq -r '.nodes[0].status // empty' "$dir/$csv.json" 2>/dev/null) || status=""
+      if [ "$status" != success ]; then
+        fail "$node analysis: ${status:-no report} ($(head -c 300 "$dir/$csv.log" 2>/dev/null | tr '\n' ' '))"
+        continue
+      fi
+      read -r frames total < <(jq -r '.nodes[0].statistics | "\(.frames_analysed) \(.total_frames)"' "$dir/$csv.json") || true
+      rows=$(( $(wc -l < "$dir/$csv.csv.partial" 2>/dev/null || echo 1) - 1 ))
+      if [ "$frames" = "$total" ] && [ "$frames" = "$expect" ] && [ "$rows" = "$frames" ]; then
+        ok "$node analysis over all $frames frames of the stack, per frame in $csv.csv"
+      else
+        fail "$node analysis covered ${frames:-no} of ${total:-unknown} frames, with $rows in $csv.csv; the stack has ${expect:-unknown}"
+      fi
+      note "$(jq -r --arg k "$csv" '.nodes[0].statistics | def r(n): . * n | round / n;
+        if $k == "snr" then "SNR of the stack: white \(.mean_white_snr | r(100)) dB, black PSNR \(.mean_black_psnr | r(100)) dB (means; lowest white \(.min_white_snr | r(100)))"
+        else "dropouts left by the stack: \(.total_dropouts) totalling \(.total_dropout_samples) samples, in \(.frames_with_dropouts) frames" end' "$dir/$csv.json")"
+    done
+
+    jq -n --arg video "${QUALITY_VIDEO#"$OUT"/}" --arg sets "$(selected_sets video | paste -sd' ' -)" \
+          --rawfile snr "$dir/snr.json" --rawfile dropouts "$dir/dropouts.json" '
+      def stats: (fromjson? // {}) | .nodes[0] // {} | if .status == "success" then .statistics else null end;
+      { video: $video, sets: ($sets | split(" ")), measured: "the stacker output, before dropout correction",
+        snr: ($snr | stats), dropouts: ($dropouts | stats) }' \
+      > "$(stage_tmp quality.json)" || fail "could not write quality.json"
+
+    printf '\nresult: %s\n' "$([ "$fails" = 0 ] && echo pass || echo "FAIL ($fails)")"
+  } > "$out"
+
+  if [ "$fails" != 0 ]; then
+    mv -- "$out" "$dir/check.failed.txt"
+    return 1
+  fi
+  rm -f -- "$dir/check.failed.txt"
+}
+
 # --- pack: the three files and their provenance ----------------------------
 #
 # The video and vfs stages' outputs are hard-linked into the pack where the
@@ -1919,7 +2084,8 @@ build_pack() {
   stage_mkdir "$dir" || return 1
   stage_unstamp || return 1
   rm -f -- "${dir:?}"/*.mkv "${dir:?}"/*.dat "${dir:?}"/*.dat.* "${dir:?}"/*.yaml* "${dir:?}"/*.json* \
-           "${dir:?}"/*.txt* "${dir:?}"/*.log "${dir:?}"/SHA256SUMS*
+           "${dir:?}"/*.txt* "${dir:?}"/*.log "${dir:?}"/*.pdf* "${dir:?}"/SHA256SUMS*
+  rm -rf -- "${dir:?}/report"
   cd -- "$dir" || return 1
 
   # Under their final names, so that each is checked as the player will find
@@ -2074,6 +2240,60 @@ check_pack() {
     || { printf 'pack: could not write pack.json\n' >&2; return 1; }
   pack_provenance "$dir" > "$(stage_tmp "$STEM.provenance.yaml")" || { printf 'pack: could not write the provenance\n' >&2; return 1; }
   printf '%s  %s\n' "$(sha256_stdin < "$dir/$STEM.provenance.yaml.partial")" "$STEM.provenance.yaml" >> "$sums"
+  pack_report "$dir" || return 1
+  printf '%s  %s\n' "$(sha256_stdin < "$dir/$STEM.report.pdf.partial")" "$STEM.report.pdf" >> "$sums"
+}
+
+# pack_report <dir>: <stem>.report.pdf, from the provenance and check results
+# in <dir> (their stage_tmp names) and the stages the pack was built from.
+# lib/pack-report.py reads them as a manifest names them, and keeps its
+# graphs and tables in <dir>/report.
+pack_report() {
+  local dir="$1" s id cvbs sdir cmd path version pdf
+  local -a sets=() tools=()
+  for s in "${COMPARE_SETS[@]}"; do
+    IFS='|' read -r id cvbs sdir <<< "$s"
+    sets+=("$id|${cvbs%/*}|$sdir|$(basename -- "$cvbs" .cvbs)")
+  done
+  for cmd in ld-decode orc-cli vfs-stacker vfs-verifier ffmpeg typst; do
+    path=$(command -v "$cmd") && path=$(realpath -- "$path") || path=""
+    case "$cmd" in
+      ld-decode) version=$(ld-decode --version 2>/dev/null | head -1) ;;
+      ffmpeg)    version=$(ffmpeg -version 2>/dev/null | head -1 | cut -d' ' -f1-3) ;;
+      typst)     version=$(typst --version 2>/dev/null | head -1) ;;
+      *)         version="" ;;
+    esac
+    tools+=("$cmd|$version|$path")
+  done
+  mkdir -p -- "$dir/report" || return 1
+  jq -n --arg disc "$DISC" --arg title "${DISC_TITLE:-$DISC}" --arg stem "$STEM" --arg out "$OUT" \
+        --arg format "$DISC_FORMAT" --arg side "$DISC_SIDE" --arg pictures "$DISC_PICTURES" \
+        --arg lead_in "$DECODE_LEAD_IN" --arg frames "$DECODE_FRAMES" \
+        --arg pack_dir "$dir" --arg version "${dir##*/}" --arg provenance "$dir/$STEM.provenance.yaml.partial" \
+        --arg check "$dir/check.txt.partial" --arg sums "$dir/SHA256SUMS.partial" \
+        --arg selection "$SELECTION" --arg framemaps "$FRAMEMAPS" \
+        --arg map "$PACK_MAP" --arg compare "$PACK_COMPARE" --arg video "$PACK_VIDEO" --arg vfs "$PACK_VFS" --arg quality "$PACK_QUALITY" \
+        --arg commit "$(git -C "$SELF_DIR" rev-parse HEAD 2>/dev/null || echo unknown)" \
+        --arg describe "$(git -C "$SELF_DIR" describe --always --dirty 2>/dev/null || echo unknown)" \
+        --argjson dirty "$([ -n "$(git -C "$SELF_DIR" status --porcelain 2>/dev/null)" ] && echo true || echo false)" \
+        --arg inputs "$(stage_inputs)" --arg sets "$(printf '%s\n' "${sets[@]}")" --arg tools "$(printf '%s\n' "${tools[@]}")" \
+        --argjson epoch "$(date +%s)" '
+    def rows($t): [ $t | split("\n")[] | select(. != "") | split("|") ];
+    { disc: $disc, title: $title, stem: $stem, out: $out, format: $format, side: $side, pictures: $pictures,
+      lead_in: $lead_in, decode_frames: $frames, pack_dir: $pack_dir, pack_version: $version,
+      provenance: $provenance, pack_check: $check, sums: $sums, selection: $selection, framemaps: $framemaps,
+      map_dir: $map, compare_dir: $compare, video_dir: $video, vfs_dir: $vfs, quality_dir: $quality,
+      script: { commit: $commit, describe: $describe, dirty: $dirty },
+      pack_inputs: ($inputs | split("\n") | map(select(. != ""))),
+      sets: [ rows($sets)[] | { set: .[0], decode_dir: .[1], set_dir: .[2], decode_base: .[3] } ],
+      tools: [ rows($tools)[] | { name: .[0], version: .[1], path: .[2] } ],
+      epoch: $epoch }' > "$dir/report/manifest.json" || { printf 'pack: could not write the report manifest\n' >&2; return 1; }
+  pdf=$(stage_tmp "$STEM.report.pdf") || return 1
+  if ! pack-python "$SELF_DIR/lib/pack-report.py" "$dir/report/manifest.json" "$pdf" --work "$dir/report" \
+       || [ "$(head -c 5 "$pdf" 2>/dev/null)" != "%PDF-" ]; then
+    printf 'pack: could not make the report (the work is in %s/report)\n' "$dir" >&2
+    return 1
+  fi
 }
 
 # pack_provenance <dir>: <stem>.provenance.yaml, from pack.json and the check

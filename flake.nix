@@ -38,9 +38,10 @@
         # that it does not have yet. Each patch says why; each goes once the
         # pinned revision has its fix. The patches are part of every decode-orc
         # stage's stamp (lib/stage.sh), so changing one rebuilds those stages.
+        # None today: decode-orc-efm-sync.patch went when 4d54969 brought its
+        # fix (decode-orc#342).
         decodeorc = decode-orc.packages.${system}.decode-orc.overrideAttrs (old: {
           patches = (old.patches or [ ]) ++ [
-            ./patches/decode-orc-efm-sync.patch
           ];
         });
         vfstools = vfs-verifier.packages.${system}.vfs-tools;
@@ -55,22 +56,28 @@
         ];
 
         # Python with PyYAML, for lib/check-disc-metadata.py, which reads the
-        # disc metadata document as a player would. It is on PATH as
-        # pack-python rather than python3: ld-decode's own Python comes first
-        # there, and is left as it is.
+        # disc metadata document as a player would, and with NumPy and
+        # Matplotlib for lib/pack-report.py, which draws the pack report's
+        # graphs. It is on PATH as pack-python rather than python3: ld-decode's
+        # own Python comes first there, and is left as it is. The shell's
+        # PYTHONPATH is ld-decode's, whose NumPy would shadow this one's, so it
+        # is cleared.
         packPython = pkgs.writeShellScriptBin "pack-python" ''
-          exec ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 "$@"
+          unset PYTHONPATH
+          exec ${pkgs.python3.withPackages (ps: [ ps.pyyaml ps.numpy ps.matplotlib ])}/bin/python3 "$@"
         '';
 
         # The pack stages: orc-cli (decode-orc ships it beside orc-gui),
         # vfs-stacker and vfs-verifier, sqlite and yq for reading the .meta
-        # databases and the disc metadata YAML, and pack-python.
+        # databases and the disc metadata YAML, pack-python, and typst, which
+        # sets the pack report (lib/pack-report.typ) as a PDF.
         packTools = [
           decodeorc
           vfstools
           pkgs.sqlite
           pkgs.yq-go
           packPython
+          pkgs.typst
         ];
 
         # install-pack.sh copies a pack to the player with rsync. ssh is the
@@ -112,6 +119,11 @@
 
         devShells.default = pkgs.mkShell {
           packages = decodeTools ++ packTools ++ installTools ++ shellTools;
+
+          # The pack report's typefaces, from here rather than the host, so
+          # the report sets the same on any machine (lib/pack-report.py runs
+          # typst with --ignore-system-fonts).
+          PACK_REPORT_FONTS = "${pkgs.ibm-plex}/share/fonts";
 
           shellHook = ''
             echo "domesday-decode-script environment"
