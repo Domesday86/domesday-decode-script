@@ -120,10 +120,10 @@ done < <(sed -n '/^SETS=(/,/^)/p' "$SELF_DIR/$DISC_SCRIPT" | sed -n 's/^  "\(.*\
 [ "${#SETS[@]}" -gt 0 ] || die "no SETS table found in $DISC_SCRIPT"
 
 # And its ld-decode flags, which are part of every decode's stamp. The decode
-# script always writes CVBS here.
+# script always writes CVBS here, with the spec origin.
 DECODE_FLAGS=$(sed -n 's/^DECODE_FLAGS=(\(.*\))$/\1/p' "$SELF_DIR/$DISC_SCRIPT")
 [ -n "$DECODE_FLAGS" ] || die "no DECODE_FLAGS line found in $DISC_SCRIPT"
-DECODE_FLAGS="$DECODE_FLAGS --cvbs"
+DECODE_FLAGS="$DECODE_FLAGS --cvbs --cvbs-spec-origin"
 
 set_ids()   { local s; for s in "${SETS[@]}"; do printf '%s\n' "${s%%|*}"; done; }
 set_field() { # set_field <set> <1|2|3>

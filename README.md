@@ -331,8 +331,8 @@ National B sides](#efm-and-the-national-b-sides).
 EFM front end is switched off on exactly the CLV sides:
 
 ```
-ld-decode --pal --noEFM --cvbs --V4300D_coherent_subtract ...   # National B
-ld-decode --pal --V4300D_coherent_subtract --cvbs ...           # the CAV sides
+ld-decode --pal --noEFM --cvbs --cvbs-spec-origin --V4300D_coherent_subtract ...   # National B
+ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...           # the CAV sides
 ```
 
 Run against a side that has none, the front end spends its time demodulating
@@ -416,7 +416,7 @@ audio. Those are facts about the disc and the captures rather than choices, so
 they are asserted in the script instead of offered as flags:
 
 ```sh
-ld-decode --pal --V4300D_coherent_subtract --cvbs ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
 ```
 
 EFM is therefore decoded on every set — Volcanoes is a CAV AIV disc and the
@@ -605,7 +605,7 @@ about the disc and the captures rather than choices, so they are asserted in the
 script instead of offered as flags:
 
 ```sh
-ld-decode --pal --cvbs --V4300D_coherent_subtract [--noEFM] ...
+ld-decode --pal --cvbs --cvbs-spec-origin --V4300D_coherent_subtract [--noEFM] ...
 ```
 
 `--noEFM` appears for the second sides only, per the `efm` column above. Player
@@ -680,7 +680,7 @@ audio. Those are facts about the discs and the captures rather than choices, so
 they are asserted in the script instead of offered as flags:
 
 ```sh
-ld-decode --pal --V4300D_coherent_subtract --cvbs ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
 ```
 
 EFM is therefore decoded on **every** side, and the side table carries no `efm`
@@ -790,7 +790,7 @@ carries EFM digital audio. Those are facts about the disc and the captures, so
 they are asserted in the script instead of offered as flags:
 
 ```sh
-ld-decode --pal --V4300D_coherent_subtract --cvbs ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
 ```
 
 Each was checked rather than assumed:
@@ -873,7 +873,7 @@ defaulting to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/north-p
 Every capture is PAL CAV, was made on an LD-V4300D, and carries **no EFM**:
 
 ```sh
-ld-decode --pal --noEFM --cvbs --V4300D_coherent_subtract ...
+ld-decode --pal --noEFM --cvbs --cvbs-spec-origin --V4300D_coherent_subtract ...
 ```
 
 **No EFM** is the one that differs from the BBC AIV discs, and it was measured.
@@ -1389,6 +1389,13 @@ CVBS is ld-decode's own default on the pinned build, but the scripts pass
 the script looks for afterwards follows the flag, so a decode made under a
 flipped default would be reported as having written no video file after the
 hours it took to make.
+
+With CVBS they also pass `--cvbs-spec-origin`, on the recommendation of
+ld-decode's author: it 0H-aligns every frame as the CVBS specification
+requires, with 0H of each frame's line 0 in the sample before sample 0. The
+pinned 8.0.0dev build still defaults to `--cvbs-legacy-origin`, the decoder's
+own line origin, which is not spec compliant. The flag is part of each
+decode's stamp, so decodes made without it are stale.
 
 The sample encoding differs by standard, and ld-decode chooses it from whether
 the signal can carry non-standard values:

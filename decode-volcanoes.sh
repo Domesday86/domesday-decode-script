@@ -493,7 +493,7 @@ elif [ "$USE_CVBS" != 1 ]; then
   STAMPING=0; NO_STAMP_WHY="only CVBS decodes are stamped"
 fi
 [ "$STAMPING" = 1 ] || [ "$ADOPT" = 0 ] || die "--adopt stamps a decode, and $NO_STAMP_WHY"
-FLAGS_LABEL="${DECODE_FLAGS[*]} --cvbs"
+FLAGS_LABEL="${DECODE_FLAGS[*]} --cvbs --cvbs-spec-origin"
 
 if [ "$STAMPING" = 1 ] && [ "$DRY_RUN" != 1 ]; then
   for tool in orc-cli sqlite3 jq; do
@@ -894,7 +894,10 @@ decode_one() {
   # extension `existing_product` then looks for follows the flag, so a silently
   # flipped default would fail a finished decode as "wrote no video file" --
   # after the hours it took to make it.
-  if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs); else cmd+=(--tbc); fi
+  # With CVBS, --cvbs-spec-origin 0H-aligns each frame as the CVBS
+  # specification requires; the pinned build still defaults to its legacy
+  # origin, and its author recommends the spec origin.
+  if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs --cvbs-spec-origin); else cmd+=(--tbc); fi
   cmd+=(--start "$start")
   [ "$FRAMES" = all ] || cmd+=(--length "$FRAMES")
   cmd+=(--threads "$DECODE_THREADS" "$src" "$dest/$base")

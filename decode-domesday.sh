@@ -801,7 +801,10 @@ decode_one() {
   # the extension `existing_product` then looks for follows the flag, so a
   # silently flipped default would fail a finished decode as "wrote no video
   # file" -- after the hours it took to make it.
-  if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs); else cmd+=(--tbc); fi
+  # With CVBS, --cvbs-spec-origin 0H-aligns each frame as the CVBS
+  # specification requires; the pinned build still defaults to its legacy
+  # origin, and its author recommends the spec origin.
+  if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs --cvbs-spec-origin); else cmd+=(--tbc); fi
   # Every capture in the library came off an LD-V4300D, whose ~8.5MHz spur sits
   # in the RF band on every side of every set, so the coherent subtraction is
   # asked for unconditionally rather than per set. It estimates the tone and
