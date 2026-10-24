@@ -987,6 +987,36 @@ inputs, so a re-run with nothing changed does nothing.
   Every set `map.orcprj` maps is either used or dropped with a reason, in
   each stack. `select` is not stamped: it is waiting until the file exists,
   and stops the build if the file breaks those rules.
+- **Phase 5 is in place:** the `video` stage. It copies the disc's committed
+  `stack.orcprj` to `orc-<rev>/video/`. That project's sources must be the
+  selection's video sets, in its order. The stage then points each source at
+  its decode, and sets each frame map and Align from the committed
+  `discs/<disc>/framemaps/`, which must still match the `map` stage's. Then it
+  processes the project: Source Align, the `Weighted` Stacker, Dropout
+  Correction and the video sink (`mkv-ffv1-bt601`, 4:3, the disc's
+  `VIDEO_DECODER`, audio, chapters and disc metadata). It writes:
+  - `<stem>.mkv`;
+  - `metadata.yaml`, the disc metadata document taken from the mkv;
+  - `video.json`: the container's figures, the metadata summary, each set's
+    noise and share of the stacker's weight, and the hand-built baseline's
+    figures (`VIDEO_BASELINE`);
+  - `check.txt`.
+
+  The mkv is checked as vp415e loads it:
+  - Matroska and FFV1, `yuv422p` 8-bit, 720×576, exactly 25/1 and 4:3;
+  - every packet a keyframe;
+  - FLAC audio at 48 kHz.
+
+  The disc metadata is checked by `lib/check-disc-metadata.py`, run with the
+  dev shell's `pack-python`. It reads the document as decode-orc's format
+  spec says a reader must, and checks:
+  - the version;
+  - the frame count;
+  - the disc's format and side (`DISC_FORMAT`, `DISC_SIDE`);
+  - the user code and Amendment 2 that the chosen sets read in the `compare`
+    stage;
+  - every picture in `DISC_PICTURES` resolving to exactly one frame;
+  - unmapped frames only in the lead-in and lead-out.
 - **The later stages arrive phase by phase.** Until they do, a build stops at
   the first stage not yet written.
 
@@ -999,6 +1029,7 @@ inputs, so a re-run with nothing changed does nothing.
 ./build-pack.sh volcanoes --force set:DS3        # redo one set's EFM image and quality
 ./build-pack.sh volcanoes --until map            # ...then map and align every set
 ./build-pack.sh volcanoes --until compare        # ...then the report to decide selection.yaml from
+./build-pack.sh volcanoes --until video          # ...then, once selection.yaml is written, the stacked mkv
 ```
 
 Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read

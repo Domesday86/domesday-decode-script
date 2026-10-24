@@ -1,7 +1,7 @@
 # Plan: from captures to a VP415e disc pack
 
-Status: **phases 0–4 are built; `selection.yaml` is still to be decided.
-Phases 5–8 are not built.** Volcanoes is the pilot
+Status: **phases 0–5 are built, and `selection.yaml` is decided.
+Phases 6–8 are not built.** Volcanoes is the pilot
 disc; the other discs follow once the process is proven on it.
 
 ## Goal
@@ -833,7 +833,9 @@ This phase is what tells capture damage from a different pressing.
 **Exit criteria:** a committed `selection.yaml`, with the video sets, the VFS
 sets, their orders, and the reason for every exclusion.
 
-**As built.** The report is built; `selection.yaml` is not yet decided.
+**As built.** The report is built, and `selection.yaml` is decided from it
+(approved 2026-10-24): all five sets in both stacks, video DS1 DS3 DS2 DS4 DS5 (by
+noise) and VFS DS1 DS2 DS4 DS5 DS3 (by data loss), with nothing dropped.
 
 - **No `compare-sets.sh`.** The report is a stamped stage of
   `build-pack.sh`, `compare`, between `map` and `select`, under
@@ -980,6 +982,111 @@ A five-set `Weighted` stack should be no worse anywhere.
 
 **Exit criteria:** `volcanoes_stack.mkv` passes every check, and a re-run does
 nothing.
+
+**As built.** Both exit criteria are met, for the drafted selection.
+
+- **No refresh.** The stage does not run `tools refresh`. A refresh would
+  read every decode in full again, about an hour, only to find the maps the
+  `map` stage already found. Instead:
+  - the frame maps and the alignment are set from the committed
+    `discs/<disc>/framemaps/` with `nodes set`;
+  - the stage first checks that those files are still byte for byte the
+    `map` stage's own;
+  - for a subset of the mapped sets, each padding is lowered by the least
+    among them. Only `pad_for_alignment` is accepted.
+- **`discs/volcanoes/stack.orcprj`** labels each source with its set id and
+  each frame map "`<set> map`", as `map.orcprj` does, followed by "Align",
+  "Stack", "DOC" and "Video Out". Its sources must be the selection's video
+  sets, in order, or `status` calls the project invalid.
+- **The stamp** covers:
+  - the decode stamps of the chosen sets and the `map` stamp;
+  - each chosen set's committed frame map, and the alignment;
+  - the video sets and their order: only the video half of the selection, so
+    reordering the VFS sets does not restack;
+  - the project and the decoder;
+  - decode-orc's rev and patches;
+  - `lib/check-disc-metadata.py`;
+  - the expected disc: the format, side and picture range from `disc.conf`
+    (`DISC_FORMAT`, `DISC_SIDE`, `DISC_PICTURES`), and the user code and
+    Amendment 2 that the chosen sets read in the `compare` stage. These are
+    recorded as values, so rerunning `compare` alone does not restack;
+  - the baseline's path.
+- **Outputs:**
+  - `volcanoes_stack.mkv`;
+  - `metadata.yaml`, the document from the mkv;
+  - `video.json`: the container's figures, the metadata summary, each set's
+    noise and weight, and the baseline's figures;
+  - `check.txt`.
+
+  The project, the stacker log and the raw check outputs are kept beside them,
+  unstamped. Once `video` is stamped, old `orc-<rev>` versions are pruned to
+  two.
+- **`check-disc-metadata.py`** is run with `pack-python`, a new dev-shell
+  command: Python with PyYAML. It isn't `python3` because ld-decode's own
+  Python comes first on the PATH.
+  - The document is taken from the mkv by its filename, and the probe also
+    confirms the MIME type.
+  - At an undecoded frame, a picture counts as resolved through the run
+    arithmetic, since the frame still advances the count, and such frames are
+    listed separately.
+  - It cannot test "`undecoded` no worse than the best single set": no stage
+    reads a whole set's VBI. It is compared with the baseline instead.
+  - Dropout totals can't be read from an mkv, so they are left out of the
+    baseline comparison.
+- **The run:** 2 h 20 min on this Mac, over NFS. The video sink makes two
+  passes, each reading all five decodes and stacking them:
+  - the VBI pre-scan for the disc metadata took 83 min, about 11 fps;
+  - the decode and encode took about 58 min, about 15 fps.
+
+  The gigabit link ran at its 120 MB/s, and orc-cli used about one core, so
+  the share's read rate sets the time.
+- **The result** passes every check:
+  - 54,002 frames, all keyframes;
+  - FFV1 `yuv422p` 8-bit at 720×576 and exactly 25/1, display aspect 4:3
+    (sample aspect 16:15);
+  - FLAC stereo at 48 kHz, 24-bit;
+  - CAV side 1, user code 1986, Amendment 2 present, CX off;
+  - one run, with every picture 1–54000 resolving to one frame;
+  - lead-in and lead-out are one frame each, and they are the only unmapped
+    frames.
+
+  Against the hand-built three-set stack, the frame count and runs are the
+  same, and there are **7 undecoded frames against 11**. The mkv is
+  19.07 GB.
+- **The mkv is lossless only as an encoding.** FFV1 and FLAC are lossless,
+  but `mkv-ffv1-bt601` is a player format. It decodes chroma, resamples
+  each line's 946 samples to 720 and stores 8-bit 4:2:2. A full-signal master
+  (`mkv-ffv1`, 4fsc) would need a second sink, at the cost of one more full
+  read.
+- **The stacker's weights need a look.** The log has 25 measurements. Over
+  frames 0–36999 and 47500 onwards the weights follow the noise, with one
+  pressing found. But between frames 37000 and 46499, the `Weighted`
+  stacker splits the five sets into two to five "pressings", block by block.
+  Each "pressing" then counts about once, so in places one set carries almost
+  all the weight. For frames 38000–38499, DS1 has 98% at σ 0.8, and DS4's σ
+  reaches 32–38.
+  - Every phase 4 measure finds one pressing, so these groups are not
+    pressings. They look like the measurement failing on that stretch of the
+    disc, possibly because of its content, or because the sets differ there.
+  - The mean shares are DS1 36%, DS2 27%, DS5 14%, DS4 12% and DS3 11%.
+  - The checks still pass, but the split costs picture quality. Re-stacking
+    two blocks with only `mode` changed, and measuring mean white SNR after
+    Dropout Correction:
+
+    | Frames | Best single set (DS1) | `Weighted` | `Mean` |
+    | --- | --- | --- | --- |
+    | 29000–29499 | 34.38 dB | 36.46 dB | 36.43 dB |
+    | 38000–38499 | 34.40 dB | 34.89 dB | 36.21 dB |
+
+    Where the grouping holds, the two modes are the same. Where it splits,
+    `Weighted` is barely better than DS1 alone, about 1.3 dB below `Mean`.
+    In that block DS4's own black PSNR drops to 26.4 dB, against 30.6 dB in
+    the normal block, which may be what breaks the pairwise test.
+  - This is a decode-orc problem:
+    [decode-orc#344](https://github.com/decode-orc/decode-orc/issues/344).
+    The stack stays as built until it is fixed; repinning decode-orc then
+    rebuilds the video stage. Until then, the stretch from frame 37000 to
+    46499 of the Volcanoes stack is a little noisier than it should be.
 
 ### Phase 6: Stack and verify the VFS image
 

@@ -170,11 +170,34 @@ selection_problems() {
 
 MAP_PROJECT="$DISC_DIR/map.orcprj"
 
+# The committed frame maps and alignment: the map stage's, reviewed. The video
+# stage stacks from these.
+FRAMEMAPS="$DISC_DIR/framemaps"
+
 # map_sets: the sets map.orcprj maps, in its order: the labels of its CVBS
 # sources, which are set ids. A set left out of it is not mapped.
 map_sets() {
   [ -f "$MAP_PROJECT" ] || return 0
   yq -r '.dag.nodes[] | select(.stage == "*_CVBS_Source") | .user_label' "$MAP_PROJECT"
+}
+
+STACK_PROJECT="$DISC_DIR/stack.orcprj"
+
+# stack_problems: what is wrong with stack.orcprj for the selection, one line
+# each, or nothing. Its CVBS sources must be the selection's video sets, in
+# its order, each with its "<set> map", and it must have the stages the video
+# stage sets: Align and Video Out.
+stack_problems() {
+  local want have id
+  [ -f "$STACK_PROJECT" ] || { printf 'is not written yet\n'; return 0; }
+  want=$(selected_sets video | paste -sd' ' -)
+  have=$(yq -r '.dag.nodes[] | select(.stage == "*_CVBS_Source") | .user_label' "$STACK_PROJECT" | paste -sd' ' -)
+  [ "$have" = "$want" ] || printf 'stacks %s, but the selection'\''s video sets are %s\n' "${have:-nothing}" "$want"
+  for id in $have "Align" "Video Out"; do
+    case "$id" in Align|"Video Out") ;; *) id="$id map" ;; esac
+    [ "$(yq -r "[.dag.nodes[] | select(.user_label == \"$id\")] | length" "$STACK_PROJECT")" = 1 ] \
+      || printf 'has no one stage named "%s"\n' "$id"
+  done
 }
 
 # How many frames from each end of a decode the compare stage reads the disc
@@ -301,17 +324,46 @@ describe_compare() {
   stage_output check.txt
 }
 
+# The selected video sets stacked, from their decodes and the committed frame
+# maps and alignment, which must be the map stage's. Only the video half of
+# the selection counts: its sets and their order. The disc metadata is
+# checked against what the chosen pressing reads (the compare stage), so that
+# is an input too, as the values, not the stage. VIDEO_SETS is left as
+# "<set>|<cvbs>", VIDEO_MAP names the map stage's directory and VIDEO_EXPECT
+# holds the user code and Amendment 2 expected ("unknown" when the sets
+# disagree or were not read).
 describe_video() {
-  local id ups=()
-  for id in $(selected_sets video); do describe_decode "$id"; ups+=("$id|$STAGE_DIR"); done
+  local id ups=() ids=()
+  describe_map; VIDEO_MAP="$STAGE_DIR"
+  VIDEO_SETS=()
+  for id in $(selected_sets video); do
+    describe_decode "$id"
+    ups+=("$id|$STAGE_DIR")
+    VIDEO_SETS+=("$id|$STAGE_DIR/${STAGE_OUTPUTS[0]}")
+  done
+  mapfile -t ids < <(selected_sets video)
+  VIDEO_EXPECT=$(jq -r --args '[ .sets[] | select(.set | IN($ARGS.positional[])) | .metadata
+      | if . == null then "unread" else "\(.user_code // "none") \(.amendment2.present // false | if . then "present" else "absent" end)" end ]
+      | unique | if length == 1 and .[0] != "unread" then .[0] else "unknown" end' \
+      "${ids[@]}" < "$OUT/$ORC_DIR/compare/compare.json" 2>/dev/null) || VIDEO_EXPECT="unknown"
   stage_begin video "$OUT/$ORC_DIR/video"
-  for id in "${ups[@]}"; do stage_input_stamp "decode:${id%%|*}" "${id#*|}"; done
-  stage_input_file "selection" "$SELECTION"
+  for id in "${ups[@]}"; do
+    stage_input_stamp "decode:${id%%|*}" "${id#*|}"
+    stage_input_file "frame map ${id%%|*}" "$FRAMEMAPS/${id%%|*}.ranges"
+  done
+  stage_input_stamp map "$VIDEO_MAP"
+  stage_input_file "alignment" "$FRAMEMAPS/alignment"
+  stage_input "video sets" "$(selected_sets video | paste -sd' ' -)"
   stage_input_file "project" "$DISC_DIR/stack.orcprj"
   stage_input_tool decode-orc
   stage_input "decoder" "$VIDEO_DECODER"
-  stage_input "aspect" "4:3"
+  stage_input "disc" "$DISC_FORMAT side $DISC_SIDE, pictures $DISC_PICTURES, user code and Amendment 2 $VIDEO_EXPECT"
+  stage_input_file "metadata check" "$SELF_DIR/lib/check-disc-metadata.py"
+  stage_input "baseline" "${VIDEO_BASELINE:-none}"
   stage_output "$STEM.mkv"
+  stage_output metadata.yaml
+  stage_output video.json
+  stage_output check.txt
 }
 
 describe_vfs() {
@@ -389,6 +441,13 @@ unit_state() {
         printf 'stale: waits on select\n'; return 1
       fi ;;
   esac
+  if [ "$unit" = video ]; then
+    problems=$(stack_problems)
+    if [ -n "$problems" ]; then
+      printf 'invalid: %s %s\n' "${STACK_PROJECT#"$SELF_DIR"/}" "$(paste -sd';' - <<< "$problems" | sed 's/;/; /g')"
+      return 1
+    fi
+  fi
   describe_unit "$unit"
   stage_state
 }
@@ -459,7 +518,8 @@ run_stage() {
     map)    run_map "$@"; return ;;
     compare) run_compare "$@"; return ;;
     select) die "select: decided by hand in ${SELECTION#"$SELF_DIR"/}; there is nothing to build" ;;
-    video) phase=5 ;; vfs) phase=6 ;; pack) phase=7 ;;
+    video)  run_video "$@"; return ;;
+    vfs) phase=6 ;; pack) phase=7 ;;
   esac
   die "$1: not built yet -- this stage arrives in phase $phase of docs/emulator-pack-plan.md"
 }
@@ -698,10 +758,9 @@ check_set() {
 # The Disc Mapper reads the whole of every decode, one set after another, so
 # the stage takes about as long as reading them all over the share.
 #
-# Its frame maps and alignment are also copied into discs/<disc>/framemaps/,
-# for committing, so that a change in mapping shows up in review.
-
-FRAMEMAPS="$DISC_DIR/framemaps"
+# Its frame maps and alignment are also copied into discs/<disc>/framemaps/
+# (FRAMEMAPS), for committing, so that a change in mapping shows up in
+# review.
 
 run_map() {
   local state
@@ -1180,6 +1239,253 @@ compare_report() {
       "VFS-STACKER --DRY-RUN, ALL SETS",
       ""' "$digest"
   sed -e 's/^\[[a-z]*\] /  /' -e 's/^/  /' -- "$log"
+}
+
+# --- video: the stacked, dropout-corrected mkv -----------------------------
+#
+# A copy of the disc's committed stack.orcprj, with its sources pointed at the
+# video sets' decodes, each frame map set from the committed
+# framemaps/<set>.ranges and Align from framemaps/alignment, then processed.
+# Nothing is refreshed: the committed maps are the map stage's, reviewed, and
+# a refresh would read every decode in full again (about an hour) to find the
+# same ones. The stage checks instead that the committed copies are still the
+# map stage's.
+#
+# The mkv is then checked as vp415e loads it (docs/emulator-pack-plan.md,
+# phase 5): the container, every packet a keyframe, the audio, and the disc
+# metadata document, which lib/check-disc-metadata.py reads as the format
+# spec's reader does. The stacker's noise and weight for each set, and a
+# comparison with the hand-built stack (VIDEO_BASELINE), go into video.json
+# and check.txt.
+#
+# The video sink first pre-scans the stack for its VBI, then decodes it.
+
+run_video() {
+  local state
+  ( build_video ) || die "video: failed (above)"
+  state=$(unit_state video) || die "video: still $state after building"
+  stage_prune "$OUT" orc video/stage.stamp
+}
+
+build_video() {
+  local dir d id cvbs rel n=0 mode pad min map="" problems mkv rc t
+  describe_video
+  dir="$STAGE_DIR"
+  problems=$(stack_problems)
+  [ -z "$problems" ] || { printf 'video: %s %s\n' "${STACK_PROJECT#"$SELF_DIR"/}" "$problems" >&2; return 1; }
+  if [ "$VIDEO_EXPECT" = unknown ]; then
+    printf 'video: the compare stage gives no one user code and Amendment 2 for the video sets (%s/compare/report.txt)\n' "$OUT/$ORC_DIR" >&2
+    return 1
+  fi
+
+  # The committed maps must still be the map stage's, and the alignment one
+  # that pads, which a subset of the sets can take by moving every padding
+  # down by the least.
+  for d in "${VIDEO_SETS[@]}" "alignment|"; do
+    id="${d%%|*}"; [ "$id" = alignment ] || id="$id.ranges"
+    if ! cmp -s -- "$FRAMEMAPS/$id" "$VIDEO_MAP/framemaps/$id"; then
+      printf 'video: %s is not the map stage'\''s %s; review with: diff %s %s\n' "${FRAMEMAPS#"$SELF_DIR"/}/$id" \
+        "$VIDEO_MAP/framemaps/$id" "${FRAMEMAPS#"$SELF_DIR"/}/$id" "$VIDEO_MAP/framemaps/$id" >&2
+      return 1
+    fi
+  done
+  mode=$(sed -n '1s/^# //p' "$FRAMEMAPS/alignment")
+  [ "$mode" = pad_for_alignment ] || { printf 'video: the alignment is %s; the stack takes pad_for_alignment\n' "${mode:-unstated}" >&2; return 1; }
+  min=$(for d in "${VIDEO_SETS[@]}"; do awk -v s="${d%%|*}" '$1 == s { print $2 }' "$FRAMEMAPS/alignment"; done | sort -n | head -1)
+
+  stage_mkdir "$dir" || return 1
+  stage_unstamp || return 1
+  rm -rf -- "$dir"/*.mkv* "$dir"/*.json* "$dir"/*.yaml* "$dir"/*.log "$dir"/*.orcprj \
+            "$dir"/check.txt* "$dir"/check.failed.txt "$dir"/crash_bundle_*.zip
+
+  mkv="$STEM.building.mkv"
+  cp -- "$STACK_PROJECT" "$dir/stack.orcprj"
+  for d in "${VIDEO_SETS[@]}"; do
+    id="${d%%|*}" cvbs="${d#*|}"
+    n=$(( n + 1 ))
+    pad=$(awk -v s="$id" '$1 == s { print $2 }' "$FRAMEMAPS/alignment")
+    [[ "$pad" =~ ^[0-9]+$ ]] || { printf 'video: %s has no padding in the alignment\n' "$id" >&2; return 1; }
+    map+="${map:+, }$n+$(( pad - min ))"
+    rel=$(realpath --relative-to="$dir" -- "$cvbs")
+    if ! { orc-cli nodes set "$dir/stack.orcprj" "$id" "input_path=$rel" \
+           && orc-cli nodes set "$dir/stack.orcprj" "$id map" "ranges=$(paste -sd, - < "$FRAMEMAPS/$id.ranges")"; } >/dev/null; then
+      printf 'video: could not point %s at %s and its frame map\n' "$id" "$cvbs" >&2
+      return 1
+    fi
+  done
+  if ! { orc-cli nodes set "$dir/stack.orcprj" Align "alignmentMode=$mode" "alignmentMap=$map" \
+         && orc-cli nodes set "$dir/stack.orcprj" "Video Out" "output_path=$mkv" "decoder_type=$VIDEO_DECODER"; } >/dev/null; then
+    printf 'video: could not set the alignment and the video sink\n' >&2
+    return 1
+  fi
+
+  cd -- "$dir" || return 1
+  printf 'video: stacking %s (alignment %s), decoder %s; progress is in %s/stack.log\n' \
+    "$(selected_sets video | paste -sd' ' -)" "$map" "$VIDEO_DECODER" "$dir"
+  t=$SECONDS rc=0
+  orc-cli "$dir/stack.orcprj" --process --log-file "$dir/stack.log" --log-out file > "$dir/console.log" 2>&1 || rc=$?
+  printf 'video: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+
+  if ! check_video "$dir" "$rc" "$mkv"; then
+    cat -- "$dir/check.failed.txt" >&2
+    printf 'video: failed its checks and is not stamped (see %s/check.failed.txt)\n' "$dir" >&2
+    return 1
+  fi
+  mv -- "$dir/$mkv" "$(stage_tmp "$STEM.mkv")"
+  cat -- "$dir/check.txt.partial"
+  stage_commit || { printf 'video: could not stamp the stage\n' >&2; return 1; }
+  printf 'video: checked and stamped: %s/%s.mkv\n' "$dir" "$STEM"
+}
+
+# check_video <dir> <orc-cli exit code> <mkv>: run the checks, write check.txt,
+# metadata.yaml and video.json to their stage_tmp names, and return non-zero
+# if any failed.
+check_video() {
+  local dir="$1" rc="$2" mkv="$1/$3" out fails=0 level text frames=0 keys=0 tagv code a2 base=""
+  local -a sets=() expect=()
+  out=$(stage_tmp check.txt) || return 1
+  ok()   { printf 'ok    %s\n' "$*"; }
+  fail() { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
+  note() { printf 'note  %s\n' "$*"; }
+  mapfile -t sets < <(selected_sets video)
+
+  {
+    printf 'stage:   video\nsets:    %s\ndecoder: %s\nchecked: %s\n\n' "${sets[*]}" "$VIDEO_DECODER" "$(date '+%F %T')"
+
+    if [ "$rc" = 0 ] && grep -q 'VideoSink: Successfully wrote' "$dir/stack.log" 2>/dev/null; then
+      ok "the stack was processed: $(sed -n 's/.*VideoSink: Successfully wrote \([0-9]*\) frames.*/\1/p' "$dir/stack.log" | tail -1) frames written"
+    else
+      fail "orc-cli exited $rc ($(grep -v '\[\(info\|debug\)\]' "$dir/stack.log" 2>/dev/null | tail -3 | tr '\n' ' '))"
+    fi
+
+    if [ -s "$mkv" ]; then
+      # The container, as vp415e loads it.
+      ffprobe -v error -show_entries format=format_name:format_tags:stream=index,codec_type,codec_name,pix_fmt,width,height,coded_width,coded_height,r_frame_rate,sample_aspect_ratio,display_aspect_ratio,bits_per_raw_sample,sample_rate,channels:stream_tags=filename,mimetype,title \
+        -of json "$mkv" > "$dir/probe.json" 2>> "$dir/console.log" || fail "ffprobe could not read the mkv"
+      while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(jq -r '
+        def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
+        [ .streams[] | select(.codec_type == "video") ] as $v | [ .streams[] | select(.codec_type == "audio") ] as $a
+        | check(.format.format_name | startswith("matroska"); "the container is Matroska"; "the container is \(.format.format_name), not Matroska"),
+          (if ($v | length) != 1 then "fail\t\($v | length) video streams, not one" else $v[0] |
+            check(.codec_name == "ffv1"; "video is FFV1"; "video is \(.codec_name), not FFV1"),
+            check(.pix_fmt == "yuv422p" and .bits_per_raw_sample == "8"; "video is yuv422p, 8-bit"; "video is \(.pix_fmt), \(.bits_per_raw_sample)-bit, not yuv422p 8-bit"),
+            check([.width, .height, .coded_width, .coded_height] == [720, 576, 720, 576]; "video is 720x576, coded 720x576";
+                  "video is \(.width)x\(.height), coded \(.coded_width)x\(.coded_height), not 720x576"),
+            check(.r_frame_rate == "25/1"; "video is exactly 25/1"; "video is \(.r_frame_rate), not 25/1"),
+            check(.display_aspect_ratio == "4:3"; "display aspect 4:3 (sample aspect \(.sample_aspect_ratio))"; "display aspect \(.display_aspect_ratio), not 4:3") end),
+          (if ($a | length) == 0 then "fail\tno audio stream" else $a[] |
+            check(.codec_name == "flac" and .sample_rate == "48000";
+                  "audio stream \(.index) (\(.tags.title // "untitled")) is FLAC at 48 kHz, \(.channels) channels";
+                  "audio stream \(.index) is \(.codec_name) at \(.sample_rate) Hz, not FLAC at 48 kHz") end),
+          ([ .streams[] | select(.codec_type == "attachment" and .tags.filename == "orc-disc-metadata.yaml"
+                                 and .tags.mimetype == "application/vnd.decode-orc.disc-metadata+yaml") ] | length
+           | check(. == 1; "the disc metadata is attached, by its filename and MIME type"; "\(.) attachments named orc-disc-metadata.yaml with its MIME type, not one"))' "$dir/probe.json")
+
+      # Every packet a keyframe, counted over the whole stream.
+      read -r frames keys < <(ffprobe -v error -select_streams v:0 -show_entries packet=flags -of csv=p=0 "$mkv" \
+                                | awk '{ n++ } /^K/ { k++ } END { print n + 0, k + 0 }')
+      if [ "$frames" -gt 0 ] && [ "$frames" = "$keys" ]; then
+        ok "all $frames video packets are keyframes"
+      else
+        fail "$keys of $frames video packets are keyframes"
+      fi
+
+      # The disc metadata, read as the format spec's reader reads it.
+      if ffmpeg -v error -y -dump_attachment:m:filename:orc-disc-metadata.yaml "$(stage_tmp metadata.yaml)" \
+                -i "$mkv" -frames:v 1 -f null - >> "$dir/console.log" 2>&1; then
+        tagv=$(jq -r '.format.tags.ORC_DISC_METADATA_VERSION // ""' "$dir/probe.json")
+        read -r code a2 <<< "$VIDEO_EXPECT"
+        expect=(--amendment2 "$a2")
+        [ "$code" = none ] || expect+=(--user-code "$code")
+        pack-python "$SELF_DIR/lib/check-disc-metadata.py" "$dir/metadata.yaml.partial" --frames "$frames" \
+          --format "$DISC_FORMAT" --side "$DISC_SIDE" --pictures "$DISC_PICTURES" --tag-version "$tagv" "${expect[@]}" \
+          > "$dir/metadata-check.json" || true
+        while IFS=$'\t' read -r level text; do "$level" "metadata: $text"; done < <(
+          jq -r '.checks[] | "\(.level)\t\(.text)"' "$dir/metadata-check.json" 2>/dev/null || printf 'fail\tthe metadata check did not run\n')
+      else
+        fail "the disc metadata could not be extracted"
+      fi
+    else
+      fail "$3 is missing or empty"
+    fi
+
+    # The stacker's view of each set: its noise and share of the weight,
+    # every 500 frames.
+    video_weights "$dir/stack.log" "${sets[@]}" > "$dir/weights.json" || fail "could not read the stacker's weights from stack.log"
+    while IFS= read -r text; do note "$text"; done < <(jq -r '
+      if .measurements == 0 then "the stacker logged no weights" else
+        "stack weights, the mean of \(.measurements) measurement(s): "
+          + ([ .sets[] | "\(.set) σ \(.mean_sigma // "-") at \(.mean_share // "-")% (least \(.least_share // "-")%)" ] | join(", ")),
+        (.sets[] | select((.mean_share // 0) < 5) | "\(.set) carries almost no weight (\(.mean_share // 0)%)"),
+        (.sample_grid[] | "\(.set): sample grid \(.samples | if . > 0 then "+\(.)" else tostring end) from the first set'"'"'s, from frame \(.from_frame)") end' "$dir/weights.json")
+
+    # The hand-built stack, for comparison: not a pass or a fail.
+    if [ -n "${VIDEO_BASELINE:-}" ] && [ -f "$DD_DECODES/$VIDEO_BASELINE" ] \
+       && ffmpeg -v error -y -dump_attachment:m:filename:orc-disc-metadata.yaml "$dir/baseline.yaml" \
+                 -i "$DD_DECODES/$VIDEO_BASELINE" -frames:v 1 -f null - >> "$dir/console.log" 2>&1; then
+      pack-python "$SELF_DIR/lib/check-disc-metadata.py" "$dir/baseline.yaml" \
+        --frames "$(yq -r '.video.frame_count' "$dir/baseline.yaml")" --format "$DISC_FORMAT" --side "$DISC_SIDE" \
+        --pictures "$DISC_PICTURES" > "$dir/baseline-check.json" || true
+      base="$dir/baseline-check.json"
+      while IFS= read -r text; do note "$text"; done < <(jq -r --slurpfile s "$dir/metadata-check.json" --arg path "$VIDEO_BASELINE" '
+        def fig: "\(.frame_count) frames, \(.address_map.runs) run(s), \(.address_map.undecoded) undecoded, \(.address_map.unmapped) unmapped, status agreement \(.disc.agreement)";
+        .summary as $b | ($s[0].summary // {}) as $n
+        | "baseline \($path): \($b | fig)",
+          "this stack: \($n | fig)",
+          (if ($n.address_map.undecoded // 1e9) > $b.address_map.undecoded or ($n.address_map.runs // 1e9) > $b.address_map.runs
+           then "this stack reads its VBI worse than the baseline" else "this stack reads its VBI no worse than the baseline" end)' "$base" 2>/dev/null)
+    else
+      note "no baseline to compare with${VIDEO_BASELINE:+ ($VIDEO_BASELINE not found)}"
+    fi
+
+    # Everything the pack's provenance (phase 7) takes from this stage.
+    jq -n --args --slurpfile probe "$dir/probe.json" --slurpfile weights "$dir/weights.json" \
+          --rawfile meta "$dir/metadata-check.json" --rawfile base "${base:-/dev/null}" \
+          --arg decoder "$VIDEO_DECODER" --argjson frames "$frames" --argjson keys "$keys" \
+          --arg baseline "${VIDEO_BASELINE:-}" '
+      { sets: $ARGS.positional, decoder: $decoder,
+        container: ($probe[0] | { format: .format.format_name, tags: .format.tags,
+                                  streams: [ .streams[] | del(.tags.filename, .tags.mimetype) ] })
+                   + { packets: $frames, keyframes: $keys },
+        metadata: ($meta | fromjson? // {} | .summary),
+        stacker: $weights[0],
+        baseline: (if $baseline == "" then null else { path: $baseline, metadata: ($base | fromjson? // {} | .summary) } end) }' \
+      "${sets[@]}" > "$(stage_tmp video.json)" || fail "could not write video.json"
+
+    printf '\nresult: %s\n' "$([ "$fails" = 0 ] && echo pass || echo "FAIL ($fails)")"
+  } > "$out"
+
+  if [ "$fails" != 0 ]; then
+    mv -- "$out" "$dir/check.failed.txt"
+    return 1
+  fi
+  rm -f -- "$dir/check.failed.txt"
+}
+
+# video_weights <stack.log> <set>...: the stacker's measured noise and share
+# of the weight for each set, averaged over the measurements it logs (one
+# whenever they change, for a block of frames), and each shift of a set's
+# sample grid onto the first set's. Its sources are the sets in the order
+# given; the noise lines list them in order, "-" for one not measured, and
+# the grid lines number them from 0.
+video_weights() {
+  local log="$1"; shift
+  jq -R -s --args '
+    def r: . * 10 | round / 10;
+    split("\n") as $lines
+    | [ $lines[] | capture("StackerStage: frames [0-9]+-[0-9]+: input noise σ in codes \\(share of the weight\\) (?<list>[^;]*)")?
+        | [ .list | split(", ")[] | (capture("^(?<sigma>[0-9.]+) \\((?<share>[0-9.]+)%\\)$") | map_values(tonumber)) // null ] ] as $logged
+    | [ $lines[] | capture("StackerStage: frames (?<from>[0-9]+)-[0-9]+: source (?<n>[0-9]+) sample grid is (?<lag>[-+][0-9]+) ")?
+        | map_values(tonumber) ] as $shifts
+    | { measurements: ($logged | length),
+        sets: [ $ARGS.positional | to_entries[] | .key as $i
+                | [ $logged[] | .[$i] | select(. != null) ] as $m
+                | { set: .value, measurements: ($m | length),
+                    mean_sigma: (if ($m | length) > 0 then [ $m[].sigma ] | add / length | r else null end),
+                    mean_share: (if ($m | length) > 0 then [ $m[].share ] | add / length | r else null end),
+                    least_share: ([ $m[].share ] | min) } ],
+        sample_grid: [ $shifts[] | { set: $ARGS.positional[.n], from_frame: .from, samples: .lag } ] }' \
+    "$@" < "$log"
 }
 
 verify_tool() {

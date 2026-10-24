@@ -54,14 +54,23 @@
           pkgs.flac
         ];
 
+        # Python with PyYAML, for lib/check-disc-metadata.py, which reads the
+        # disc metadata document as a player would. It is on PATH as
+        # pack-python rather than python3: ld-decode's own Python comes first
+        # there, and is left as it is.
+        packPython = pkgs.writeShellScriptBin "pack-python" ''
+          exec ${pkgs.python3.withPackages (ps: [ ps.pyyaml ])}/bin/python3 "$@"
+        '';
+
         # The pack stages: orc-cli (decode-orc ships it beside orc-gui),
-        # vfs-stacker and vfs-verifier, and sqlite and yq for reading the
-        # .meta databases and the disc metadata YAML.
+        # vfs-stacker and vfs-verifier, sqlite and yq for reading the .meta
+        # databases and the disc metadata YAML, and pack-python.
         packTools = [
           decodeorc
           vfstools
           pkgs.sqlite
           pkgs.yq-go
+          packPython
         ];
 
         # The decode scripts are bash 4+ (associative arrays, ${var,,}, wait -n)
