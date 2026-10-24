@@ -73,6 +73,12 @@
           packPython
         ];
 
+        # install-pack.sh copies a pack to the player with rsync. ssh is the
+        # system's own, so the user's ssh config and keys are the ones used.
+        installTools = [
+          pkgs.rsync
+        ];
+
         # The decode scripts are bash 4+ (associative arrays, ${var,,}, wait -n)
         # and call coreutils with GNU options (date -Is). macOS ships bash 3.2
         # and BSD coreutils in /bin, so both are named here rather than left to
@@ -105,7 +111,7 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = decodeTools ++ packTools ++ shellTools;
+          packages = decodeTools ++ packTools ++ installTools ++ shellTools;
 
           shellHook = ''
             echo "domesday-decode-script environment"

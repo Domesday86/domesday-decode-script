@@ -1,8 +1,9 @@
 # Plan: from captures to a VP415e disc pack
 
-Status: **phases 0–6 are built, and `selection.yaml` is decided.
-Phases 7–8 are not built.** Volcanoes is the pilot disc; the other discs
-follow once the process is proven on it.
+Status: **phases 0–7 are built, and `selection.yaml` is decided.** The
+Volcanoes pack awaits its hand check on the player, the last of phase 7's
+exit criteria. Phase 8 is not built. Volcanoes is the pilot disc; the other
+discs follow once the process is proven on it.
 
 ## Goal
 
@@ -1253,6 +1254,98 @@ SHA256SUMS
 **Exit criteria:**
 - The Volcanoes pack passes the hand check on the player.
 - `build-pack.sh volcanoes` on an unchanged tree does no work.
+
+**As built.** The second exit criterion is met: a rerun on an unchanged tree
+does nothing, in about 8 s. The first waits on the hand check.
+
+- **Where the pack goes.** Each pack is a version, `pack-<key>/`, where the
+  key covers what it holds: the video and vfs stamps and the stem. The newest
+  two are kept, as for every other stage, and `decode-script/volcanoes/pack`
+  links to the current one. Some inputs only feed the provenance: the compare
+  stamp, `selection.yaml` and the hand check. They are stamped, but they don't
+  change the key, so recording the hand check restamps the same version.
+- **Assembly.** The stage hard-links the three files from
+  `orc-<rev>/video/` and `vfs-<rev>/`. The decodes share allows it, so
+  nothing is copied. Where it can't link, it copies, and checks the copy byte
+  for byte.
+- **The checks, again, on the pack's own files:**
+  - the mkv: the video stage's checks in full (now `check_mkv`, which both
+    stages share). The disc metadata must also be the document the video
+    stage checked;
+  - the image and its map: the vfs stage's hashes, the reference
+    (`pack.sha256`) and the map's parse, plus `vfs-verifier` on the image.
+
+  The rest of those stages' checks are about how the files were made, not
+  what they are: the stacker's weights, the baseline comparisons, the vote
+  counts. Those checks are carried in the provenance.
+- **Outputs:**
+  - `SHA256SUMS`: the three files, then the provenance.
+  - `volcanoes_stack.provenance.yaml`. It holds:
+    - the pack's id, version and status, and the commit of this repo it was
+      built from;
+    - each file's size, hash and source;
+    - the hand check;
+    - every mapped capture's library path, `sources.sha256` fingerprint,
+      decode and place in each stack, or why it was dropped;
+    - the locked revisions and narHashes of ld-decode, decode-orc (with its
+      patches), vfs-verifier and nixpkgs;
+    - `selection.yaml`, and the compare stage's evidence;
+    - `video.json`, with the stacker's weights;
+    - `vfs.json`, with the verdict;
+    - the compare, video and vfs stamps;
+    - every check line of the video, vfs and pack stages.
+  - `pack.json` and `check.txt`.
+- **The hand check** is recorded in the repo, not edited into the
+  provenance. A build output is the build's to write, and the repo receives
+  only reviewed decisions. The record goes in
+  `discs/<disc>/player-check.yaml`, as a list of checks. Each check gives:
+  - the pack's id, in quotes;
+  - the date;
+  - the vp415e version;
+  - `pass` or `fail`;
+  - notes, if any.
+
+  The id is the first 16 hex digits of the sha256 of the three files'
+  `SHA256SUMS` lines. It names the bytes, not the inputs, so a check is never
+  carried over to a pack that differs. The provenance is left out of the id,
+  because it changes when the check is recorded. The stage copies the last
+  check for its id into the provenance and `pack.json`:
+  - `pass`: the pack is complete;
+  - `fail`: the stage fails;
+  - none yet: the pack is stamped and waits. `status` reports "up to date;
+    awaiting the hand check on the player (pack id …)".
+- **Installing.** `install-pack.sh <disc> <host>` takes the disc as well as
+  the host. Before copying, it checks the player's side over one ssh call:
+  - the media directory is group `vp415d` and mode `2775`, and the user can
+    write to it and is in the group;
+  - there is room, and `rsync` and `sha256sum` are there.
+
+  The copy uses rsync without `-a`, so no group is carried over, and sends
+  the `.dat` and `.bsm` before the `.mkv`. It then sets group `vp415d` and
+  mode `0644` on all three files explicitly, since a file rsync skipped keeps
+  whatever it had. Finally it checks each file's group and mode as
+  `vp415-selftest` does, and every hash against `SHA256SUMS`.
+
+  `--pack` installs another version, and `--dry-run` copies nothing. It never
+  uses sudo, and the system `ssh` is used, so the user's own keys apply.
+  Tested against a stand-in player (a local directory and an `ssh` shim),
+  including:
+  - a wrong group on the media directory;
+  - a hash mismatch;
+  - an unstamped pack;
+  - a file left with the wrong group and mode.
+
+  It has not yet been run against the player.
+- **The run** takes about 3 minutes. It reads the 19 GB mkv over the share
+  once: it hashes the file while the keyframe count reads it, and the two
+  reads overlap.
+- **The result.** Every check passes on `pack-eb4a40ac049e`, pack id
+  `298eb83fe340638a`:
+  - mkv `dd11859c…a417`;
+  - `.dat` `92b1a0d7…af4b`;
+  - `.bsm` `d9922681…d27b`.
+
+  The last two are the reference hashes.
 
 ### Phase 8: Roll out to the other discs
 

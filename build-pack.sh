@@ -155,6 +155,34 @@ vfs_accept() {
 # reviewed; every later stack is checked against it.
 VFS_REFERENCE="$DISC_DIR/pack.sha256"
 
+# The hand check of the pack on the player: a list of checks, each naming the
+# pack by its id, with the date, the vp415e version and the result. A person
+# writes it; the pack stage only reads it.
+PLAYER_CHECK="$DISC_DIR/player-check.yaml"
+
+# player_check_problems: what is wrong with PLAYER_CHECK, one line each, or
+# nothing.
+player_check_problems() {
+  local json
+  [ -f "$PLAYER_CHECK" ] || return 0
+  json=$(yq -o=json . "$PLAYER_CHECK" 2>/dev/null) || { printf 'it is not valid YAML\n'; return 0; }
+  jq -r '
+    if type != "object" or (.checks | type) != "array" then "it has no list of checks" else
+      .checks | to_entries[] | "check \(.key + 1)" as $c | .value
+      | (if (.pack | type) == "string" and (.pack | test("^[0-9a-f]{16}$")) then empty else "\($c) names no pack id (16 hex digits, in quotes)" end),
+        (if (.date // "" | tostring | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) then empty else "\($c) has no date (YYYY-MM-DD)" end),
+        (if (.vp415e // "" | tostring) != "" then empty else "\($c) names no vp415e version" end),
+        (if .result == "pass" or .result == "fail" then empty else "\($c) has result \(.result // "none"), not pass or fail" end)
+    end' <<< "$json"
+}
+
+# player_check_for <pack id>: the last check recorded for that pack, as JSON,
+# or null.
+player_check_for() {
+  [ -f "$PLAYER_CHECK" ] || { printf 'null\n'; return 0; }
+  yq -o=json . "$PLAYER_CHECK" | jq -c --arg id "$1" '[ .checks[]? | select(.pack == $id) ] | last'
+}
+
 # selection_problems: what is wrong with selection.yaml, one line each, or
 # nothing. Each stack names its sets, best first, from the sets map.orcprj
 # maps, each once, and lists every mapped set it leaves out under dropped,
@@ -244,6 +272,7 @@ stage_tool() {
     set|map|video)  printf 'decode-orc|decode-orc|orc-cli\n' ;;
     compare)        printf 'decode-orc|decode-orc|orc-cli\nvfs-verifier|vfs-tools|vfs-stacker\n' ;;
     vfs)            printf 'vfs-verifier|vfs-tools|vfs-stacker\n' ;;
+    pack)           printf 'vfs-verifier|vfs-tools|vfs-verifier\n' ;;
     *)              return 1 ;;
   esac
 }
@@ -404,22 +433,35 @@ describe_vfs() {
   stage_output check.txt
 }
 
-# The pack is filed under its own key, so each distinct pack is a version of
-# its own and the newest two are kept.
+# The pack: the video and vfs stages' outputs, and the provenance of the
+# whole. Its directory is named after the key of what it holds (the two
+# stacks and the stem), so each distinct pack is a version of its own and the
+# newest two are kept. What only its provenance takes -- the compare stage's
+# evidence, the selection and the hand check on the player -- is stamped too,
+# but leaves the name alone, so recording the hand check restamps the same
+# pack. PACK_VIDEO, PACK_VFS and PACK_COMPARE are left naming those stages'
+# directories.
 describe_pack() {
-  local video vfs key
-  describe_video; video="$STAGE_DIR"
-  describe_vfs;   vfs="$STAGE_DIR"
+  local key
+  describe_compare; PACK_COMPARE="$STAGE_DIR"
+  describe_video;   PACK_VIDEO="$STAGE_DIR"
+  describe_vfs;     PACK_VFS="$STAGE_DIR"
   stage_begin pack "$OUT/pack"
-  stage_input_stamp video "$video"
-  stage_input_stamp vfs "$vfs"
+  stage_input_stamp video "$PACK_VIDEO"
+  stage_input_stamp vfs "$PACK_VFS"
   stage_input "stem" "$STEM"
   key=$(stage_key)
   STAGE_DIR="$OUT/pack-${key:0:12}"
+  stage_input_stamp compare "$PACK_COMPARE"
+  stage_input_file "selection" "$SELECTION"
+  stage_input_file "player check" "$PLAYER_CHECK"
   stage_output "$STEM.mkv"
   stage_output "$STEM.dat"
   stage_output "$STEM.dat.bsm"
-  stage_output provenance.yaml
+  stage_output "$STEM.provenance.yaml"
+  stage_output SHA256SUMS
+  stage_output pack.json
+  stage_output check.txt
 }
 
 # The units a stage is built in: one per set, or the stage itself.
@@ -476,6 +518,11 @@ unit_state() {
     fi
   fi
   describe_unit "$unit"
+  # An up-to-date pack also says whether it has passed the hand check.
+  if [ "$unit" = pack ] && state=$(stage_state); then
+    printf '%s; %s\n' "$state" "$(jq -r '.status // "status unknown"' "$STAGE_DIR/pack.json" 2>/dev/null || echo 'status unknown')"
+    return 0
+  fi
   stage_state
 }
 
@@ -524,6 +571,7 @@ status() {
   show_versions "$OUT" orc video/stage.stamp
   show_versions "$OUT" vfs stage.stamp
   show_versions "$OUT" pack stage.stamp
+  [ ! -L "$OUT/pack" ] || printf '    %-40s the current pack, %s\n' pack "$(readlink -- "$OUT/pack")"
 }
 
 if [ "$MODE" = status ]; then
@@ -534,11 +582,9 @@ fi
 # --- build -----------------------------------------------------------------
 
 # Each stage is built from the units that are stale (or forced), all at once,
-# so that a stage can run them side by side. The stages after decode are
-# written phase by phase (docs/emulator-pack-plan.md); until a stage's phase
-# lands, reaching it stale stops the run there.
+# so that a stage can run them side by side.
 run_stage() {
-  local name="$1" phase; shift
+  local name="$1"; shift
   case "$name" in
     decode) run_decode "$@"; return ;;
     set)    run_set "$@"; return ;;
@@ -547,9 +593,8 @@ run_stage() {
     select) die "select: decided by hand in ${SELECTION#"$SELF_DIR"/}; there is nothing to build" ;;
     video)  run_video "$@"; return ;;
     vfs)    run_vfs "$@"; return ;;
-    pack)   phase=7 ;;
+    pack)   run_pack "$@"; return ;;
   esac
-  die "$1: not built yet -- this stage arrives in phase $phase of docs/emulator-pack-plan.md"
 }
 
 # The decodes are made, checked and stamped by the disc's own decode script,
@@ -1369,8 +1414,8 @@ build_video() {
 # metadata.yaml and video.json to their stage_tmp names, and return non-zero
 # if any failed.
 check_video() {
-  local dir="$1" rc="$2" mkv="$1/$3" out fails=0 level text frames=0 keys=0 tagv code a2 base=""
-  local -a sets=() expect=()
+  local dir="$1" rc="$2" mkv="$1/$3" out fails=0 level text frames=0 keys=0 base=""
+  local -a sets=()
   out=$(stage_tmp check.txt) || return 1
   ok()   { printf 'ok    %s\n' "$*"; }
   fail() { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
@@ -1386,56 +1431,7 @@ check_video() {
       fail "orc-cli exited $rc ($(grep -v '\[\(info\|debug\)\]' "$dir/stack.log" 2>/dev/null | tail -3 | tr '\n' ' '))"
     fi
 
-    if [ -s "$mkv" ]; then
-      # The container, as vp415e loads it.
-      ffprobe -v error -show_entries format=format_name:format_tags:stream=index,codec_type,codec_name,pix_fmt,width,height,coded_width,coded_height,r_frame_rate,sample_aspect_ratio,display_aspect_ratio,bits_per_raw_sample,sample_rate,channels:stream_tags=filename,mimetype,title \
-        -of json "$mkv" > "$dir/probe.json" 2>> "$dir/console.log" || fail "ffprobe could not read the mkv"
-      while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(jq -r '
-        def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
-        [ .streams[] | select(.codec_type == "video") ] as $v | [ .streams[] | select(.codec_type == "audio") ] as $a
-        | check(.format.format_name | startswith("matroska"); "the container is Matroska"; "the container is \(.format.format_name), not Matroska"),
-          (if ($v | length) != 1 then "fail\t\($v | length) video streams, not one" else $v[0] |
-            check(.codec_name == "ffv1"; "video is FFV1"; "video is \(.codec_name), not FFV1"),
-            check(.pix_fmt == "yuv422p" and .bits_per_raw_sample == "8"; "video is yuv422p, 8-bit"; "video is \(.pix_fmt), \(.bits_per_raw_sample)-bit, not yuv422p 8-bit"),
-            check([.width, .height, .coded_width, .coded_height] == [720, 576, 720, 576]; "video is 720x576, coded 720x576";
-                  "video is \(.width)x\(.height), coded \(.coded_width)x\(.coded_height), not 720x576"),
-            check(.r_frame_rate == "25/1"; "video is exactly 25/1"; "video is \(.r_frame_rate), not 25/1"),
-            check(.display_aspect_ratio == "4:3"; "display aspect 4:3 (sample aspect \(.sample_aspect_ratio))"; "display aspect \(.display_aspect_ratio), not 4:3") end),
-          (if ($a | length) == 0 then "fail\tno audio stream" else $a[] |
-            check(.codec_name == "flac" and .sample_rate == "48000";
-                  "audio stream \(.index) (\(.tags.title // "untitled")) is FLAC at 48 kHz, \(.channels) channels";
-                  "audio stream \(.index) is \(.codec_name) at \(.sample_rate) Hz, not FLAC at 48 kHz") end),
-          ([ .streams[] | select(.codec_type == "attachment" and .tags.filename == "orc-disc-metadata.yaml"
-                                 and .tags.mimetype == "application/vnd.decode-orc.disc-metadata+yaml") ] | length
-           | check(. == 1; "the disc metadata is attached, by its filename and MIME type"; "\(.) attachments named orc-disc-metadata.yaml with its MIME type, not one"))' "$dir/probe.json")
-
-      # Every packet a keyframe, counted over the whole stream.
-      read -r frames keys < <(ffprobe -v error -select_streams v:0 -show_entries packet=flags -of csv=p=0 "$mkv" \
-                                | awk '{ n++ } /^K/ { k++ } END { print n + 0, k + 0 }')
-      if [ "$frames" -gt 0 ] && [ "$frames" = "$keys" ]; then
-        ok "all $frames video packets are keyframes"
-      else
-        fail "$keys of $frames video packets are keyframes"
-      fi
-
-      # The disc metadata, read as the format spec's reader reads it.
-      if ffmpeg -v error -y -dump_attachment:m:filename:orc-disc-metadata.yaml "$(stage_tmp metadata.yaml)" \
-                -i "$mkv" -frames:v 1 -f null - >> "$dir/console.log" 2>&1; then
-        tagv=$(jq -r '.format.tags.ORC_DISC_METADATA_VERSION // ""' "$dir/probe.json")
-        read -r code a2 <<< "$VIDEO_EXPECT"
-        expect=(--amendment2 "$a2")
-        [ "$code" = none ] || expect+=(--user-code "$code")
-        pack-python "$SELF_DIR/lib/check-disc-metadata.py" "$dir/metadata.yaml.partial" --frames "$frames" \
-          --format "$DISC_FORMAT" --side "$DISC_SIDE" --pictures "$DISC_PICTURES" --tag-version "$tagv" "${expect[@]}" \
-          > "$dir/metadata-check.json" || true
-        while IFS=$'\t' read -r level text; do "$level" "metadata: $text"; done < <(
-          jq -r '.checks[] | "\(.level)\t\(.text)"' "$dir/metadata-check.json" 2>/dev/null || printf 'fail\tthe metadata check did not run\n')
-      else
-        fail "the disc metadata could not be extracted"
-      fi
-    else
-      fail "$3 is missing or empty"
-    fi
+    check_mkv "$mkv" "$dir" "$(stage_tmp metadata.yaml)"
 
     # The stacker's view of each set: its noise and share of the weight,
     # every 500 frames.
@@ -1488,6 +1484,67 @@ check_video() {
     return 1
   fi
   rm -f -- "$dir/check.failed.txt"
+}
+
+# check_mkv <mkv> <work dir> <metadata out>: the checks of an mkv as vp415e
+# loads it (docs/emulator-pack-plan.md, phase 5): the container, every packet
+# a keyframe, the audio, and the disc metadata document, extracted to
+# <metadata out> and read by lib/check-disc-metadata.py as the format spec's
+# reader does. Reports with the caller's ok and fail, leaves probe.json and
+# metadata-check.json in <work dir>, and sets the caller's frames and keys.
+check_mkv() {
+  local mkv="$1" work="$2" meta="$3" level text tagv code a2
+  local -a expect=()
+  if [ -s "$mkv" ]; then
+    # The container, as vp415e loads it.
+    ffprobe -v error -show_entries format=format_name:format_tags:stream=index,codec_type,codec_name,pix_fmt,width,height,coded_width,coded_height,r_frame_rate,sample_aspect_ratio,display_aspect_ratio,bits_per_raw_sample,sample_rate,channels:stream_tags=filename,mimetype,title \
+      -of json "$mkv" > "$work/probe.json" 2>> "$work/console.log" || fail "ffprobe could not read the mkv"
+    while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(jq -r '
+      def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
+      [ .streams[] | select(.codec_type == "video") ] as $v | [ .streams[] | select(.codec_type == "audio") ] as $a
+      | check(.format.format_name | startswith("matroska"); "the container is Matroska"; "the container is \(.format.format_name), not Matroska"),
+        (if ($v | length) != 1 then "fail\t\($v | length) video streams, not one" else $v[0] |
+          check(.codec_name == "ffv1"; "video is FFV1"; "video is \(.codec_name), not FFV1"),
+          check(.pix_fmt == "yuv422p" and .bits_per_raw_sample == "8"; "video is yuv422p, 8-bit"; "video is \(.pix_fmt), \(.bits_per_raw_sample)-bit, not yuv422p 8-bit"),
+          check([.width, .height, .coded_width, .coded_height] == [720, 576, 720, 576]; "video is 720x576, coded 720x576";
+                "video is \(.width)x\(.height), coded \(.coded_width)x\(.coded_height), not 720x576"),
+          check(.r_frame_rate == "25/1"; "video is exactly 25/1"; "video is \(.r_frame_rate), not 25/1"),
+          check(.display_aspect_ratio == "4:3"; "display aspect 4:3 (sample aspect \(.sample_aspect_ratio))"; "display aspect \(.display_aspect_ratio), not 4:3") end),
+        (if ($a | length) == 0 then "fail\tno audio stream" else $a[] |
+          check(.codec_name == "flac" and .sample_rate == "48000";
+                "audio stream \(.index) (\(.tags.title // "untitled")) is FLAC at 48 kHz, \(.channels) channels";
+                "audio stream \(.index) is \(.codec_name) at \(.sample_rate) Hz, not FLAC at 48 kHz") end),
+        ([ .streams[] | select(.codec_type == "attachment" and .tags.filename == "orc-disc-metadata.yaml"
+                               and .tags.mimetype == "application/vnd.decode-orc.disc-metadata+yaml") ] | length
+         | check(. == 1; "the disc metadata is attached, by its filename and MIME type"; "\(.) attachments named orc-disc-metadata.yaml with its MIME type, not one"))' "$work/probe.json")
+
+    # Every packet a keyframe, counted over the whole stream.
+    read -r frames keys < <(ffprobe -v error -select_streams v:0 -show_entries packet=flags -of csv=p=0 "$mkv" \
+                              | awk '{ n++ } /^K/ { k++ } END { print n + 0, k + 0 }')
+    if [ "$frames" -gt 0 ] && [ "$frames" = "$keys" ]; then
+      ok "all $frames video packets are keyframes"
+    else
+      fail "$keys of $frames video packets are keyframes"
+    fi
+
+    # The disc metadata, read as the format spec's reader reads it.
+    if ffmpeg -v error -y -dump_attachment:m:filename:orc-disc-metadata.yaml "$meta" \
+              -i "$mkv" -frames:v 1 -f null - >> "$work/console.log" 2>&1; then
+      tagv=$(jq -r '.format.tags.ORC_DISC_METADATA_VERSION // ""' "$work/probe.json")
+      read -r code a2 <<< "$VIDEO_EXPECT"
+      expect=(--amendment2 "$a2")
+      [ "$code" = none ] || expect+=(--user-code "$code")
+      pack-python "$SELF_DIR/lib/check-disc-metadata.py" "$meta" --frames "$frames" \
+        --format "$DISC_FORMAT" --side "$DISC_SIDE" --pictures "$DISC_PICTURES" --tag-version "$tagv" "${expect[@]}" \
+        > "$work/metadata-check.json" || true
+      while IFS=$'\t' read -r level text; do "$level" "metadata: $text"; done < <(
+        jq -r '.checks[] | "\(.level)\t\(.text)"' "$work/metadata-check.json" 2>/dev/null || printf 'fail\tthe metadata check did not run\n')
+    else
+      fail "the disc metadata could not be extracted"
+    fi
+  else
+    fail "${mkv##*/} is missing or empty"
+  fi
 }
 
 # video_weights <stack.log> <set>...: the stacker's measured noise and share
@@ -1823,6 +1880,277 @@ vfs_coverage() {
         sets: map(. + { in_stack: (.set as $s | $stack | index($s) != null) }) }'
 }
 
+# --- pack: the three files and their provenance ----------------------------
+#
+# The video and vfs stages' outputs are hard-linked into the pack where the
+# share allows it, so nothing is copied or recomputed, and copied otherwise.
+# They are then checked again as they stand (docs/emulator-pack-plan.md,
+# phase 7): the mkv as the video stage checks it, and the image's hashes
+# against the vfs stage's and the reference, its bad sector map and
+# vfs-verifier on it.
+#
+# Beside them go SHA256SUMS and <stem>.provenance.yaml, which vp415e ignores:
+# the captures' fingerprints, the tool revisions, the selection and the
+# compare stage's evidence for it, the stacker's weights, the vfs verdict,
+# every stage's checks and the hand check on the player.
+#
+# vp415e cannot open a side without the player's hardware, so the last check
+# is a person's, on the player, recorded in PLAYER_CHECK against the pack's
+# id: the first 16 hex digits of the sha256 of SHA256SUMS' lines for the three
+# files the player loads. A pack is complete only once a check that passed is
+# recorded for its id. Until then it is built and stamped, and awaits that
+# check; a check that failed fails the stage.
+#
+# $OUT/pack links to the current version, for install-pack.sh.
+
+run_pack() {
+  local state
+  ( build_pack ) || die "pack: failed (above)"
+  state=$(unit_state pack) || die "pack: still $state after building"
+  stage_prune "$OUT" pack stage.stamp
+}
+
+build_pack() {
+  local dir f how
+  local -a assembled=()
+  describe_pack
+  dir="$STAGE_DIR"
+
+  stage_mkdir "$dir" || return 1
+  stage_unstamp || return 1
+  rm -f -- "${dir:?}"/*.mkv "${dir:?}"/*.dat "${dir:?}"/*.dat.* "${dir:?}"/*.yaml* "${dir:?}"/*.json* \
+           "${dir:?}"/*.txt* "${dir:?}"/*.log "${dir:?}"/SHA256SUMS*
+  cd -- "$dir" || return 1
+
+  # Under their final names, so that each is checked as the player will find
+  # it. The stamp, written last, is what makes the pack complete.
+  for f in "$PACK_VIDEO/$STEM.mkv" "$PACK_VFS/$STEM.dat" "$PACK_VFS/$STEM.dat.bsm"; do
+    if ln -- "$f" "${f##*/}" 2>/dev/null; then
+      how=linked
+    else
+      printf 'pack: %s cannot be linked here; copying it\n' "${f##*/}"
+      cp -- "$f" "${f##*/}" || return 1
+      how=copied
+    fi
+    assembled+=("${f##*/}|$f|$how")
+  done
+  printf 'pack: assembled %s from %s and %s; checking it again\n' "$STEM" "${PACK_VIDEO#"$OUT"/}" "${PACK_VFS#"$OUT"/}"
+
+  if ! check_pack "$dir" "${assembled[@]}"; then
+    cat -- "$dir/check.failed.txt" >&2
+    printf 'pack: failed its checks and is not stamped (see %s/check.failed.txt)\n' "$dir" >&2
+    return 1
+  fi
+  cat -- "$dir/check.txt.partial"
+  stage_commit || { printf 'pack: could not stamp the stage\n' >&2; return 1; }
+  printf 'pack: checked and stamped: %s\n' "$dir"
+}
+
+# check_pack <dir> <file>|<source>|<linked|copied>...: run the checks, write
+# check.txt, SHA256SUMS, pack.json and the provenance to their stage_tmp
+# names, and return non-zero if any failed.
+check_pack() {
+  local dir="$1" out fails=0 level text frames=0 keys=0 a name src how hashpid accept sums id record problems
+  local dathash bsmhash
+  local -a rows=()
+  shift
+  out=$(stage_tmp check.txt) || return 1
+  sums=$(stage_tmp SHA256SUMS) || return 1
+  ok()   { printf 'ok    %s\n' "$*"; }
+  fail() { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
+  note() { printf 'note  %s\n' "$*"; }
+  accept=$(vfs_accept)
+  : > "$dir/console.log"
+
+  # The mkv is hashed while the checks below read it, so that the two reads
+  # of it over the share overlap.
+  sha256_stdin < "$dir/$STEM.mkv" > "$dir/mkv-sha256.txt" &
+  hashpid=$!
+
+  {
+    printf 'stage:   pack\nvideo:   %s\nvfs:     %s\nchecked: %s\n\n' "${PACK_VIDEO#"$OUT"/}" "${PACK_VFS#"$OUT"/}" "$(date '+%F %T')"
+
+    # The files are the stages' own: the same file, or a copy that is
+    # identical to it.
+    for a; do
+      IFS='|' read -r name src how <<< "$a"
+      if [ "$how" = linked ] && [ "$(file_ino "$dir/$name")" = "$(file_ino "$src")" ]; then
+        ok "$name is ${src#"$OUT"/}, linked"
+      elif [ "$how" = copied ] && cmp -s -- "$dir/$name" "$src"; then
+        ok "$name is a copy of ${src#"$OUT"/}, byte for byte"
+      else
+        fail "$name is not ${src#"$OUT"/}"
+      fi
+    done
+
+    # The video stage's checks, again, on the pack's mkv.
+    check_mkv "$dir/$STEM.mkv" "$dir" "$dir/metadata.yaml"
+    if cmp -s -- "$dir/metadata.yaml" "$PACK_VIDEO/metadata.yaml"; then
+      ok "the disc metadata is the document the video stage checked"
+    else
+      fail "the disc metadata differs from the document the video stage checked"
+    fi
+
+    # The vfs stage's checks, again, on the pack's image.
+    dathash=$(sha256_stdin < "$dir/$STEM.dat")
+    bsmhash=$(sha256_stdin < "$dir/$STEM.dat.bsm")
+    while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(
+      jq -r --argjson size "$(file_size "$dir/$STEM.dat")" --arg hash "$dathash" --arg bsmhash "$bsmhash" \
+            --argjson bsm "$(awk '/^[[:space:]]*$/ { next } /^[[:space:]]*[0-9]+[[:space:]]*$/ { n++; next } { m++ }
+                                  END { printf "{\"sectors\": %d, \"malformed\": %d}", n, m }' "$dir/$STEM.dat.bsm")" '
+        def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
+        .image as $i
+        | check($size == $i.size and $hash == $i.sha256; "the image is the one the vfs stage checked (\($size) bytes)";
+                "the image is not the one the vfs stage checked"),
+          check($bsmhash == $i.bsm_sha256; "the bad sector map is the one the vfs stage checked";
+                "the bad sector map is not the one the vfs stage checked"),
+          check($bsm.malformed == 0 and $bsm.sectors == $i.bsm_sectors; "the bad sector map parses: \($bsm.sectors) sectors";
+                "the bad sector map has \($bsm.malformed) malformed line(s) and \($bsm.sectors) sectors, against \($i.bsm_sectors)"),
+          "note\tthe vfs stage judged the image \(.verdict)\(if .verdict != "bit-perfect" then ", which the selection accepts" else "" end)"' \
+        "$PACK_VFS/vfs.json" 2>/dev/null || printf 'fail\tcould not read %s\n' "${PACK_VFS#"$OUT"/}/vfs.json")
+    if [ -f "$VFS_REFERENCE" ]; then
+      if diff -q <(grep -v '^#' "$VFS_REFERENCE") \
+                 <(printf '%s  %s\n%s  %s\n' "$dathash" "$STEM.dat" "$bsmhash" "$STEM.dat.bsm") > /dev/null; then
+        ok "the image and its map match the reference, ${VFS_REFERENCE#"$SELF_DIR"/}"
+      else
+        fail "the image or its map differs from the reference, ${VFS_REFERENCE#"$SELF_DIR"/}"
+      fi
+    else
+      fail "there is no reference for the image yet (${VFS_REFERENCE#"$SELF_DIR"/}); the vfs stage says how to record one"
+    fi
+    if vfs-verifier "$dir/$STEM.dat" > "$dir/vfs-verifier.txt" 2>&1 && grep -q 'Verification passed' "$dir/vfs-verifier.txt"; then
+      ok "vfs-verifier passes the image"
+    elif [ "$accept" = incomplete ] && grep -q 'Verification failed' "$dir/vfs-verifier.txt"; then
+      note "vfs-verifier fails the image, which the selection accepts (vfs.accept: incomplete)"
+    else
+      fail "vfs-verifier does not pass the image (vfs-verifier.txt)"
+    fi
+
+    # The hashes, and the pack's id.
+    if wait "$hashpid" && [ -s "$dir/mkv-sha256.txt" ]; then
+      printf '%s  %s\n%s  %s\n%s  %s\n' "$(cat -- "$dir/mkv-sha256.txt")" "$STEM.mkv" \
+        "$dathash" "$STEM.dat" "$bsmhash" "$STEM.dat.bsm" > "$sums"
+      id=$(sha256_stdin < "$sums" | cut -c1-16)
+      ok "hashed: SHA256SUMS; the pack's id is $id"
+    else
+      fail "could not hash $STEM.mkv"
+      id=unknown
+    fi
+
+    # The hand check on the player.
+    problems=$(player_check_problems)
+    record=null
+    if [ -n "$problems" ]; then
+      while IFS= read -r text; do fail "${PLAYER_CHECK#"$SELF_DIR"/}: $text"; done <<< "$problems"
+    else
+      record=$(player_check_for "$id")
+      while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(jq -r --arg id "$id" --arg file "${PLAYER_CHECK#"$SELF_DIR"/}" --arg disc "$DISC" '
+        if . == null then
+          "note\tawaiting the hand check on the player: install the pack (./install-pack.sh \($disc) <host>), check it there, and record the result in \($file) as a check with pack: \"\($id)\", date, vp415e (its version) and result (pass or fail)"
+        elif .result == "pass" then "ok\tchecked by hand on the player on \(.date) with vp415e \(.vp415e): passed"
+        else "fail\tchecked by hand on the player on \(.date) with vp415e \(.vp415e): failed\(if .notes then " (\(.notes))" else "" end)" end' <<< "$record")
+    fi
+
+    printf '\nresult: %s\n' "$([ "$fails" = 0 ] && echo pass || echo "FAIL ($fails)")"
+  } > "$out"
+
+  if [ "$fails" != 0 ]; then
+    mv -- "$out" "$dir/check.failed.txt"
+    return 1
+  fi
+  rm -f -- "$dir/check.failed.txt"
+
+  for a; do
+    IFS='|' read -r name src how <<< "$a"
+    rows+=("$name|$(file_size "$dir/$name")|$(awk -v n="$name" '$2 == n { print $1 }' "$sums")|${src#"$OUT"/}|$how")
+  done
+  jq -n --arg id "$id" --argjson check "$record" --args '
+    { id: $id,
+      files: [ $ARGS.positional[] | split("|") | { name: .[0], bytes: (.[1] | tonumber), sha256: .[2], from: .[3], how: .[4] } ],
+      player_check: $check,
+      complete: ($check.result? == "pass") }
+    | .status = (if .complete then "complete: passed the hand check on the player"
+                 else "awaiting the hand check on the player (pack id \($id))" end)' "${rows[@]}" > "$(stage_tmp pack.json)" \
+    || { printf 'pack: could not write pack.json\n' >&2; return 1; }
+  pack_provenance "$dir" > "$(stage_tmp "$STEM.provenance.yaml")" || { printf 'pack: could not write the provenance\n' >&2; return 1; }
+  printf '%s  %s\n' "$(sha256_stdin < "$dir/$STEM.provenance.yaml.partial")" "$STEM.provenance.yaml" >> "$sums"
+}
+
+# pack_provenance <dir>: <stem>.provenance.yaml, from pack.json and the check
+# results in <dir> (their stage_tmp names) and what the stages before it
+# recorded.
+pack_provenance() {
+  local dir="$1" id
+  local -a captures=() patches=()
+  for id in $(map_sets); do
+    captures+=("$id|$(set_field "$id" 2)|$(set_field "$id" 3)|$id/$LDD_DIR")
+  done
+  for id in "$SELF_DIR"/patches/*.patch; do
+    [ -f "$id" ] && patches+=("${id##*/}|$(sha256_stdin < "$id")")
+  done
+  printf '# The provenance of the %s pack for %s: what it was made from, how,\n' "$STEM" "$DISC"
+  printf '# and every check it passed. Written by build-pack.sh; vp415e ignores it.\n'
+  jq -n --arg disc "$DISC" --arg stem "$STEM" --arg version "${dir##*/}" --arg built "$(date '+%FT%T%z')" \
+        --arg script "$(git -C "$SELF_DIR" describe --always --dirty 2>/dev/null || echo unknown)" \
+        --slurpfile pack "$dir/pack.json.partial" --slurpfile lock "$SELF_DIR/flake.lock" \
+        --argjson selection "$(yq -o=json . "$SELECTION")" --slurpfile evidence "$PACK_COMPARE/compare.json" \
+        --slurpfile video "$PACK_VIDEO/video.json" --slurpfile vfs "$PACK_VFS/vfs.json" \
+        --rawfile sources "$SELF_DIR/sources.sha256" \
+        --rawfile stamp_compare "$PACK_COMPARE/stage.stamp" --rawfile stamp_video "$PACK_VIDEO/stage.stamp" \
+        --rawfile stamp_vfs "$PACK_VFS/stage.stamp" \
+        --rawfile check_video "$PACK_VIDEO/check.txt" --rawfile check_vfs "$PACK_VFS/check.txt" \
+        --rawfile check_pack "$dir/check.txt.partial" \
+        --arg patches "$( [ "${#patches[@]}" = 0 ] || printf '%s\n' "${patches[@]}")" --args '
+    def stamp($t): ($t | split("\n")) as $l
+      | { key: ([ $l[] | capture("^key: (?<v>.*)")?.v ] | first),
+          stamped: ([ $l[] | capture("^stamped: (?<v>[0-9]+)")?.v | tonumber | todate ] | first),
+          inputs: [ $l[] | capture("^input: (?<v>.*)")?.v ] };
+    def checks($t): [ $t | split("\n")[] | select(test("^(ok|note|FAIL) ") or test("^result: ")) ];
+    def node($path): reduce $path[] as $step ("root";
+      $lock[0].nodes[.].inputs[$step] as $n | if ($n | type) == "array" then node($n) else $n end);
+    def tool($input): $lock[0].nodes[node([$input])] as $n
+      | { rev: $n.locked.rev, narHash: $n.locked.narHash,
+          source: ($n.original | "\(.type):\(.owner)/\(.repo)\(if .ref then "/\(.ref)" else "" end)") };
+    ($sources | split("\n")) as $src
+    | ([ $src[] | capture("^# head-bytes: (?<n>[0-9]+)")?.n | tonumber ] | first) as $head
+    | [ $src[] | select(test("^[0-9a-f]{64}  ")) | capture("^(?<sha>[0-9a-f]+)  (?<bytes>[0-9]+)  (?<path>.*)$") ] as $fingerprints
+    | def role($stack; $set): ($selection[$stack].sets | index($set)) as $i
+        | if $i != null then { position: ($i + 1) }
+          else { dropped: ([ $selection[$stack].dropped[]? | select(.set == $set) | .reason ] | first) } end;
+      $pack[0] as $p
+      | { disc: $disc, stem: $stem,
+          pack: { id: $p.id, version: $version, built: $built, script: $script, status: $p.status, complete: $p.complete },
+          files: $p.files,
+          player_check: $p.player_check,
+          captures: [ $ARGS.positional[] | split("|") as [$set, $first, $path, $decode]
+                      | ([ $fingerprints[] | select(.path == $path) ] | first) as $f
+                      | { set: $set, first_picture: ($first | tonumber), library_path: $path,
+                          fingerprint: (if $f then { sha256_of_head: $f.sha, head_bytes: $head, bytes: ($f.bytes | tonumber) } else null end),
+                          decode: $decode, video: role("video"; $set), vfs: role("vfs"; $set) } ],
+          tools: ({ "ld-decode": tool("ld-decode"), "decode-orc": tool("decode-orc"), "vfs-verifier": tool("vfs-verifier"), nixpkgs: tool("nixpkgs") }
+                  | .["decode-orc"].patches = [ $patches | split("\n")[] | select(. != "") | split("|") | { name: .[0], sha256: .[1] } ]),
+          selection: $selection,
+          evidence: $evidence[0],
+          video: $video[0],
+          vfs: $vfs[0],
+          stamps: { compare: stamp($stamp_compare), video: stamp($stamp_video), vfs: stamp($stamp_vfs) },
+          checks: { video: checks($check_video), vfs: checks($check_vfs), pack: checks($check_pack) } }' \
+    "${captures[@]}" | yq -P -p=json -o=yaml
+}
+
+# pack_link: point $OUT/pack at the current pack, once it is up to date.
+pack_link() {
+  unit_state pack > /dev/null || return 0
+  describe_pack
+  [ "$(readlink -- "$OUT/pack" 2>/dev/null)" != "${STAGE_DIR##*/}" ] || return 0
+  if [ -e "$OUT/pack" ] && [ ! -L "$OUT/pack" ]; then
+    printf 'pack: %s is not a link, so it is left as it is\n' "$OUT/pack" >&2
+    return 0
+  fi
+  stage_guard "$OUT/pack" && ln -sfn -- "${STAGE_DIR##*/}" "$OUT/pack" \
+    && printf 'pack -> %s, the current pack\n' "${STAGE_DIR##*/}"
+}
+
 verify_tool() {
   local t input pkg cmd problem
   t=$(stage_tool "$1") || return 0
@@ -1864,3 +2192,6 @@ for (( i = FROM_I; i <= UNTIL_I; i++ )); do
   verify_tool "$name"
   run_stage "$name" "${todo[@]}"
 done
+
+# The current pack, once the run has reached it and it is up to date.
+[ "$UNTIL_I" -lt "$(stage_index pack)" ] || pack_link

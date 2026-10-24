@@ -911,7 +911,7 @@ it.
 
 ## Building a VP415e pack
 
-`build-pack.sh <disc>` will take a disc from its captures to the `<stem>.mkv`,
+`build-pack.sh <disc>` takes a disc from its captures to the `<stem>.mkv`,
 `<stem>.dat` and `<stem>.dat.bsm` the [VP415e](https://github.com/Domesday86/vp415e)
 emulator loads. It works stage by stage, and each stage keeps a stamp of its
 inputs, so a re-run with nothing changed does nothing.
@@ -1043,8 +1043,38 @@ inputs, so a re-run with nothing changed does nothing.
     them by copying `vfs.sha256` there after review;
   - **the hand-built image** (`VFS_BASELINE`). Every sector both recovered
     must hold the same bytes.
-- **The later stages arrive phase by phase.** Until they do, a build stops at
-  the first stage not yet written.
+- **Phase 7 is in place:** the `pack` stage and `install-pack.sh`. The stage
+  hard-links the video and vfs stages' outputs into `pack-<key>/`, so nothing
+  is copied, and checks them again as they stand:
+  - the mkv, with the video stage's checks;
+  - the image and its map, against the vfs stage's hashes and the
+    reference, and with `vfs-verifier`.
+
+  Beside them it writes:
+  - `SHA256SUMS`;
+  - `<stem>.provenance.yaml`, which vp415e ignores. It records the captures'
+    fingerprints, the tool revisions, the selection and the evidence behind
+    it, the stacker's weights, the vfs verdict and every stage's checks;
+  - `pack.json` and `check.txt`.
+
+  `pack` on the decodes share links to the current version.
+
+  The last check is a person's, on the player. Until it is recorded, `status`
+  says the pack is awaiting the hand check, and gives its id: the first 16 hex
+  digits of the hash of its three files' `SHA256SUMS` lines. Record the check
+  in `discs/<disc>/player-check.yaml`:
+
+  ```yaml
+  checks:
+    - pack: "298eb83fe340638a"   # the pack's id, in quotes
+      date: 2026-10-25
+      vp415e: <the player's vp415e version>
+      result: pass               # or fail
+      notes: <what was checked>
+  ```
+
+  The next build restamps the same pack as complete. A recorded `fail` fails
+  the stage.
 
 ```sh
 ./build-pack.sh volcanoes status                 # each stage: up to date, or stale and why
@@ -1057,7 +1087,39 @@ inputs, so a re-run with nothing changed does nothing.
 ./build-pack.sh volcanoes --until compare        # ...then the report to decide selection.yaml from
 ./build-pack.sh volcanoes --until video          # ...then, once selection.yaml is written, the stacked mkv
 ./build-pack.sh volcanoes --until vfs            # ...then the stacked, verified VFS image
+./build-pack.sh volcanoes --until pack           # ...then the pack and its provenance (the default)
 ```
+
+### Installing a pack on the player
+
+`install-pack.sh` copies the current pack's three files to the player's media
+directory over ssh. It is never part of the build:
+
+```sh
+./install-pack.sh volcanoes development@vp415e-pi --dry-run   # check both ends, copy nothing
+./install-pack.sh volcanoes development@vp415e-pi             # copy, then check on the player
+./install-pack.sh volcanoes development@vp415e-pi --pack <decodes>/decode-script/volcanoes/pack-<key>
+```
+
+The last line installs another version, such as the previous one.
+
+**Before copying,** it checks:
+- the pack is stamped;
+- the media directory (default `/srv/vp415e/media`) is group `vp415d` and
+  mode `2775`;
+- the ssh user can write to it and is in the group;
+- there is room, and the player has `rsync` and `sha256sum`.
+
+**The copy:**
+- It sends the `.dat` and `.bsm` before the `.mkv`, since the player lists a
+  side by its `.mkv`.
+- It doesn't use `rsync -a`, which would carry the group over from here and
+  defeat the directory's setgid bit (`vp415-selftest` reports that). It then
+  sets group `vp415d` and mode `0644` on all three files explicitly.
+
+**Afterwards,** it checks each file's group and mode, and checks every hash
+on the player against `SHA256SUMS`. It never uses sudo, and it uses the
+system's own `ssh`, with its keys; `rsync` comes from the dev shell.
 
 Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read
 from its decode script's `SETS` table, so there is one list of captures.

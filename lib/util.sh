@@ -19,6 +19,7 @@ sha256_stdin() {
 # symlink, as a reader of the file would.
 file_size() { stat -L -c %s -- "$1" 2>/dev/null || stat -L -f %z -- "$1"; }
 file_dev()  { stat -L -c %d -- "$1" 2>/dev/null || stat -L -f %d -- "$1"; }
+file_ino()  { stat -L -c %i -- "$1" 2>/dev/null || stat -L -f %i -- "$1"; }
 
 # The physical path of a directory that exists.
 phys_dir() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
