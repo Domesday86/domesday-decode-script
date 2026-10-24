@@ -1,0 +1,11 @@
+# Volcanoes: the reference SHA-256 of the stacked VFS image and its bad
+# sector map, recorded once the image passed the bit-perfect test
+# (docs/emulator-pack-plan.md, phase 6). Every later vfs stage must match.
+#
+# Recorded 2026-10-24 from vfs-41ab10c: DS1 DS2 DS4 DS5 DS3 at decode-orc
+# 31d22e6, ld-decode 16dc70f. 332089344 bytes, 162153 EFM sectors; 139918
+# listed bad, all before the filesystem (146) or in free space (139772). The
+# image holds the same bytes as the hand-built one wherever both recovered a
+# sector.
+92b1a0d760a021bb2cd18554454b3aa095db2bb0b6c0227d95b09677cda3af4b  volcanoes_stack.dat
+d992268153abdf2e481469fae53a96cbe8d229be2e0d5c35e73d1b06c708d27b  volcanoes_stack.dat.bsm

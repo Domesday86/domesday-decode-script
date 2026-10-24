@@ -982,6 +982,7 @@ inputs, so a re-run with nothing changed does nothing.
     dropped:
       - set: DS3
         reason: loses 1.7% of its EFM after C2
+    accept: incomplete       # optional: ship even if the filesystem still lacks sectors
   ```
 
   Every set `map.orcprj` maps is either used or dropped with a reason, in
@@ -1017,6 +1018,31 @@ inputs, so a re-run with nothing changed does nothing.
     stage;
   - every picture in `DISC_PICTURES` resolving to exactly one frame;
   - unmapped frames only in the lead-in and lead-out.
+- **Phase 6 is in place:** the `vfs` stage. It stacks the selection's VFS
+  sets' EFM images, best first, with `vfs-stacker` (majority consensus), and
+  checks the result with `vfs-verifier`. It writes, under `vfs-<rev>/`:
+  - `<stem>.dat` and `<stem>.dat.bsm`;
+  - `vfs.sha256`, their hashes;
+  - `vfs.json`: the verdict, each set's contribution, the bad sectors by
+    role and the baseline comparison;
+  - `check.txt`.
+
+  The image must pass the bit-perfect test (the plan, phase 6):
+  1. vfs-stacker's `RESULT` is `GOOD`;
+  2. vfs-verifier passes;
+  3. no sector the filesystem needs comes from one set alone, and no vote was
+     split.
+
+  Bad sectors in free space or before the filesystem don't count. A failing
+  image stops the stage and lists each needed sector still bad, with its
+  object, and which mapped sets' own images recover it. `accept: incomplete`
+  under `vfs` in `selection.yaml` lets it through as `incomplete`.
+
+  The result is also checked against two things:
+  - **the reference hashes** in `discs/<disc>/pack.sha256`. A person records
+    them by copying `vfs.sha256` there after review;
+  - **the hand-built image** (`VFS_BASELINE`). Every sector both recovered
+    must hold the same bytes.
 - **The later stages arrive phase by phase.** Until they do, a build stops at
   the first stage not yet written.
 
@@ -1030,6 +1056,7 @@ inputs, so a re-run with nothing changed does nothing.
 ./build-pack.sh volcanoes --until map            # ...then map and align every set
 ./build-pack.sh volcanoes --until compare        # ...then the report to decide selection.yaml from
 ./build-pack.sh volcanoes --until video          # ...then, once selection.yaml is written, the stacked mkv
+./build-pack.sh volcanoes --until vfs            # ...then the stacked, verified VFS image
 ```
 
 Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read

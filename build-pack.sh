@@ -142,10 +142,23 @@ selected_sets() {
   yq -r ".$1.sets[]" "$SELECTION"
 }
 
+# vfs_accept: what the selection accepts of the VFS stack: "bit-perfect", or
+# "incomplete" when vfs.accept says a pack may ship with sectors the
+# filesystem needs still bad (served by vp415e as MEDIUM ERROR).
+vfs_accept() {
+  local a=""
+  [ ! -f "$SELECTION" ] || a=$(yq -r '.vfs.accept // ""' "$SELECTION" 2>/dev/null)
+  printf '%s\n' "${a:-bit-perfect}"
+}
+
+# The VFS image's reference hash, recorded once the image has passed and been
+# reviewed; every later stack is checked against it.
+VFS_REFERENCE="$DISC_DIR/pack.sha256"
+
 # selection_problems: what is wrong with selection.yaml, one line each, or
 # nothing. Each stack names its sets, best first, from the sets map.orcprj
 # maps, each once, and lists every mapped set it leaves out under dropped,
-# with a reason.
+# with a reason. The VFS stack may also accept an incomplete image.
 selection_problems() {
   local stack
   local -a mapped=()
@@ -163,7 +176,9 @@ selection_problems() {
             ($sets[] | select(. as $s | $dropped | index($s)) | "\($stack) both uses and drops \(.)"),
             ($mapped[] | select(. as $s | ($sets + $dropped) | index($s) | not)
              | "\($stack) neither uses nor drops \(.)"),
-            (.dropped[]? | select((.reason // "") == "") | "\($stack) drops \(.set) without a reason")
+            (.dropped[]? | select((.reason // "") == "") | "\($stack) drops \(.set) without a reason"),
+            (if has("accept") and ($stack != "vfs" or .accept != "incomplete")
+             then "\($stack) accept is \(.accept); only vfs takes one, and only incomplete" else empty end)
         end' "${mapped[@]}"
   done
 }
@@ -366,15 +381,27 @@ describe_video() {
   stage_output check.txt
 }
 
+# The selected VFS sets' EFM images stacked, best first, from the set stages.
+# Only the VFS half of the selection counts: its sets, their order and what it
+# accepts. The reference hash (VFS_REFERENCE) and the hand-built image
+# (VFS_BASELINE) are inputs too, so recording or changing either rechecks the
+# stack. VFS_SETS is left as "<set>|<set stage dir>".
 describe_vfs() {
-  local id ups=()
-  for id in $(selected_sets vfs); do describe_set "$id"; ups+=("$id|$STAGE_DIR"); done
+  local id
+  VFS_SETS=()
+  for id in $(selected_sets vfs); do describe_set "$id"; VFS_SETS+=("$id|$STAGE_DIR"); done
   stage_begin vfs "$OUT/$VFS_DIR"
-  for id in "${ups[@]}"; do stage_input_stamp "set:${id%%|*}" "${id#*|}"; done
-  stage_input_file "selection" "$SELECTION"
+  for id in "${VFS_SETS[@]}"; do stage_input_stamp "set:${id%%|*}" "${id#*|}"; done
+  stage_input "vfs sets" "$(selected_sets vfs | paste -sd' ' -)"
+  stage_input "vfs accepts" "$(vfs_accept)"
   stage_input_tool vfs-verifier
+  stage_input_file "reference" "$VFS_REFERENCE"
+  stage_input "baseline" "${VFS_BASELINE:-none}"
   stage_output "$STEM.dat"
   stage_output "$STEM.dat.bsm"
+  stage_output vfs.sha256
+  stage_output vfs.json
+  stage_output check.txt
 }
 
 # The pack is filed under its own key, so each distinct pack is a version of
@@ -519,7 +546,8 @@ run_stage() {
     compare) run_compare "$@"; return ;;
     select) die "select: decided by hand in ${SELECTION#"$SELF_DIR"/}; there is nothing to build" ;;
     video)  run_video "$@"; return ;;
-    vfs) phase=6 ;; pack) phase=7 ;;
+    vfs)    run_vfs "$@"; return ;;
+    pack)   phase=7 ;;
   esac
   die "$1: not built yet -- this stage arrives in phase $phase of docs/emulator-pack-plan.md"
 }
@@ -1486,6 +1514,313 @@ video_weights() {
                     least_share: ([ $m[].share ] | min) } ],
         sample_grid: [ $shifts[] | { set: $ARGS.positional[.n], from_frame: .from, samples: .lag } ] }' \
     "$@" < "$log"
+}
+
+# --- vfs: the stacked, verified .dat and .bsm ------------------------------
+#
+# vfs-stacker merges the VFS sets' EFM images, best first, with its default
+# majority consensus, and vfs-verifier reads the ADFS filesystem of the
+# result. Neither exits non-zero for a bad image, so both logs are parsed.
+#
+# The image is then given the bit-perfect test (docs/emulator-pack-plan.md,
+# phase 6). Most of a disc's EFM track is free space that no capture
+# recovers, so the test is about what the filesystem depends on:
+#
+# 1. vfs-stacker's RESULT is GOOD: no sector in file data, the filesystem's
+#    metadata or allocated space is still bad;
+# 2. vfs-verifier passes: the filesystem is found and whole, and no bad
+#    sector touches an object;
+# 3. no sector the filesystem depends on rests on one capture, and no sector
+#    at all was decided by a vote the sets split over.
+#
+# An image that fails stops the stage, with the bad sectors, the objects they
+# fall in and which mapped sets recover any of them, unless the selection
+# accepts an incomplete image (vfs.accept). Once an image has passed, its hash
+# goes in VFS_REFERENCE, by hand after review; every later stack must match
+# it. A dry run of vfs-stacker over this image and the hand-built one
+# (VFS_BASELINE) shows whether the two hold the same bytes wherever both
+# recovered a sector.
+
+run_vfs() {
+  local state
+  ( build_vfs ) || die "vfs: failed (above)"
+  state=$(unit_state vfs) || die "vfs: still $state after building"
+  stage_prune "$OUT" vfs stage.stamp
+}
+
+build_vfs() {
+  local dir s id sdir dat="$STEM.building.dat" rc vrc brc=none t
+  local -a images=()
+  describe_vfs
+  dir="$STAGE_DIR"
+
+  stage_mkdir "$dir" || return 1
+  stage_unstamp || return 1
+  rm -f -- "${dir:?}"/*.dat "${dir:?}"/*.dat.* "${dir:?}"/*.txt* "${dir:?}"/*.json* "${dir:?}"/*.sha256* "${dir:?}"/*.log
+  cd -- "$dir" || return 1
+
+  for s in "${VFS_SETS[@]}"; do
+    IFS='|' read -r id sdir <<< "$s"
+    images+=("$(realpath --relative-to="$dir" -- "$sdir/${id,,}_efm.dat")")
+  done
+
+  printf 'vfs: stacking the EFM images of %s\n' "$(selected_sets vfs | paste -sd' ' -)"
+  t=$SECONDS rc=0
+  vfs-stacker --log-file "$dir/vfs-stacker.debug.log" -o "$dat" "${images[@]}" > "$dir/vfs-stacker.txt" 2>&1 || rc=$?
+  printf 'vfs: vfs-stacker exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+  vrc=0
+  if [ -f "$dat" ]; then
+    vfs-verifier "$dat" > "$dir/vfs-verifier.txt" 2>&1 || vrc=$?
+  else
+    : > "$dir/vfs-verifier.txt"
+  fi
+  printf 'vfs: vfs-verifier exited %s\n' "$vrc"
+  : > "$dir/baseline.txt"
+  if [ -n "${VFS_BASELINE:-}" ] && [ -f "$DD_DECODES/$VFS_BASELINE" ] && [ -f "$dat" ]; then
+    brc=0
+    vfs-stacker --dry-run "$dat" "$(realpath --relative-to="$dir" -- "$DD_DECODES/$VFS_BASELINE")" > "$dir/baseline.txt" 2>&1 || brc=$?
+    printf 'vfs: compared with the hand-built image (exit %s)\n' "$brc"
+  fi
+
+  if ! check_vfs "$dir" "$rc" "$vrc" "$brc" "$dat"; then
+    cat -- "$dir/check.failed.txt" >&2
+    printf 'vfs: failed its checks and is not stamped (see %s/check.failed.txt)\n' "$dir" >&2
+    return 1
+  fi
+  mv -- "$dir/$dat.bsm" "$(stage_tmp "$STEM.dat.bsm")"
+  mv -- "$dir/$dat" "$(stage_tmp "$STEM.dat")"
+  cat -- "$dir/check.txt.partial"
+  stage_commit || { printf 'vfs: could not stamp the stage\n' >&2; return 1; }
+  printf 'vfs: checked and stamped: %s/%s.dat\n' "$dir" "$STEM"
+}
+
+# check_vfs <dir> <vfs-stacker exit> <vfs-verifier exit> <baseline exit|none> <image>:
+# run the checks, write check.txt, vfs.json and vfs.sha256 to their stage_tmp
+# names, and return non-zero if any failed.
+check_vfs() {
+  local dir="$1" rc="$2" vrc="$3" brc="$4" dat="$1/$5" out fails=0 level text accept hash bsmhash size
+  local -a sets=() mapped=()
+  out=$(stage_tmp check.txt) || return 1
+  ok()   { printf 'ok    %s\n' "$*"; }
+  fail() { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
+  note() { printf 'note  %s\n' "$*"; }
+  mapfile -t sets < <(selected_sets vfs)
+  accept=$(vfs_accept)
+
+  {
+    printf 'stage:   vfs\nsets:    %s\naccepts: %s\nchecked: %s\n\n' "${sets[*]}" "$accept" "$(date '+%F %T')"
+
+    if [ "$rc" = 0 ] && [ -s "$dat" ] && [ -f "$dat.bsm" ] && grep -q '^\[info\] Wrote ' "$dir/vfs-stacker.txt"; then
+      ok "vfs-stacker wrote the image and its bad sector map"
+    else
+      fail "vfs-stacker exited $rc without writing the image ($(grep -v '^\[info\]' "$dir/vfs-stacker.txt" | tail -3 | tr '\n' ' '))"
+    fi
+    if [ "$vrc" = 0 ] && grep -q 'Verification \(passed\|failed\)' "$dir/vfs-verifier.txt"; then
+      ok "vfs-verifier read the image"
+    else
+      fail "vfs-verifier exited $vrc without a verdict ($(grep -v '^\[info\]' "$dir/vfs-verifier.txt" | tail -3 | tr '\n' ' '))"
+    fi
+
+    if [ -s "$dat" ]; then
+      size=$(stat -c %s -- "$dat" 2>/dev/null || stat -f %z -- "$dat")
+      hash=$(sha256_stdin < "$dat")
+      bsmhash=$(sha256_stdin < "$dat.bsm")
+    fi
+    mapfile -t mapped < <(map_sets)
+    vfs_digest "$dir/vfs-stacker.txt" "$dir/vfs-stacker.debug.log" "$dir/vfs-verifier.txt" "$dir/baseline.txt" \
+               "$dat.bsm" "${size:-0}" "${hash:-}" "${bsmhash:-}" "${sets[@]}" > "$dir/digest.json" \
+      || fail "could not read the vfs-stacker and vfs-verifier logs"
+
+    # The image itself.
+    while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(jq -r '
+      def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
+      .image as $i | .stack as $s
+      | check($i.size == ($s.output_sectors // -1) * 2048; "the image is \($s.output_sectors) EFM sectors (\($i.size) bytes)";
+              "the image is \($i.size) bytes, not \($s.output_sectors) EFM sectors"),
+        check($i.bsm_malformed == 0 and $i.bsm_sectors == ($s.bad // -1);
+              "the bad sector map parses: \($i.bsm_sectors) sectors, as vfs-stacker reports";
+              "the bad sector map has \($i.bsm_malformed) malformed line(s) and \($i.bsm_sectors) sectors, against \($s.bad) reported"),
+        (if $s.padded > 0 then "note\t\($s.padded) sector(s) at the end are padding to the disc length: no set reached them" else empty end)' "$dir/digest.json")
+
+    # The bit-perfect test. With the selection accepting an incomplete image,
+    # its failures are reported but do not stop the stage.
+    while IFS=$'\t' read -r level text; do
+      [ "$level" != fail ] || [ "$accept" != incomplete ] || level=note
+      "$level" "$text"
+    done < <(jq -r '
+      def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
+      .stack as $s | .verify as $v
+      | check($s.result.verdict == "GOOD"; "1. vfs-stacker: GOOD, every sector the filesystem depends on was recovered";
+              "1. vfs-stacker: \($s.result.verdict // "no result"): \($s.result.text // "see vfs-stacker.txt")"),
+        check($v.passed and $v.located and ($v.roles.allocated_unlisted // 1) == 0 and $v.truncated == false;
+              "2. vfs-verifier: passed; the filesystem is located and whole, and all \($v.objects) object(s) are free of bad sectors";
+              "2. vfs-verifier: \(if $v.passed then "passed" else "failed" end); located \($v.located), free space map \($v.fsm), root directory \($v.directory), \($v.objects_damaged) object(s) damaged, \($v.roles.allocated_unlisted) bad sector(s) in allocated space no object lists\(if $v.truncated then ", truncated" else "" end)"),
+        check(($s.vital_only == 0) and $s.majority == 0 and $s.split == 0 and $s.contested == 0 and $s.disagreements == 0;
+              "3. no sector the filesystem depends on rests on one set, and no vote was split";
+              "3. \($s.vital_only) sector(s) the filesystem depends on rest on one set; \($s.majority) majority vote(s), \($s.split) split, \($s.contested) contested consensus, \($s.disagreements) sector(s) the sets disagree on"),
+        "note\tbad sectors by role: \($s.roles | to_entries | map("\(.key | gsub("_"; " ")) \(.value)") | join(", "))",
+        "note\trecovered: \($s.unanimous) by agreement, \($s.consensus) by consensus (\($s.consensus_two) on two sets); stacking gained \($s.recovered_over_best // 0) over the best set alone (\($s.best_single.set // "?"), whose image is \($s.best_single.bad // "?") bad)",
+        (.sets[] | select(.only_good > 0) | "note\t\(.set) alone recovered \(.only_good) sector(s), \(.vital_only) of them needed by the filesystem"),
+        (if $v.fill_unflagged > 0 then "note\t\($v.fill_unflagged) recovered sector(s) within objects are blank fill: blank on the disc, or lost without the decoder noticing, which vfs-verifier cannot tell apart" else empty end),
+        (if $v.unaccounted > 0 then "note\t\($v.unaccounted) used sector(s) belong to no object in the root directory (allocation slack, or subdirectories, which vfs-verifier does not descend)" else empty end),
+        (if $v.displaced > 0 then "fail\t\($v.displaced) free extent(s) disagree with the content: a run of sectors may have been lost or duplicated" else empty end)' "$dir/digest.json")
+
+    # What is still bad, for deciding what to do (phase 6, step 4).
+    if [ "$(jq '.stack.vital | length' "$dir/digest.json" 2>/dev/null || echo 0)" != 0 ]; then
+      vfs_coverage "$dir/digest.json" "${mapped[@]}" > "$dir/coverage.json" || fail "could not work out which sets cover the bad sectors"
+      while IFS= read -r text; do note "$text"; done < <(jq -r '
+        "still bad, and needed by the filesystem:", (.runs[] | "  \(.text)"),
+        (.sets[] | "  \(.set)\(if .in_stack then "" else " (not in the stack)" end): reaches \(.reaches), recovers \(.recovers) of them")' "$dir/coverage.json")
+    fi
+
+    # The reference, once recorded.
+    printf '%s  %s\n%s  %s\n' "${hash:-}" "$STEM.dat" "${bsmhash:-}" "$STEM.dat.bsm" > "$(stage_tmp vfs.sha256)"
+    if [ -f "$VFS_REFERENCE" ]; then
+      if diff -q <(grep -v '^#' "$VFS_REFERENCE") "$dir/vfs.sha256.partial" > /dev/null; then
+        ok "the image and its map match the reference, ${VFS_REFERENCE#"$SELF_DIR"/}"
+      else
+        fail "the image or its map differs from the reference, ${VFS_REFERENCE#"$SELF_DIR"/}; if the change is expected, record it: cp $dir/vfs.sha256 ${VFS_REFERENCE#"$SELF_DIR"/}"
+      fi
+    else
+      note "no reference yet; once this image is reviewed, record it: cp $dir/vfs.sha256 ${VFS_REFERENCE#"$SELF_DIR"/}"
+    fi
+
+    # The hand-built image, for comparison. Sectors both recovered must hold
+    # the same bytes; otherwise there is a pipeline bug or a pressing
+    # difference to explain before the pack ships. Lacking more than it does
+    # of what the filesystem needs fails too, unless an incomplete image is
+    # accepted.
+    if [ "$brc" = none ]; then
+      note "no baseline to compare with${VFS_BASELINE:+ ($VFS_BASELINE not found)}"
+    else
+      while IFS=$'\t' read -r level text; do
+        [ "$level" != lacks ] || { [ "$accept" = incomplete ] && level=note || level=fail; }
+        "$level" "$text"
+      done < <(jq -r --arg path "$VFS_BASELINE" '
+        .baseline as $b
+        | if $b.compared == null then "fail\tvfs-stacker could not compare this image with \($path) (baseline.txt)" else
+            (if $b.disagreed == 0 then "ok\tthis image and \($path) hold the same bytes in all \($b.compared) sector(s) both recovered"
+             else "fail\tthis image and \($path) differ in \($b.disagreed) of the \($b.compared) sector(s) both recovered (a pipeline bug or a pressing difference; see baseline.txt)" end),
+            (if $b.ours.vital_bad > $b.theirs.vital_bad then "lacks\tthis image lacks \($b.ours.vital_bad) sector(s) the filesystem needs, the baseline \($b.theirs.vital_bad)"
+             else "ok\tthis image lacks no more of what the filesystem needs than the baseline (\($b.ours.vital_bad) against \($b.theirs.vital_bad))" end),
+            "note\tbad sectors: \($b.ours.bad) here, \($b.theirs.bad) in the baseline; \($b.ours.only_good) recovered only here, \($b.theirs.only_good) only there"
+          end' "$dir/digest.json")
+    fi
+
+    jq --arg accept "$accept" '
+      { sets, accept: $accept, image, stack, verify, baseline,
+        bit_perfect: (.stack.result.verdict == "GOOD" and .verify.passed and .stack.vital_only == 0
+                      and .stack.majority == 0 and .stack.split == 0 and .stack.contested == 0 and .stack.disagreements == 0) }
+      | .verdict = (if .bit_perfect then "bit-perfect" else "incomplete" end)' "$dir/digest.json" > "$(stage_tmp vfs.json)" \
+      || fail "could not write vfs.json"
+    [ "$fails" != 0 ] || note "verdict: $(jq -r .verdict "$dir/vfs.json.partial")"
+
+    printf '\nresult: %s\n' "$([ "$fails" = 0 ] && echo pass || echo "FAIL ($fails)")"
+  } > "$out"
+
+  if [ "$fails" != 0 ]; then
+    mv -- "$out" "$dir/check.failed.txt"
+    return 1
+  fi
+  rm -f -- "$dir/check.failed.txt"
+}
+
+# vfs_digest <vfs-stacker log> <its debug log> <vfs-verifier log> <baseline log>
+#            <bsm> <size> <sha256> <bsm sha256> <set>...: what the logs say,
+# as JSON. Neither tool reports anything but text, so the lines are parsed
+# here; vfs-stacker's sources are the sets in the order given, and in the
+# baseline's dry run this image is source 1 and the baseline source 2. The
+# stacker lists at most 20 runs of still-bad sectors at info level, so the
+# vital ones are read from its debug log, which has them all.
+vfs_digest() {
+  local stack="$1" debug="$2" verify="$3" base="$4" bsm="$5" size="$6" hash="$7" bsmhash="$8"; shift 8
+  jq -n --args --rawfile stack "$stack" --rawfile debug "$debug" --rawfile verify "$verify" --rawfile base "$base" \
+        --argjson size "$size" --arg hash "$hash" --arg bsmhash "$bsmhash" \
+        --argjson bsm "$(awk '/^[[:space:]]*$/ { next } /^[[:space:]]*[0-9]+[[:space:]]*$/ { n++; next } { m++ }
+                               END { printf "{\"sectors\": %d, \"malformed\": %d}", n, m }' "$bsm" 2>/dev/null || echo '{"sectors": 0, "malformed": -1}')" '
+    def lines($t): $t | split("\n") | map(sub("^\\[[a-z]+\\] "; ""));
+    def first($l; re): [ $l[] | capture(re)? ] | .[0] // null;
+    def num($l; re): first($l; re) | if . == null then null else .n | tonumber end;
+    def contribution($l): [ $l[] | capture("^    (?<image>[^ ]+) +(?<used>[0-9]+) +(?<only_good>[0-9]+) +(?<vital_only>[0-9]+) +(?<vital_bad>[0-9]+)$")?
+                            | del(.image) | map_values(tonumber) ];
+    def sources($l): [ $l[] | capture("^    (?<image>[^ ]+) +(?<sectors>[0-9]+) +[0-9.]+ MB +(?<bad>[0-9]+) +[0-9.]+%$")?
+                       | .sectors |= tonumber | .bad |= tonumber ];
+    def role($l; $what): num($l; "^  \($what) +: (?<n>[0-9]+)");
+    lines($stack) as $s | lines($debug) as $d | lines($verify) as $v | lines($base) as $b
+    | sources($s) as $src | contribution($s) as $con
+    | ($d | index(["Sectors the filesystem depends on that are still bad:"])) as $at
+    | { sets: [ $ARGS.positional | to_entries[] | { set: .value } + ($src[.key] // {} | del(.image)) + ($con[.key] // {}) ],
+        image: { size: $size, sha256: $hash, bsm_sha256: $bsmhash, bsm_sectors: $bsm.sectors, bsm_malformed: $bsm.malformed },
+        stack: ({ result: first($s; "RESULT: (?<verdict>[A-Z]+) - (?<text>.*)$"),
+                  output_sectors: num($s; "^  Output holds (?<n>[0-9]+) EFM"),
+                  unanimous: num($s; "^  Recovered by agreement +: (?<n>[0-9]+)"),
+                  majority: (num($s; "^  Recovered by majority vote +: (?<n>[0-9]+)") // 0),
+                  split: (num($s; "^  Recovered but split +: (?<n>[0-9]+)") // 0),
+                  consensus: (num($s; "^  Recovered by consensus +: (?<n>[0-9]+)") // 0),
+                  consensus_two: (num($s; "^    Accepted on two sources +: (?<n>[0-9]+)") // 0),
+                  contested: (num($s; "^    Contested +: (?<n>[0-9]+)") // 0),
+                  unrecovered: num($s; "^  Still bad in every source +: (?<n>[0-9]+)"),
+                  padded: (num($s; "^  Padding at the end +: (?<n>[0-9]+)") // 0),
+                  disagreements: (num($s; "^Source disagreement \\((?<n>[0-9]+) sector") // 0),
+                  recovered_over_best: num($s; "^  Stacking recovered (?<n>[0-9]+) EFM sector"),
+                  best_single: (first($s; "^  Best single source  : (?<image>.+) with (?<n>[0-9]+) bad") as $best
+                                | if $best == null then null else
+                                    { set: ([ $src | to_entries[] | select(.value.image == $best.image) | $ARGS.positional[.key] ] | .[0]),
+                                      bad: ($best.n | tonumber) } end),
+                  vital_only: ([ $con[].vital_only ] | add // 0),
+                  roles: { file_data: role($s; "Within file data"), metadata: role($s; "Filesystem metadata"),
+                           allocated_unlisted: role($s; "Allocated, not in any object"),
+                           before_filesystem: num($s; "^  Before the filesystem +: (?<n>[0-9]+) \\(harmless\\)"),
+                           free_space: num($s; "^  Free space +: (?<n>[0-9]+) \\(harmless\\)"),
+                           past_end: num($s; "^  Past the end of the image +: (?<n>[0-9]+) \\(harmless\\)") },
+                  vital: (if $at == null then [] else
+                            $d[$at + 1:] | (map(test("^    [0-9]")) | index(false) // length) as $n | .[:$n]
+                            | map(capture("^    (?<from>[0-9]+)(-(?<to>[0-9]+) \\([^)]*\\))?(?<where>.*)$")
+                                  | { from: (.from | tonumber), to: ((.to // .from) | tonumber), where: (.where | sub("^ (in |- )"; "")) }) end) }
+                | .bad = ((.unrecovered // 0) + .padded)),
+        verify: { passed: any($v[]; test("Verification passed")),
+                  located: any($v[]; test("Located by validated")),
+                  fsm: (first($v; "Free space map \\(sectors 0-1\\) : (?<s>.*)$") | .s? // null),
+                  directory: (first($v; "Root directory \\(sectors 2-6\\) : (?<s>.*)$") | .s? // null),
+                  metadata_bad: any($v[]; test("Metadata occupies .* listed as BAD")),
+                  truncated: any($v[]; test("Image is TRUNCATED")),
+                  objects: ((num($v; "^  All (?<n>[0-9]+) object\\(s\\) are free") // num($v; "^  [0-9]+ of (?<n>[0-9]+) object\\(s\\) are affected")) // 0),
+                  objects_damaged: (num($v; "^  (?<n>[0-9]+) of [0-9]+ object\\(s\\) are affected") // 0),
+                  fill_unflagged: (num($v; "^  (?<n>[0-9]+) fill sector\\(s\\) are not accounted") // 0),
+                  displaced: (num($v; "^  (?<n>[0-9]+) of [0-9]+ free extent\\(s\\) disagree") // 0),
+                  unaccounted: (num($v; "^  Unaccounted +: (?<n>[0-9]+) sector") // 0),
+                  roles: { file_data: role($v; "Within file data"), metadata: role($v; "Filesystem metadata"),
+                           allocated_unlisted: role($v; "Allocated, not in any object"),
+                           before_filesystem: role($v; "Before the filesystem"),
+                           free_space: num($v; "^  Free space \\(harmless\\) +: (?<n>[0-9]+)"),
+                           past_end: role($v; "Past the end of the image") } },
+        baseline: (sources($b) as $bs | contribution($b) as $bc
+                   | first($b; "^    1 vs 2 +(?<compared>[0-9]+) +(?<disagreed>[0-9]+) ") as $pair
+                   | { compared: ($pair.compared? | if . == null then null else tonumber end),
+                       disagreed: ($pair.disagreed? | if . == null then null else tonumber end),
+                       ours: (($bs[0] // {}) + ($bc[0] // {}) | del(.image)),
+                       theirs: (($bs[1] // {}) + ($bc[1] // {}) | del(.image)) }) }' "$@"
+}
+
+# vfs_coverage <digest.json> <set>...: for the sectors the filesystem needs
+# that the stack still lacks, how many each mapped set's own image reaches
+# and recovers. A set outside the stack that recovers some is worth adding.
+vfs_coverage() {
+  local digest="$1" id img sectors
+  local -a rows=()
+  for id; do
+    img="$OUT/$ORC_DIR/sets/$id/${id,,}_efm.dat"
+    [ -f "$img" ] || continue
+    sectors=$(( $(stat -L -c %s -- "$img" 2>/dev/null || stat -L -f %z -- "$img") / 2048 ))
+    rows+=("$(jq -r '.stack.vital[] | "\(.from) \(.to)"' "$digest" | awk -v n="$sectors" -v id="$id" '
+      FNR == NR { bad[$1 + 0] = 1; next }
+      { for (s = $1 + 0; s <= $2 + 0; s++) if (s < n) { r++; if (!(s in bad)) g++ } }
+      END { printf "{\"set\": \"%s\", \"reaches\": %d, \"recovers\": %d}\n", id, r, g }' "$img.bsm" -)")
+  done
+  printf '%s\n' "${rows[@]}" | jq -s --slurpfile d "$digest" '
+    ($d[0].sets | map(.set)) as $stack
+    | { runs: [ $d[0].stack.vital[] | { text: "\(if .from == .to then "\(.from)" else "\(.from)-\(.to)" end) \(.where)" } ],
+        sets: map(. + { in_stack: (.set as $s | $stack | index($s) != null) }) }'
 }
 
 verify_tool() {

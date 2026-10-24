@@ -1,8 +1,8 @@
 # Plan: from captures to a VP415e disc pack
 
-Status: **phases 0–5 are built, and `selection.yaml` is decided.
-Phases 6–8 are not built.** Volcanoes is the pilot
-disc; the other discs follow once the process is proven on it.
+Status: **phases 0–6 are built, and `selection.yaml` is decided.
+Phases 7–8 are not built.** Volcanoes is the pilot disc; the other discs
+follow once the process is proven on it.
 
 ## Goal
 
@@ -197,9 +197,18 @@ coded size is still 720×576.
 No tool compares the image with a known-good one, so the pipeline has to
 define **bit-perfect** for itself. An image counts as bit-perfect when:
 
-1. vfs-stacker reports `GOOD` and the stacked `.bsm` is empty;
-2. vfs-verifier finds no bad or unaccounted-for sectors;
-3. no sector was taken from a single capture, and none was left contested.
+1. vfs-stacker reports `GOOD`: no sector in file data, the filesystem's
+   metadata or allocated space is still bad;
+2. vfs-verifier passes: the filesystem is located and whole, no object holds
+   a bad sector, and no bad sector lies in allocated space that no object
+   lists;
+3. no sector the filesystem depends on was taken from a single capture, and
+   no sector at all was decided by a majority, a split vote or a contested
+   consensus.
+
+The `.bsm` is not empty, and cannot be. Most of an AIV disc's EFM track is
+free space that no capture recovers (86% of Volcanoes), so the test is about
+what the filesystem needs, not every sector (phase 6, as built).
 
 Once an image passes, its SHA-256 is recorded in the repo as the reference
 for later runs.
@@ -1120,6 +1129,92 @@ nothing.
   explained before the pack ships.
 
 **Exit criteria:** a `.dat`/`.bsm` pair with a recorded verdict and hash.
+
+**As built.** The exit criterion is met: Volcanoes' image is bit-perfect, and
+its hash is recorded in `discs/volcanoes/pack.sha256`.
+
+- **The stage** stacks the selection's VFS sets, best first, with
+  `vfs-stacker -o` and its default majority consensus. It then runs
+  `vfs-verifier` on the result, and `vfs-stacker --dry-run` over the result
+  and the hand-built image (`VFS_BASELINE` in `disc.conf`). Neither tool
+  exits non-zero for a bad image, so all three logs are parsed. The stacker
+  also writes a debug log, which is where it lists every still-bad run past
+  the first 20.
+- **The bit-perfect test** is the one above, revised. As first written it
+  asked for an empty `.bsm` and for no sector taken from a single capture.
+  Neither can hold on these discs:
+  - 139,918 of Volcanoes' 162,153 EFM sectors are bad in every capture: 146
+    before the filesystem and 139,772 in free space;
+  - one free-space sector was recovered only by DS3.
+
+  So the test asks only about the sectors the filesystem needs. It is checked
+  as three lines in `check.txt`.
+- **A failing image** stops the stage. It is not stamped, and `check.txt`
+  lists:
+  - each needed sector still bad, with the object it falls in;
+  - for every mapped set, including any left out of the VFS stack, how many
+    of those sectors its own image reaches and recovers.
+
+  If the losses are to be accepted (step 4), `vfs.accept: incomplete` in
+  `selection.yaml` turns the test's failures into notes. The verdict is then
+  `incomplete`. No other key is needed: the other options change the
+  captures, the decodes or the set projects, which are already stage inputs.
+- **The reference.** The stage writes `vfs.sha256`, the hashes of the `.dat`
+  and the `.bsm`, in `sha256sum` form. Once an image has been reviewed, a
+  person copies that file to `discs/<disc>/pack.sha256` and commits it; the
+  stage never writes to the repo. From then on a stack that differs fails, and
+  the message gives the command to record the new hashes if the change is
+  expected. The reference is a stage input, so recording it rechecks the
+  stack once.
+- **The stamp** covers:
+  - the set stamps of the VFS sets;
+  - the VFS sets and their order, and what the selection accepts (only the
+    VFS half of the selection, so reordering the video sets does not
+    restack);
+  - vfs-verifier's rev;
+  - the reference;
+  - the baseline's path.
+- **Outputs:**
+  - `volcanoes_stack.dat` and `volcanoes_stack.dat.bsm`;
+  - `vfs.sha256`;
+  - `vfs.json`: the verdict, each set's sectors, bad sectors and
+    contribution, the stack's figures, the bad sectors by role, the verifier's
+    findings and the baseline comparison;
+  - `check.txt`.
+
+  The three logs, the debug log and `digest.json` are kept beside them,
+  unstamped. Once `vfs` is stamped, old `vfs-<rev>` versions are pruned to
+  two.
+- **The run** takes about 15 s: the images are 317 MB each. A rerun does
+  nothing.
+- **The result** is bit-perfect:
+  - `GOOD`. The filesystem is located by its validated "Hugo" signature,
+    with the free space map checksums correct and the root directory
+    consistent, and all 21 objects are free of bad sectors.
+  - 22,235 sectors were recovered by agreement and none by consensus. No
+    vote was split, and the sets never disagree.
+  - Stacking gained 3 sectors over DS1 alone, all in free space.
+  - DS4 is missing 4 of the sectors the filesystem needs, which the other
+    sets supply.
+- **Against the hand-built image**, the two hold the same bytes in all
+  22,235 sectors that both recovered, and neither lacks a sector the
+  filesystem needs.
+  - The only byte difference is the last sector, 162152, in free space. The
+    rev8 EFM images stop one sector short of the disc length the filesystem
+    gives, so the stacker pads it, empty and listed bad. The hand-built
+    sources reached it, and two of them agreed on its content.
+  - So this image lists 139,918 bad sectors, one more than the hand-built
+    image's 139,917. The plan's "no more bad sectors than the hand-built
+    image" is therefore checked as no more of the sectors the filesystem
+    needs; the totals are only noted.
+- **Two notes from `vfs-verifier`, both also true of the hand-built image:**
+  - 12,495 sectors within objects hold blank fill but are not in the `.bsm`.
+    Of these, 12,398 are in `DATA2`, 41% of it. vfs-verifier cannot tell
+    blank on the disc from lost unnoticed. Wherever two sets recovered the
+    same one they agree, so most likely they are blank on the disc.
+  - 309 used sectors belong to no object in the root directory. These are
+    allocation slack, or objects in subdirectories, which vfs-verifier does
+    not descend into.
 
 ### Phase 7: Pack assembly
 
