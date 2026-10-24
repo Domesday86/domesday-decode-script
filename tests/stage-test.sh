@@ -87,6 +87,9 @@ stage_begin "broken" "$T/broken"; stage_output never.txt
 t=$(stage_tmp other.txt) && printf 'x\n' > "$t"
 refuses "a commit without its outputs fails" stage_commit
 check "and leaves no stamp" [ ! -e "$T/broken/stage.stamp" ]
+stage_begin "unstamped" "$T/unstamped"; stage_output out.txt
+mkdir -p "$T/unstamped"; printf 'x\n' > "$T/unstamped/out.txt"
+s=$(stage_state); check "outputs with no stamp are stale, and say so: $s" [ "${s#stale: not stamped}" != "$s" ]
 
 # shellcheck disable=SC2016 # expanded by the inner shell
 refuses "a stage outside the share cannot commit" bash -c '. "$0/lib/shares.sh"; . "$0/lib/stage.sh"; shares_load; stage_begin x /tmp/stage-test-x; stage_commit' "$ROOT"

@@ -1,6 +1,6 @@
 # Plan: from captures to a VP415e disc pack
 
-Status: **phase 0 is built; phases 1–8 are not.** Volcanoes is the pilot
+Status: **phases 0 and 1 are built. Phases 2–8 are not.** Volcanoes is the pilot
 disc; the other discs follow once the process is proven on it.
 
 ## Goal
@@ -497,6 +497,73 @@ to `decode-script/volcanoes/<DS>/ld-decode-16dc70f/`. It changes as follows:
 
 **Exit criteria:** five decodes, and a re-run that does nothing and finishes in
 seconds.
+
+**As built.** Both exit criteria are met.
+- **The five full decodes** were made on 2026-10-23 on this Mac, an M4, by
+  `build-pack.sh volcanoes --until decode`. Two ran at a time with four
+  workers each, at 12.5–13 FPS each (18.6 FPS for DS5, which ran alone). The
+  whole run took 3 h 5 min.
+- **Every set passed its checks:**
+  - 54,003–54,005 frames;
+  - `STANDARD_STABLE_UNLOCKED`, which decode-orc accepts;
+  - EFM t-values on all of the roughly 7,000 frames from picture #47000.
+- **Sizes:** each set is 76.6 GB of CVBS, 2.0 GB of EFM and 622 MB of WAV.
+  The five come to 369 GB.
+- **A re-run** finds all five up to date and finishes in about 5 s, most of it
+  entering the dev shell.
+- **VBI picture numbers.** The ld-decode log shows 25–45 frames per set whose
+  picture does not follow the one before it. They are single-frame VBI
+  misreads (DS3 reads #49821 as #69486) and small skips and repeats. The
+  Disc Mapper deals with these in phase 3. `check.txt` counts them, and
+  reports the first and last frames' pictures rather than the smallest and
+  largest.
+
+Where the build settles something the text above left open:
+
+- **Shared description.** `lib/decode.sh` describes a decode stage for both
+  `decode-volcanoes.sh`, which builds and stamps it, and `build-pack.sh`, which
+  asks whether it is up to date. The flags come from one `DECODE_FLAGS=(…)`
+  line in the decode script, which `build-pack.sh` reads as it reads `SETS`.
+  The stamp's inputs are the source line, the ld-decode rev, `start`, `frames`
+  and `flags`. Threads and jobs are left out, since they change only the
+  speed.
+- **The start.**
+  - The stamp records the start ld-decode was given.
+  - `build-pack.sh` reads that start from the `.start` cache beside the
+    decode. The cache line now ends in `target=<first picture>` and is used
+    only for the same lead-in and picture.
+  - A cache from before this change is re-resolved once.
+- **The decode stage in `build-pack.sh`.** It runs the decode script on the
+  stale sets, using `discs/<disc>/disc.conf`'s `DECODE_JOBS=2` and
+  `DECODE_THREADS=4`. A forced set (`--force decode:DS3`) is passed on with
+  `--force`.
+- **Unstamped outputs.** `stage_state` now reports outputs that have no stamp
+  as `stale: not stamped (…)` rather than `never built`. The decode script
+  refuses such a decode without `--force`, or checks and stamps it with
+  `--adopt`. There were no decodes under `decode-script/volcanoes/` to adopt:
+  the hand-built project's decodes are `ld-decode-2454ee6`, on a Linux path.
+- **The checks** are written to `check.txt`, which is a stage output:
+  - **Frame count.** A whole side must be 54,000 pictures plus the lead-in
+    kept, within 1%. A `--frames N` decode may come out up to
+    `(opens − start) + 1` short, because `--length` counts from the start
+    ld-decode is given, not from where its writer opens.
+  - **decode-orc's view** comes from a one-source project, built with
+    `orc-cli -i PAL_CVBS_Source=… --export-project` in `.work` and listed with
+    `nodes list --json`.
+  - **Picture numbers** are taken from ld-decode's log, which names the CAV
+    picture on every frame it writes.
+- **EFM.**
+  - The front end writes t-values on every frame, including the ones before
+    picture #47000 that have no EFM data. A t-value check therefore proves
+    little.
+  - The share of t-values in T3–T11 doesn't separate them cleanly either: about
+    63% before the data against 83% within it, on DS4.
+  - So phase 1 checks only that the span has t-values, as written. Phase 2's
+    EFM sink is the real test.
+- **Audio.** rev8 writes analogue audio as a sidecar beside the decode,
+  `<stem>_audio_0.wav` ("Analogue stereo" in `.meta`), and also writes
+  `<stem>.dropouts.meta`. Neither is a stamped output. `check.txt` records the
+  audio sidecar.
 
 ### Phase 2: Per-set EFM and quality
 

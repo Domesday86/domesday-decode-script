@@ -30,6 +30,8 @@ SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/lib/shares.sh"
 # shellcheck source=lib/stage.sh
 . "$SELF_DIR/lib/stage.sh"
+# shellcheck source=lib/decode.sh
+. "$SELF_DIR/lib/decode.sh"
 
 STAGES=(decode set map select video vfs pack)
 
@@ -112,6 +114,12 @@ while IFS= read -r line; do
 done < <(sed -n '/^SETS=(/,/^)/p' "$SELF_DIR/$DISC_SCRIPT" | sed -n 's/^  "\(.*\)"$/\1/p')
 [ "${#SETS[@]}" -gt 0 ] || die "no SETS table found in $DISC_SCRIPT"
 
+# And its ld-decode flags, which are part of every decode's stamp. The decode
+# script always writes CVBS here.
+DECODE_FLAGS=$(sed -n 's/^DECODE_FLAGS=(\(.*\))$/\1/p' "$SELF_DIR/$DISC_SCRIPT")
+[ -n "$DECODE_FLAGS" ] || die "no DECODE_FLAGS line found in $DISC_SCRIPT"
+DECODE_FLAGS="$DECODE_FLAGS --cvbs"
+
 set_ids()   { local s; for s in "${SETS[@]}"; do printf '%s\n' "${s%%|*}"; done; }
 set_field() { # set_field <set> <1|2|3>
   local s
@@ -162,21 +170,21 @@ stage_tool() {
 # outputs. It decides nothing and writes nothing, so status can describe every
 # stage without running any.
 
+# A decode is described exactly as the decode script stamps it
+# (lib/decode.sh). Its start is the one cached beside it for this lead-in and
+# first picture; with none cached, the decode script has to resolve it, and
+# the decode cannot be up to date.
 describe_decode() {
-  local id="$1" rel base
+  local id="$1" rel base dir report start
   rel=$(set_field "$id" 3)
-  base="${rel##*/}"; base="${base%.ldf}"; base="${base// /-}"
-  stage_begin "decode:$id" "$OUT/$id/$LDD_DIR"
-  stage_input_source "$rel"
-  stage_input_tool ld-decode
-  stage_input "first picture" "$(set_field "$id" 2)"
-  stage_input "lead-in" "$DECODE_LEAD_IN"
-  stage_input "frames" "$DECODE_FRAMES"
-  stage_input "flags" "--pal --cvbs --V4300D_coherent_subtract"
-  stage_output "$base.cvbs"
-  stage_output "$base.meta"
-  stage_output "$base.efm"
-  stage_output "$base.efm.meta"
+  base=$(decode_base "$rel")
+  dir="$OUT/$id/$LDD_DIR"
+  if report=$(decode_cached_start "$dir/$base.start" "$DECODE_LEAD_IN" "$(set_field "$id" 2)"); then
+    start=$(decode_report_field "$report" start) || start="unresolved"
+  else
+    start="unresolved"
+  fi
+  decode_describe "$id" "$dir" "$base" "$rel" "$start" "$DECODE_FRAMES" "$DECODE_FLAGS"
 }
 
 describe_set() {
@@ -339,15 +347,42 @@ fi
 
 # --- build -----------------------------------------------------------------
 
-# The stages are written phase by phase (docs/emulator-pack-plan.md). Until a
-# stage's phase lands, reaching it stale stops the run here.
-run_unit() {
-  local unit="$1" phase
-  case "${unit%%:*}" in
-    decode) phase=1 ;; set) phase=2 ;; map) phase=3 ;; select) phase=4 ;;
-    video)  phase=5 ;; vfs) phase=6 ;; pack) phase=7 ;;
+# Each stage is built from the units that are stale (or forced), all at once,
+# so that a stage can run them side by side. The stages after decode are
+# written phase by phase (docs/emulator-pack-plan.md); until a stage's phase
+# lands, reaching it stale stops the run there.
+run_stage() {
+  local name="$1" phase; shift
+  case "$name" in
+    decode) run_decode "$@"; return ;;
+    set) phase=2 ;; map) phase=3 ;; select) phase=4 ;;
+    video) phase=5 ;; vfs) phase=6 ;; pack) phase=7 ;;
   esac
-  die "$unit: not built yet -- this stage arrives in phase $phase of docs/emulator-pack-plan.md"
+  die "$1: not built yet -- this stage arrives in phase $phase of docs/emulator-pack-plan.md"
+}
+
+# The decodes are made, checked and stamped by the disc's own decode script,
+# so a decode made by hand and one made here are the same thing. It verifies
+# the captures first, and refuses to replace a stale decode unless told to:
+# here, by --force decode or decode:<set>.
+run_decode() {
+  local u state
+  local -a stale=() again=() args
+  for u; do
+    if forced "$u"; then again+=("${u#decode:}"); else stale+=("${u#decode:}"); fi
+  done
+  args=(--library "$DD_LIBRARY" --output "$OUT"
+        --frames "$DECODE_FRAMES" --lead-in "$DECODE_LEAD_IN"
+        --jobs "$DECODE_JOBS" --threads "$DECODE_THREADS")
+  if [ "${#stale[@]}" -gt 0 ]; then
+    "$SELF_DIR/$DISC_SCRIPT" "${args[@]}" "${stale[@]}" || die "decode: $DISC_SCRIPT stopped"
+  fi
+  if [ "${#again[@]}" -gt 0 ]; then
+    "$SELF_DIR/$DISC_SCRIPT" "${args[@]}" --force "${again[@]}" || die "decode: $DISC_SCRIPT stopped"
+  fi
+  for u; do
+    state=$(unit_state "$u") || die "$u: still $state after decoding"
+  done
 }
 
 verify_tool() {
@@ -356,6 +391,9 @@ verify_tool() {
   IFS='|' read -r input pkg cmd <<< "$t"
   problem=$(stage_tool_verify "$pkg" "$cmd") || die "$1: $problem"
 }
+
+# What the decode script is told about the shares.
+[ "${#NO_MOUNT[@]}" = 0 ] || export DD_NO_MOUNT=1
 
 # --from skips the stages before it, so they must already be up to date:
 # otherwise the stages after would be built from stale inputs.
@@ -367,19 +405,23 @@ done
 
 for (( i = FROM_I; i <= UNTIL_I; i++ )); do
   name="${STAGES[$i]}"
+  # The shares can drop during a run of several hours, so they are checked
+  # again before every stage. A stage that failed partway left no stamp, so
+  # running again after a remount resumes here.
+  check_shares
+  todo=()
   while IFS= read -r unit; do
-    # The shares can drop during a run of several hours, so they are checked
-    # again before every stage. A stage that failed partway left no stamp, so
-    # running again after a remount resumes here.
-    check_shares
     state=$(unit_state "$unit") && up=1 || up=0
     if [ "$up" = 1 ] && ! forced "$unit"; then
       printf '%-12s %s\n' "$unit" "$state"
       continue
     fi
     [ "$unit" != select ] || die "select: $state"
+    [ "$up" = 0 ] || state="up to date, but forced"
     printf '%-12s %s\n' "$unit" "$state"
-    verify_tool "${unit%%:*}"
-    run_unit "$unit"
+    todo+=("$unit")
   done < <(stage_units "$name")
+  [ "${#todo[@]}" -gt 0 ] || continue
+  verify_tool "$name"
+  run_stage "$name" "${todo[@]}"
 done

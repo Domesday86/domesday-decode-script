@@ -86,6 +86,7 @@ Every script takes the same core flags and environment variables:
 | `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
 | `--force` | | refuse | overwrite an existing decode |
+| `--adopt` | | | Volcanoes only: check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
 | `-n, --dry-run` | | | resolve starts and print the commands, decode nothing |
 | `--list` | | | list what the selectors chose and exit |
 
@@ -323,7 +324,7 @@ EFM front end is switched off on exactly the CLV sides:
 
 ```
 ld-decode --pal --noEFM --cvbs --V4300D_coherent_subtract ...   # National B
-ld-decode --pal --cvbs --V4300D_coherent_subtract ...           # the CAV sides
+ld-decode --pal --V4300D_coherent_subtract --cvbs ...           # the CAV sides
 ```
 
 Run against a side that has none, the front end spends its time demodulating
@@ -407,7 +408,7 @@ audio. Those are facts about the disc and the captures rather than choices, so
 they are asserted in the script instead of offered as flags:
 
 ```sh
-ld-decode --pal --cvbs --V4300D_coherent_subtract ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs ...
 ```
 
 EFM is therefore decoded on every set — Volcanoes is a CAV AIV disc and the
@@ -446,6 +447,58 @@ in parallel at the `--jobs` concurrency, and cached beside the decode as
 `<basename>.start`. Nothing is taken from the `--start` values recorded by hand
 in the library's `Volcanoes_Notes.txt`; those were made against a different
 ld-decode and are not what this build wants.
+
+### Checked and stamped decodes
+
+Volcanoes is the pilot for [building a VP415e pack](#building-a-vp415e-pack),
+so its script also keeps each decode as a stage of that build. The other
+scripts follow once the process is proven here.
+
+- **The captures are verified first.** `verify-sources.sh` checks the selected
+  captures against `sources.sha256` before any start search or decode, so a
+  changed or missing capture is caught in seconds.
+- **Each finished decode is checked**, and the results are written beside it as
+  `check.txt`:
+  - `.cvbs`, `.meta`, `.efm` and `.efm.meta` are all there;
+  - decode-orc accepts the source (`STANDARD_STABLE_LOCKED` or
+    `STANDARD_STABLE_UNLOCKED`, from `orc-cli nodes list --json`);
+  - the frame count is the side's 54,000 pictures plus the lead-in kept,
+    within 1% (or the `--frames` asked for);
+  - the frames from picture #47000 to the end, where the disc carries EFM
+    data, all have EFM t-values. That is as far as this goes: the front end
+    writes t-values from noise as well, so whether they decode is for the EFM
+    sink in phase 2.
+  - It also records where the analogue audio went. ld-decode rev8 writes it
+    beside the decode as `<basename>_audio_0.wav`, not inside the `.cvbs`.
+- **A decode that passes is stamped** (`stage.stamp`). The stamp records the
+  capture's fingerprint, the ld-decode revision, the start, the frames and the
+  flags. A failed check leaves no stamp, and the report is kept as
+  `check.failed.txt`.
+- **A re-run skips an up-to-date decode.** With nothing changed, the script
+  verifies, finds every stamp matching and stops, in a second or two.
+- **A stale decode is never overwritten silently.** If a decode has no stamp,
+  or its stamp no longer matches (other frames, say), the script stops and
+  says which input changed. `--force` decodes it again. `--adopt` instead checks
+  the decode that is there and stamps it if it passes, which is the way to
+  keep a decode made before stamps, or one whose check needed fixing.
+- **Two versions are kept.** After a new ld-decode revision's decode is
+  stamped, all but the newest two `ld-decode-<rev>` directories of that set
+  are removed.
+
+Only a decode made by the `flake.lock` build, checked as above, in CVBS, is
+stamped. `--decoder`, `--no-verify-decoder` and `--tbc` decode as before,
+without a stamp. The checks need `orc-cli`, `sqlite3` and `jq`, all in the dev
+shell.
+
+```
+$ ./decode-volcanoes.sh --frames all DS4
+...
+   state: stale: changed frames
+decode-volcanoes.sh: DS4: stale: changed frames
+A decode is there (…/DS4/ld-decode-16dc70f/Volcanoes_DD86-DS4_….cvbs), and is not replaced without --force. Pass
+--force to decode it again, or --adopt to check the decode that is there and
+stamp it if it passes.
+```
 
 ## Decoding the EcoDisc disc
 
@@ -619,7 +672,7 @@ audio. Those are facts about the discs and the captures rather than choices, so
 they are asserted in the script instead of offered as flags:
 
 ```sh
-ld-decode --pal --cvbs --V4300D_coherent_subtract ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs ...
 ```
 
 EFM is therefore decoded on **every** side, and the side table carries no `efm`
@@ -729,7 +782,7 @@ carries EFM digital audio. Those are facts about the disc and the captures, so
 they are asserted in the script instead of offered as flags:
 
 ```sh
-ld-decode --pal --cvbs --V4300D_coherent_subtract ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs ...
 ```
 
 Each was checked rather than assumed:
@@ -854,14 +907,21 @@ it.
 `<stem>.dat` and `<stem>.dat.bsm` the [VP415e](https://github.com/Domesday86/vp415e)
 emulator loads. It works stage by stage, and each stage keeps a stamp of its
 inputs, so a re-run with nothing changed does nothing.
-[docs/emulator-pack-plan.md](docs/emulator-pack-plan.md) has the plan. Phase 0
-is in place: the pinned tools, the share checks, the stamps (`lib/stage.sh`,
-tested by `tests/stage-test.sh`) and the driver. The stages themselves arrive
-phase by phase. Until then a build stops at the first stage not yet written.
+[docs/emulator-pack-plan.md](docs/emulator-pack-plan.md) has the plan.
+- **Phase 0 is in place:** the pinned tools, the share checks, the stamps
+  (`lib/stage.sh`, tested by `tests/stage-test.sh`) and the driver.
+- **Phase 1 is in place:** the `decode` stage. It runs the disc's decode
+  script on every stale set, two at a time with four workers each, so a
+  decode made here and one made by hand are the same thing. See [Checked and
+  stamped decodes](#checked-and-stamped-decodes).
+- **The later stages arrive phase by phase.** Until they do, a build stops at
+  the first stage not yet written.
 
 ```sh
-./build-pack.sh volcanoes status   # each stage: up to date, or stale and why
-./build-pack.sh volcanoes          # build what is stale
+./build-pack.sh volcanoes status                 # each stage: up to date, or stale and why
+./build-pack.sh volcanoes                        # build what is stale
+./build-pack.sh volcanoes --until decode         # just the decodes
+./build-pack.sh volcanoes --force decode:DS3     # decode one set again
 ```
 
 Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read
@@ -885,13 +945,17 @@ Decodes are therefore filed under the pinned commit:
     ├── ld-decode-16dc70f/          # 8.0.0dev
     │   ├── Volcanoes_DD86-DS1_….cvbs
     │   ├── Volcanoes_DD86-DS1_….start
-    │   └── decoder.txt
+    │   ├── decoder.txt
+    │   ├── check.txt               # Volcanoes: what the decode was checked for
+    │   └── stage.stamp             # Volcanoes: what it was made from
     └── ld-decode-<next rev>/       # after nix flake update
 ```
 
 Decoding a disc again after updating ld-decode lands beside the earlier decode
 rather than on top of it. Only a re-run of the *same* commit collides, and that
-still stops with `already exists; pass --force to overwrite`. The `.start` cache
+still stops with `already exists; pass --force to overwrite` (for Volcanoes, a
+matching decode is skipped as up to date instead; see [Checked and stamped
+decodes](#checked-and-stamped-decodes)). The `.start` cache
 sits inside the decoder directory too, since which start keeps the lead-in is a
 question about the writer's behaviour and so about the build.
 

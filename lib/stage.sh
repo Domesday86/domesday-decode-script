@@ -171,6 +171,12 @@ stage_stamp_field() {
 stage_state() {
   local f="$STAGE_DIR/$STAGE_STAMP" key old o changed
   if [ ! -f "$f" ]; then
+    # Outputs with no stamp are an interrupted or unchecked run, or one made
+    # before stamps: never taken as complete.
+    for o in "${STAGE_OUTPUTS[@]}"; do
+      [ -e "$STAGE_DIR/$o" ] || continue
+      printf 'stale: not stamped (%s is there, but was never checked and stamped)\n' "$o"; return 1
+    done
     printf 'stale: never built\n'; return 1
   fi
   key=$(stage_key)
