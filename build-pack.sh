@@ -140,6 +140,19 @@ selected_sets() {
   yq -r ".$1.sets[]" "$SELECTION"
 }
 
+MAP_PROJECT="$DISC_DIR/map.orcprj"
+
+# map_sets: the sets map.orcprj maps, in its order: the labels of its CVBS
+# sources, which are set ids. A set left out of it is not mapped.
+map_sets() {
+  [ -f "$MAP_PROJECT" ] || return 0
+  yq -r '.dag.nodes[] | select(.stage == "*_CVBS_Source") | .user_label' "$MAP_PROJECT"
+}
+
+for id in $(map_sets); do
+  set_field "$id" 1 >/dev/null || die "${MAP_PROJECT#"$SELF_DIR"/} has a source labelled $id, which is not a set in $DISC_SCRIPT"
+done
+
 # --- shares and tools ------------------------------------------------------
 
 check_shares() {
@@ -208,14 +221,25 @@ describe_set() {
   stage_output check.txt
 }
 
+# Every set map.orcprj names, mapped and aligned together, from their decodes.
+# MAP_DECODES is left naming each one's decode, as "<set>|<cvbs>".
 describe_map() {
   local id ups=()
-  for id in $(set_ids); do describe_decode "$id"; ups+=("$id|$STAGE_DIR"); done
+  MAP_DECODES=()
+  for id in $(map_sets); do
+    describe_decode "$id"
+    ups+=("$id|$STAGE_DIR")
+    MAP_DECODES+=("$id|$STAGE_DIR/${STAGE_OUTPUTS[0]}")
+  done
   stage_begin map "$OUT/$ORC_DIR/map"
   for id in "${ups[@]}"; do stage_input_stamp "decode:${id%%|*}" "${id#*|}"; done
   stage_input_tool decode-orc
-  stage_input_file "project" "$DISC_DIR/stack.orcprj"
+  stage_input_file "map project" "$MAP_PROJECT"
   stage_output analysis.json
+  stage_output refresh.json
+  for id in "${ups[@]}"; do stage_output "framemaps/${id%%|*}.ranges"; done
+  stage_output framemaps/alignment
+  stage_output check.txt
 }
 
 describe_video() {
@@ -368,7 +392,8 @@ run_stage() {
   case "$name" in
     decode) run_decode "$@"; return ;;
     set)    run_set "$@"; return ;;
-    map) phase=3 ;; select) phase=4 ;;
+    map)    run_map "$@"; return ;;
+    select) phase=4 ;;
     video) phase=5 ;; vfs) phase=6 ;; pack) phase=7 ;;
   esac
   die "$1: not built yet -- this stage arrives in phase $phase of docs/emulator-pack-plan.md"
@@ -595,6 +620,198 @@ check_set() {
     return 1
   fi
   rm -f -- "$dir/check.failed.txt"
+}
+
+# --- map: every set mapped and aligned, for the selection report -----------
+#
+# A copy of the disc's committed map.orcprj, pointed at the decodes, is
+# refreshed with tools refresh: the Disc Mapper builds each set's frame map,
+# then Source Alignment places the sets against each other and compares the
+# captures (noise, pressing groups, softness). Nothing is processed. The
+# refresh saves into the copy, so the mapped project can be opened in the GUI.
+#
+# The Disc Mapper reads the whole of every decode, one set after another, so
+# the stage takes about as long as reading them all over the share.
+#
+# Its frame maps and alignment are also copied into discs/<disc>/framemaps/,
+# for committing, so that a change in mapping shows up in review.
+
+FRAMEMAPS="$DISC_DIR/framemaps"
+
+run_map() {
+  local state
+  ( build_map ) || die "map: failed (above)"
+  state=$(unit_state map) || die "map: still $state after building"
+}
+
+build_map() {
+  local dir rel d id cvbs rc t
+  describe_map
+  dir="$STAGE_DIR"
+  [ "${#MAP_DECODES[@]}" -gt 0 ] || { printf 'map: %s names no sets\n' "${MAP_PROJECT#"$SELF_DIR"/}" >&2; return 1; }
+
+  stage_mkdir "$dir" || return 1
+  stage_unstamp || return 1
+  rm -rf -- "$dir"/*.json* "$dir"/*.log "$dir"/*.orcprj "$dir"/framemaps* \
+            "$dir"/check.txt* "$dir"/check.failed.txt "$dir"/crash_bundle_*.zip
+
+  cp -- "$MAP_PROJECT" "$dir/map.orcprj"
+  for d in "${MAP_DECODES[@]}"; do
+    id="${d%%|*}" cvbs="${d#*|}"
+    rel=$(realpath --relative-to="$dir" -- "$cvbs")
+    orc-cli nodes set "$dir/map.orcprj" "$id" "input_path=$rel" >/dev/null || {
+      printf 'map: could not point %s at %s\n' "$id" "$cvbs" >&2; return 1; }
+  done
+
+  cd -- "$dir" || return 1
+  printf 'map: mapping and aligning %s (the Disc Mapper reads each decode in full)\n' "$(map_sets | paste -sd' ' -)"
+  t=$SECONDS rc=0
+  orc-cli tools refresh "$dir/map.orcprj" --json > "$(stage_tmp refresh.json)" 2> "$dir/refresh.log" || rc=$?
+  printf 'map: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+
+  if ! check_map "$dir" "$rc"; then
+    cat -- "$dir/check.failed.txt" >&2
+    printf 'map: failed its checks and is not stamped (see %s/check.failed.txt)\n' "$dir" >&2
+    return 1
+  fi
+  cat -- "$dir/check.txt.partial"
+  stage_commit || { printf 'map: could not stamp the stage\n' >&2; return 1; }
+  printf 'map: checked and stamped\n'
+
+  # The committed copies, replaced whole so a set dropped from the project
+  # loses its map here too.
+  rm -rf -- "$FRAMEMAPS"
+  cp -R -- "$dir/framemaps" "$FRAMEMAPS"
+  if git -C "$SELF_DIR" status --porcelain -- "$FRAMEMAPS" | grep -q .; then
+    printf 'map: the frame maps or alignment differ from the committed ones; review them with: git diff -- %s\n' "${FRAMEMAPS#"$SELF_DIR"/}"
+  fi
+}
+
+# check_map <dir> <refresh exit code>: run the checks, write check.txt,
+# analysis.json and the frame maps to their stage_tmp names, and return
+# non-zero if any failed.
+check_map() {
+  local dir="$1" rc="$2" report out fails=0 i id node status ranges pad n
+  local -a sets=() order=()
+
+  report="$dir/refresh.json.partial"
+  out=$(stage_tmp check.txt) || return 1
+  ok()   { printf 'ok    %s\n' "$*"; }
+  fail() { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
+  note() { printf 'note  %s\n' "$*"; }
+  mapfile -t sets < <(map_sets)
+
+  {
+    printf 'stage:   map\nsets:    %s\nchecked: %s\n\n' "${sets[*]}" "$(date '+%F %T')"
+
+    if [ "$rc" = 0 ] && [ "$(jq -r '.completed' "$report" 2>/dev/null)" = true ]; then
+      ok "the refresh ran every tool and saved map.orcprj"
+    else
+      fail "the refresh exited $rc ($(grep -v '^\[' "$dir/refresh.log" 2>/dev/null | tail -3 | tr '\n' ' '))"
+      # A set that cannot be mapped stops the refresh there, and is named.
+      jq -r '.nodes[]? | select(.status != "success" and .status != "skipped")
+             | "\(.node): \(.tool) \(.status): \(.summary)"' "$report" 2>/dev/null \
+        | while IFS= read -r line; do fail "$line"; done
+      if [ "$rc" = 6 ]; then
+        note "a set that cannot be mapped is dropped by deleting its source and frame map from ${MAP_PROJECT#"$SELF_DIR"/}"
+      fi
+    fi
+
+    # Each set's frame map: the Disc Mapper succeeded and wrote ranges, and
+    # the capture is in a signal state decode-orc accepts.
+    for id in "${sets[@]}"; do
+      node="$id map"
+      status=$(jq -r --arg n "$node" '.nodes[]? | select(.node == $n) | .status' "$report" 2>/dev/null) || status=""
+      ranges=$(jq -r --arg n "$node" '.nodes[]? | select(.node == $n) | .parameter_changes.ranges // empty' "$report" 2>/dev/null) || ranges=""
+      if [ "$status" = success ] && [ -n "$ranges" ]; then
+        ok "$id mapped: $(jq -r --arg n "$node" '.nodes[] | select(.node == $n) | .statistics
+          | "\(.outputFrames) frames, \(.paddingFrames) padding in \(.gapsPadded) gaps"' "$report")"
+        tr ',' '\n' <<< "$ranges" > "$(stage_tmp "framemaps/$id.ranges")"
+      else
+        fail "$id was not mapped (${status:-no report})"
+        continue
+      fi
+      note "$id: $(jq -r --arg n "$node" '.nodes[] | select(.node == $n) | (.statistics
+        | "\(.splitFieldFrames) split-field frames dropped, \(.removedDuplicates) duplicates removed (\(.duplicatesDecidedByQuality) of \(.duplicateGroups) groups decided on quality), \(.removedUnmappable) unmappable, \(.gapsTooWideToPad) gaps too wide to pad, \(.correctedVBIErrors) VBI errors corrected")
+        + ([.sources[0] | select(.signal_state != null) | ", \(.signal_state)"] | add // "")' "$report")"
+      jq -r --arg n "$node" '.nodes[] | select(.node == $n) | .items[]? | select(.type != "info") | .message' "$report" \
+        | while IFS= read -r line; do note "$id: $line"; done
+    done
+
+    # The alignment: an offset for every set, in the order Align takes them.
+    status=$(jq -r '.nodes[]? | select(.tool == "source_alignment") | .status' "$report" 2>/dev/null) || status=""
+    if [ "$status" = success ]; then
+      mapfile -t order < <(jq -r '.nodes[] | select(.tool == "source_alignment") | .sources[].label' "$report")
+      if [ "${order[*]}" = "${sets[*]}" ]; then
+        ok "Align takes the sets in the project's order"
+      else
+        fail "Align takes the sets as ${order[*]}, not ${sets[*]}"
+      fi
+      {
+        printf '# %s\n' "$(jq -r '.nodes[] | select(.tool == "source_alignment") | .parameter_changes.alignmentMode' "$report")"
+        n=0
+        for id in "${order[@]}"; do
+          n=$(( n + 1 ))
+          pad=$(jq -r --argjson i "$n" '.nodes[] | select(.tool == "source_alignment") | .parameter_changes.alignmentMap
+                | split(", ")[] | select(startswith("\($i)+")) | ltrimstr("\($i)+")' "$report")
+          printf '%s %s\n' "$id" "${pad:-none}"
+          [ -n "$pad" ] || fail "$id has no place in the alignment map"
+        done
+      } > "$(stage_tmp framemaps/alignment)"
+      ok "aligned: $(jq -r '.nodes[] | select(.tool == "source_alignment") | "map \(.parameter_changes.alignmentMap); output frame 1 is picture \(.statistics.globalFirstVBIFrame); \(.statistics.framesWith3PlusSources) frames have 3 or more sources, \(.statistics.framesWith2Sources) two, \(.statistics.framesWith1Source) one"' "$report")"
+      jq -r '.nodes[] | select(.tool == "source_alignment") | .summary | split("\n")[]
+             | select(test("^  Source [0-9]+: (noise|not compared)|^Pressings:|stands alone"))' "$report" \
+        | while IFS= read -r line; do note "${line#  }"; done
+      jq -r '.nodes[] | select(.tool == "source_alignment") | .items[]? | select(.type != "info") | .message' "$report" \
+        | while IFS= read -r line; do note "$line"; done
+    else
+      fail "Source Alignment did not run to success (${status:-no report})"
+    fi
+
+    # Everything the selection report (phase 4) reads from this stage, by set.
+    map_digest "$report" "${sets[@]}" > "$(stage_tmp analysis.json)" || fail "could not write analysis.json"
+
+    printf '\nresult: %s\n' "$([ "$fails" = 0 ] && echo pass || echo "FAIL ($fails)")"
+  } > "$out"
+
+  if [ "$fails" != 0 ]; then
+    mv -- "$out" "$dir/check.failed.txt"
+    return 1
+  fi
+  rm -f -- "$dir/check.failed.txt"
+}
+
+# map_digest <refresh report> <set>...: analysis.json, the refresh report by
+# set. Source Alignment's capture comparison exists only as text in its
+# summary, so each source's line of it is parsed here; "Source N" is the Nth
+# input of Align.
+map_digest() {
+  local report="$1"; shift
+  jq --args '
+    def align: .nodes[] | select(.tool == "source_alignment");
+    def pads: (align.parameter_changes.alignmentMap // "") | split(", ") | map(select(. != "") | split("+")
+              | { key: .[0], value: (.[1] | tonumber) }) | from_entries;
+    def comparison($i): (align.summary // "") | split("\n")[]
+      | capture("^  Source (?<n>[0-9]+): noise σ (?<sigma>[0-9.]+) codes(, 5–6 MHz response (?<response>[0-9.]+))?(, pressing (?<pressing>[A-Z]+))?(, sample grid (?<grid>[-+][0-9]+))?$")
+      | select(.n == ($i | tostring))
+      | { noise_sigma: (.sigma | tonumber), response_5_6mhz: (.response | if . then tonumber else null end),
+          pressing: .pressing, sample_grid: (.grid | if . then tonumber else 0 end) };
+    . as $r
+    | { project: .project, completed: .completed,
+        sets: [ $ARGS.positional | to_entries[] | .value as $id | (.key + 1) as $i
+                | ($r | .nodes[] | select(.node == "\($id) map")) as $m
+                | { set: $id,
+                    source: ($m.sources[0] // null),
+                    map: { status: $m.status, statistics: $m.statistics, summary: $m.summary,
+                           warnings: [ $m.items[]? | select(.type != "info") | .message ] },
+                    alignment_padding: ($r | pads["\($i)"]),
+                    capture: ([ $r | comparison($i) ] | first // null),
+                    soft: ([ $r | align.items[]? | select(.message | startswith("Source \($i) is soft")) ] | length > 0) } ],
+        alignment: ($r | [ align ] | first // null | if . then
+                     { status, mode: .parameter_changes.alignmentMode, map: .parameter_changes.alignmentMap,
+                       statistics, summary, warnings: [ .items[]? | select(.type != "info") | .message ] } else null end),
+        pressing_groups: ($r | [ align.statistics.pressingGroups ] | first // null) }' \
+    "$@" < "$report"
 }
 
 verify_tool() {

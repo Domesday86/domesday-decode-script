@@ -444,10 +444,10 @@ Where the build settles something the text above left open:
   file's content as an input, and read their sets from `.video.sets[]` and
   `.vfs.sets[]`. Phase 4 can add to that format, but should keep those two
   lists.
-- **Project files** are expected at `discs/<disc>/stack.orcprj`, and (since
-  phase 2) at `discs/<disc>/set-efm.orcprj` and `set-quality.orcprj`, which
-  every set shares. Until `stack.orcprj` is written, the `map` and `video`
-  stamps record it as missing.
+- **Project files** are expected at `discs/<disc>/stack.orcprj`, at
+  `discs/<disc>/set-efm.orcprj` and `set-quality.orcprj`, which every set
+  shares (since phase 2), and at `discs/<disc>/map.orcprj` (since phase 3).
+  Until `stack.orcprj` is written, the `video` stamp records it as missing.
 - **Linux mount points** default to `/home/sdi/raid/Domesday86_{Library,Decodes}`
   in `shares.conf`. A host that differs sets them in `shares.local.conf`.
 - **Scratch.** Once the decodes share passes its check, `ensure_shares`

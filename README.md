@@ -937,6 +937,23 @@ inputs, so a re-run with nothing changed does nothing.
   decode. They are two projects because `--process` runs every sink in a
   project, and the analyses each read the whole decode. Sets run
   `SET_JOBS` at a time.
+- **Phase 3 is in place:** the `map` stage. It copies the disc's committed
+  `map.orcprj` to `orc-<rev>/map/`, points each set's source at its decode,
+  and runs `orc-cli tools refresh`. The Disc Mapper builds each set's frame
+  map, then Source Alignment places the sets against each other and compares
+  the captures. Nothing is processed. It writes:
+  - `analysis.json`: by set, the Disc Mapper's figures (padding, split-field
+    frames, duplicates) and warnings, the alignment padding, and the capture
+    comparison (noise, 5–6 MHz response, pressing group, softness), for the
+    selection report in phase 4;
+  - `refresh.json`, decode-orc's own report, and `check.txt`;
+  - `framemaps/<set>.ranges` (one entry per line, 0-based as a project
+    stores them) and `framemaps/alignment` (each set's padding).
+
+  The frame maps and alignment are also copied into `discs/<disc>/framemaps/`
+  for committing, so a change in mapping shows up in `git diff`. A set that
+  cannot be mapped stops the stage and is named; drop it by deleting its
+  source and frame map from `map.orcprj`.
 - **The later stages arrive phase by phase.** Until they do, a build stops at
   the first stage not yet written.
 
@@ -947,6 +964,7 @@ inputs, so a re-run with nothing changed does nothing.
 ./build-pack.sh volcanoes --until set            # the decodes, then each set's EFM image and quality
 ./build-pack.sh volcanoes --force decode:DS3     # decode one set again
 ./build-pack.sh volcanoes --force set:DS3        # redo one set's EFM image and quality
+./build-pack.sh volcanoes --until map            # ...then map and align every set
 ```
 
 Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read
