@@ -62,6 +62,14 @@ nix flake update decode-orc vfs-verifier
 decode-orc and vfs-verifier are pinned at whatever their `main` was when they
 were last updated.
 
+decode-orc is built with the fixes in `patches/decode-orc-*.patch` that its
+pinned revision does not have yet. Each patch says what it fixes. Remove one
+from `flake.nix` once an update brings its fix. Today there is one:
+`decode-orc-efm-sync.patch` stops the EFM sink crashing in data mode on macOS.
+A patch is part of the stamp of every stage that runs decode-orc, so adding,
+changing or removing one rebuilds those stages. A new patch file must be
+`git add`ed before Nix can see it.
+
 `flake.lock` is committed; commit it again after updating so decodes stay
 reproducible.
 
@@ -459,7 +467,7 @@ scripts follow once the process is proven here.
   changed or missing capture is caught in seconds.
 - **Each finished decode is checked**, and the results are written beside it as
   `check.txt`:
-  - `.cvbs`, `.meta`, `.efm` and `.efm.meta` are all there;
+  - `.cvbs`, `.meta`, `.efm`, `.efm.meta` and `.dropouts.meta` are all there;
   - decode-orc accepts the source (`STANDARD_STABLE_LOCKED` or
     `STANDARD_STABLE_UNLOCKED`, from `orc-cli nodes list --json`);
   - the frame count is the side's 54,000 pictures plus the lead-in kept,
@@ -914,6 +922,21 @@ inputs, so a re-run with nothing changed does nothing.
   script on every stale set, two at a time with four workers each, so a
   decode made here and one made by hand are the same thing. See [Checked and
   stamped decodes](#checked-and-stamped-decodes).
+- **Phase 2 is in place:** the `set` stage. For each set it writes, under
+  `orc-<rev>/sets/<set>/`:
+  - the EFM data image `<set>_efm.dat`, with its bad sector map (`.bsm`) and
+    decode report (`.txt`), from decode-orc's EFM sink;
+  - the SNR, dropout and burst-level figures per frame (`snr.csv`,
+    `dropouts.csv`, `burst.csv`), from its analysis sinks;
+  - `quality.json`, which gathers the EFM report's figures and each analysis's
+    summary for the selection report in phase 4;
+  - `check.txt`, the checks the set passed before it was stamped.
+
+  The projects come from the disc's committed `set-efm.orcprj` and
+  `set-quality.orcprj`, copied beside the outputs and pointed at the set's
+  decode. They are two projects because `--process` runs every sink in a
+  project, and the analyses each read the whole decode. Sets run
+  `SET_JOBS` at a time.
 - **The later stages arrive phase by phase.** Until they do, a build stops at
   the first stage not yet written.
 
@@ -921,7 +944,9 @@ inputs, so a re-run with nothing changed does nothing.
 ./build-pack.sh volcanoes status                 # each stage: up to date, or stale and why
 ./build-pack.sh volcanoes                        # build what is stale
 ./build-pack.sh volcanoes --until decode         # just the decodes
+./build-pack.sh volcanoes --until set            # the decodes, then each set's EFM image and quality
 ./build-pack.sh volcanoes --force decode:DS3     # decode one set again
+./build-pack.sh volcanoes --force set:DS3        # redo one set's EFM image and quality
 ```
 
 Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read

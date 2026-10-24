@@ -1,6 +1,6 @@
 # Plan: from captures to a VP415e disc pack
 
-Status: **phases 0 and 1 are built. Phases 2–8 are not.** Volcanoes is the pilot
+Status: **phases 0–2 are built. Phases 3–8 are not.** Volcanoes is the pilot
 disc; the other discs follow once the process is proven on it.
 
 ## Goal
@@ -444,9 +444,10 @@ Where the build settles something the text above left open:
   file's content as an input, and read their sets from `.video.sets[]` and
   `.vfs.sets[]`. Phase 4 can add to that format, but should keep those two
   lists.
-- **Project files** are expected at `discs/<disc>/stack.orcprj` and
-  `discs/<disc>/sets/<DS>.orcprj`. None is written yet, so the `set`, `map`
-  and `video` stamps currently record them as missing.
+- **Project files** are expected at `discs/<disc>/stack.orcprj`, and (since
+  phase 2) at `discs/<disc>/set-efm.orcprj` and `set-quality.orcprj`, which
+  every set shares. Until `stack.orcprj` is written, the `map` and `video`
+  stamps record it as missing.
 - **Linux mount points** default to `/home/sdi/raid/Domesday86_{Library,Decodes}`
   in `shares.conf`. A host that differs sets them in `shares.local.conf`.
 - **Scratch.** Once the decodes share passes its check, `ensure_shares`
@@ -584,6 +585,100 @@ only that set.
 
 **Exit criteria:** every set has an EFM image, a `.bsm`, the decode report and
 quality JSON. A re-run does nothing.
+
+**As built.** Both exit criteria are met.
+
+- **The run.** It was made on 2026-10-24 on this Mac, by `build-pack.sh
+  volcanoes --until set`, two sets at a time, from 07:02 to 09:05: 2 h 3 min.
+  - Every set passed its checks and was stamped. The outputs come to 1.7 GB.
+  - A re-run finds all five up to date, in about 7 s.
+  - The EFM sink took 46–53 s per set, and the dropout analysis 1–2 s.
+  - SNR and burst level each took about 1,350–1,430 s with two sets sharing
+    the link, and 830–920 s for DS5, which ran alone.
+  - The Mac's link to the NAS is gigabit, and it ran at its 120 MB/s
+    throughout, so the share's read rate sets the stage's time.
+- **The results**, from each set's `quality.json`:
+
+  | Set | Sectors | Not recovered (`.bsm`) | Good | Uncorrectable | Data loss after C2 | White SNR | Black PSNR | Dropouts (count / samples) | Burst |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | DS1 | 162,152 | 139,920 | 22,231 | 2 | 0.0080% | 33.84 dB | 31.91 dB | 306,910 / 5.70 M | 126.4 |
+  | DS2 | 162,152 | 139,925 | 22,226 | 7 | 0.0244% | 33.45 dB | 31.68 dB | 235,780 / 8.42 M | 126.3 |
+  | DS3 | 162,148 | 140,346 | 21,796 | 426 | 1.7395% | 33.09 dB | 32.90 dB | 201,712 / 6.69 M | 125.1 |
+  | DS4 | 162,152 | 139,926 | 22,224 | 12 | 0.0322% | 32.33 dB | 30.53 dB | 976,165 / 9.09 M | 130.5 |
+  | DS5 | 162,151 | 139,933 | 22,217 | 15 | 0.0558% | 32.31 dB | 30.74 dB | 621,260 / 16.80 M | 127.6 |
+
+  - SNR and burst are means over the frames.
+  - The EFM sink grades every set POOR, because each has some uncorrectable
+    sectors.
+  - The EFM figures agree with the hand-built project. DS1 loses 0.0080% after
+    C2 in both. DS3 is again the outlier, at 1.74% against 1.84%, and its image
+    is again a few sectors shorter than the others.
+  - Phase 4 weighs all of this; nothing here selects or drops a set.
+
+- **A decode-orc fix carried here.** At the pinned `31d22e6` (and on `main` at
+  `706b5f3`), the EFM sink in data mode crashes on macOS (SIGTRAP) within a
+  second of starting, on any input.
+  - The cause is in `Data24ToRawSector::waitingForSync()`. Once it has dropped
+    the bytes before a sync pattern, it counts the flags of a whole sector even
+    when fewer than 2,352 bytes are left, reading past the end of two vectors.
+    libstdc++ lets that read pass; macOS's hardened libc++ traps it.
+  - `patches/decode-orc-efm-sync.patch` waits for the rest of the sector
+    instead. `flake.nix` applies it to the pinned decode-orc until decode-orc
+    has the fix.
+  - `stage_input_tool` adds each `patches/<input>-*.patch` to the tool's stamp
+    line, so changing a patch makes the stages that use the tool stale.
+- **Two projects per set, not one.** `--process` triggers every sink in a
+  project, and the SNR and burst-level sinks each read the whole decode. In one
+  project, processing the EFM sink would also run both analyses, which
+  `tools run` then repeats. So each disc commits:
+  - `discs/<disc>/set-efm.orcprj` (source "Disc", sink "EFM"), run with
+    `--process`;
+  - `set-quality.orcprj` (source "Disc", sinks "SNR", "Dropouts" and "Burst"),
+    each sink run with `tools run --json --quiet --csv`.
+
+  Every set shares the two. Each run copies them into
+  `orc-<rev>/sets/<DS>/` and sets the source's `input_path`, relative to the
+  project file, and the EFM output with `nodes set`.
+- **Outputs, all stamped:**
+  - `<ds>_efm.dat`, `.dat.bsm` and `.dat.txt`;
+  - `snr.csv`, `dropouts.csv` and `burst.csv`, one row per frame;
+  - `quality.json`: the EFM report's figures (assessment, sectors good,
+    corrected and uncorrectable, C1/C2, data loss, missing sections) and each
+    analysis's summary statistics;
+  - `check.txt`.
+
+  Each tool's raw JSON and log, the two projects and `efm.log` stay beside
+  them, unstamped.
+- **The checks:**
+  - The EFM sink exits 0, and its report says `Result : SUCCESS`.
+  - The image is a whole number of 2048-byte sectors, and the `.bsm` exists.
+  - Each analysis reports `success` over all the decode's frames, and all
+    three see the same number.
+
+  How much was recovered, and how clean the picture is, are evidence for
+  phase 4, recorded but never failed.
+- **The stamp:** the decode's stamp, decode-orc's rev and patches, and both
+  project files.
+- **The decode stage now also requires `.dropouts.meta`**, which the dropout
+  analysis reads. The stamped decodes already have it, so they stay up to
+  date.
+- **`SET_JOBS=2`** in `disc.conf`. Sets run two at a time, and each set's
+  console lines carry its id.
+- **Timings on DS4, read over NFS on this Mac:**
+  - The EFM sink took 49 s for the whole side. It recovered 22,226 sectors
+    with 12 uncorrectable and 0.03% data loss after C2. The image is 162,150
+    sectors, 139,926 of them in the `.bsm`, most of them the span before
+    picture #47000 that carries no EFM data.
+  - The dropout analysis reads only `.dropouts.meta` and takes about a second.
+  - SNR and burst level each read the whole 76 GB CVBS, so the share's read
+    rate sets their time. SNR over all 54,003 frames of DS4 took 841 s (about
+    91 MB/s) at 14% CPU, so a set takes about half an hour.
+- **Tested** on a throwaway disc: DS4 and DS5, 400 frames each from picture
+  #47000, under `.work`.
+  - Both sets passed and were stamped, and a re-run did nothing in 3 s.
+  - `--force set:DS4` redid DS4 alone.
+  - A broken template made both sets stale, built neither, and stamped
+    neither.
 
 ### Phase 3: Map, align and compare every set
 

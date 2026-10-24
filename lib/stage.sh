@@ -131,9 +131,16 @@ stage_input_source() {
   STAGE_INPUTS+=("source $1: $line")
 }
 
+# A tool by its locked revision, and by any patches flake.nix applies to it
+# (patches/<flake input>-*.patch), so that changing a patch is a change of
+# tool.
 stage_input_tool() {
-  local rev
+  local rev p
   rev=$(stage_tool_rev "$1") || rev="unlocked"
+  for p in "$STAGE_ROOT/patches/$1"-*.patch; do
+    [ -f "$p" ] || continue
+    rev+=" +${p##*/}:$(sha256_stdin < "$p" | cut -c1-12)"
+  done
   STAGE_INPUTS+=("tool $1: $rev")
 }
 

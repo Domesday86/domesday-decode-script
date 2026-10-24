@@ -187,13 +187,25 @@ describe_decode() {
   decode_describe "$id" "$dir" "$base" "$rel" "$start" "$DECODE_FRAMES" "$DECODE_FLAGS"
 }
 
+# A set's EFM image and quality figures, from its decode and the disc's two
+# committed set projects. SET_DECODE is left naming the decode it reads.
 describe_set() {
-  local id="$1"
-  describe_decode "$id"; local up="$STAGE_DIR"
+  local id="$1" efm="${1,,}_efm.dat"
+  describe_decode "$id"
+  SET_DECODE="${STAGE_DIR}/${STAGE_OUTPUTS[0]}"
   stage_begin "set:$id" "$OUT/$ORC_DIR/sets/$id"
-  stage_input_stamp "decode:$id" "$up"
+  stage_input_stamp "decode:$id" "${SET_DECODE%/*}"
   stage_input_tool decode-orc
-  stage_input_file "project" "$DISC_DIR/sets/$id.orcprj"
+  stage_input_file "efm project" "$DISC_DIR/set-efm.orcprj"
+  stage_input_file "quality project" "$DISC_DIR/set-quality.orcprj"
+  stage_output "$efm"
+  stage_output "$efm.bsm"
+  stage_output "$efm.txt"
+  stage_output quality.json
+  stage_output snr.csv
+  stage_output dropouts.csv
+  stage_output burst.csv
+  stage_output check.txt
 }
 
 describe_map() {
@@ -355,7 +367,8 @@ run_stage() {
   local name="$1" phase; shift
   case "$name" in
     decode) run_decode "$@"; return ;;
-    set) phase=2 ;; map) phase=3 ;; select) phase=4 ;;
+    set)    run_set "$@"; return ;;
+    map) phase=3 ;; select) phase=4 ;;
     video) phase=5 ;; vfs) phase=6 ;; pack) phase=7 ;;
   esac
   die "$1: not built yet -- this stage arrives in phase $phase of docs/emulator-pack-plan.md"
@@ -383,6 +396,205 @@ run_decode() {
   for u; do
     state=$(unit_state "$u") || die "$u: still $state after decoding"
   done
+}
+
+# --- set: each set's EFM image and quality figures -------------------------
+#
+# Two projects per set, copies of the disc's committed set-efm.orcprj and
+# set-quality.orcprj pointed at the set's decode. They are separate because
+# --process triggers every sink in a project, and SNR and burst level each
+# read the whole decode: in one project, --process for the EFM would read it
+# twice more for nothing. So the EFM project is processed, and each analysis
+# sink of the other is run with tools run, which reports its statistics as
+# JSON and writes its per-frame figures as CSV.
+#
+# The sets run SET_JOBS at a time (disc.conf). Each one's console lines carry
+# its set id.
+
+# The analysis sinks of set-quality.orcprj: <tool>|<stage name>|<csv>.
+SET_ANALYSES=("snr_analysis|SNR|snr" "dropout_analysis|Dropouts|dropouts" "burst_level_analysis|Burst|burst")
+
+run_set() {
+  local u id state fails=0 running=0
+  for u; do
+    id="${u#set:}"
+    ( build_set "$id" ) 2>&1 | awk -v p="[$id] " '{ print p $0; fflush() }' &
+    running=$(( running + 1 ))
+    if [ "$running" -ge "$SET_JOBS" ]; then
+      wait -n || fails=$(( fails + 1 ))
+      running=$(( running - 1 ))
+    fi
+  done
+  while [ "$running" -gt 0 ]; do
+    wait -n || fails=$(( fails + 1 ))
+    running=$(( running - 1 ))
+  done
+  [ "$fails" = 0 ] || die "set: $fails set(s) failed (above, and in each one's check.failed.txt if it reached its checks)"
+  for u; do
+    state=$(unit_state "$u") || die "$u: still $state after building"
+  done
+}
+
+# build_set <set>: make one set's EFM image and quality figures, check them,
+# and stamp them if they pass.
+build_set() {
+  local id="$1" dir decode efm rel a tool node csv rc t
+  describe_set "$id"
+  dir="$STAGE_DIR"; decode="$SET_DECODE"; efm="${id,,}_efm.dat"
+
+  # Start clean: no stamp, and nothing left from an earlier run.
+  stage_mkdir "$dir" || return 1
+  stage_unstamp || return 1
+  rm -f -- "$dir"/*_efm.dat* "$dir"/*.csv* "$dir"/*.json* "$dir"/*.log \
+           "$dir"/*.orcprj "$dir"/check.txt* "$dir"/check.failed.txt "$dir"/crash_bundle_*.zip
+
+  # The projects, beside their outputs. Their paths are relative to the
+  # project file, which decode-orc resolves them against, so the projects open
+  # the same on any host that mounts the decodes share.
+  rel=$(realpath --relative-to="$dir" -- "$decode")
+  cp -- "$DISC_DIR/set-efm.orcprj" "$dir/efm.orcprj"
+  cp -- "$DISC_DIR/set-quality.orcprj" "$dir/quality.orcprj"
+  if ! { orc-cli nodes set "$dir/efm.orcprj" Disc "input_path=$rel" \
+         && orc-cli nodes set "$dir/efm.orcprj" EFM "output_path=$efm" \
+         && orc-cli nodes set "$dir/quality.orcprj" Disc "input_path=$rel"; } >/dev/null; then
+    printf '%s: could not point the set projects at %s\n' "$id" "$decode" >&2
+    return 1
+  fi
+
+  # orc-cli writes a crash bundle to its working directory: here, if anywhere.
+  cd -- "$dir" || return 1
+
+  printf 'EFM: decoding %s\n' "${decode##*/}"
+  t=$SECONDS rc=0
+  orc-cli "$dir/efm.orcprj" --process --log-file "$dir/efm.log" --log-out file || rc=$?
+  printf 'EFM: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+
+  for a in "${SET_ANALYSES[@]}"; do
+    IFS='|' read -r tool node csv <<< "$a"
+    t=$SECONDS
+    orc-cli tools run "$dir/quality.orcprj" "$tool" --node "$node" --json --quiet \
+      --csv "$(stage_tmp "$csv.csv")" > "$dir/$csv.json" 2> "$dir/$csv.log" || true
+    printf '%s: analysed in %ss\n' "$node" "$(( SECONDS - t ))"
+  done
+
+  if ! check_set "$id" "$dir" "$efm" "$rc"; then
+    cat -- "$dir/check.failed.txt" >&2
+    printf '%s: failed its checks and is not stamped (see %s/check.failed.txt)\n' "$id" "$dir" >&2
+    return 1
+  fi
+  cat -- "$dir/check.txt.partial"
+  stage_commit || { printf '%s: could not stamp the set\n' "$id" >&2; return 1; }
+  printf '%s: checked and stamped\n' "$id"
+}
+
+# efm_report_value <report> <label>: the figure after "<label> :" in the EFM
+# sink's decode report, with its thousands separators taken out.
+efm_report_value() {
+  sed -n "s/^ *$2 *: *//p" "$1" | head -1 | tr -d ,
+}
+
+# check_set <set> <dir> <efm image> <EFM exit code>: run the checks, write
+# check.txt and quality.json to their stage_tmp names, and return non-zero if
+# any failed.
+check_set() {
+  local id="$1" dir="$2" efm="$3" rc="$4"
+  local out fails=0 f size=0 sectors=0 bad=0 recovery a tool node csv status frames total
+  local result="" assessment="" good="" corrected="" uncorrectable="" c1="" c2="" loss="" missing=""
+  local -a counts=()
+
+  out=$(stage_tmp check.txt) || return 1
+  ok()   { printf 'ok    %s\n' "$*"; }
+  fail() { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
+  note() { printf 'note  %s\n' "$*"; }
+
+  {
+    printf 'set:     %s\ndecode:  %s\nchecked: %s\n\n' "$id" "$SET_DECODE" "$(date '+%F %T')"
+
+    # The EFM image: whole 2048-byte sectors, a bad sector map and a report
+    # that says the decode succeeded. How much was recovered is evidence for
+    # the selection (phase 4), not a pass or a fail.
+    if [ "$rc" = 0 ]; then ok "the EFM sink finished"
+    else fail "the EFM sink exited $rc (efm.log has its log)"; fi
+    if [ -s "$dir/$efm" ]; then
+      size=$(file_size "$dir/$efm"); sectors=$(( size / 2048 ))
+      if [ $(( size % 2048 )) = 0 ]; then ok "$efm is $sectors sectors ($size bytes)"
+      else fail "$efm is $size bytes, not a whole number of 2048-byte sectors"; fi
+    else
+      fail "$efm is missing or empty"
+    fi
+    if [ -e "$dir/$efm.bsm" ]; then
+      bad=$(grep -c . "$dir/$efm.bsm" || true)
+      ok "$efm.bsm lists $bad sector(s) not recovered"
+    else
+      fail "$efm.bsm is missing"
+    fi
+    f="$dir/$efm.txt"
+    if [ -s "$f" ]; then
+      result=$(efm_report_value "$f" Result)
+      assessment=$(efm_report_value "$f" 'Overall assessment')
+      recovery=$(efm_report_value "$f" 'Good \/ corrected \/ uncorrectable')
+      IFS='/ ' read -r good corrected uncorrectable <<< "$recovery" || true
+      c1=$(efm_report_value "$f" 'C1 uncorrectable' | sed -n 's/.*(\(.*\) %).*/\1/p')
+      c2=$(efm_report_value "$f" 'C2 uncorrectable' | sed -n 's/.*(\(.*\) %).*/\1/p')
+      loss=$(efm_report_value "$f" 'Data loss (post-C2)' | sed 's/ *%.*//')
+      missing=$(efm_report_value "$f" 'Sections missing' | awk '{ print $1 }')
+      if [ "$result" = SUCCESS ]; then ok "the decode report says $result"
+      else fail "the decode report says ${result:-nothing} (SUCCESS expected)"; fi
+      note "EFM $assessment: sectors good $good, corrected $corrected, uncorrectable $uncorrectable; data loss after C2 $loss%; C1 uncorrectable $c1%, C2 $c2%; sections missing $missing"
+    else
+      fail "$efm.txt, the decode report, is missing or empty"
+    fi
+
+    # The analysis sinks: each ran, over every frame of the decode.
+    for a in "${SET_ANALYSES[@]}"; do
+      IFS='|' read -r tool node csv <<< "$a"
+      status=$(jq -r '.nodes[0].status // empty' "$dir/$csv.json" 2>/dev/null) || status=""
+      if [ "$status" != success ]; then
+        fail "$node analysis: ${status:-no report} ($(head -c 300 "$dir/$csv.log" 2>/dev/null | tr '\n' ' '))"
+        continue
+      fi
+      read -r frames total < <(jq -r '.nodes[0].statistics | "\(.frames_analysed) \(.total_frames)"' "$dir/$csv.json") || true
+      if [ "$frames" = "$total" ] && [ "${frames:-0}" -gt 0 ] && [ -s "$dir/$csv.csv.partial" ]; then
+        ok "$node analysis over all $frames frames, per frame in $csv.csv"
+      else
+        fail "$node analysis covered ${frames:-no} of ${total:-unknown} frames"
+      fi
+      counts+=("$total")
+      note "$(jq -r --arg k "$csv" '.nodes[0].statistics | def r(n): . * n | round / n;
+        if $k == "snr" then "SNR: white \(.mean_white_snr | r(100)) dB, black PSNR \(.mean_black_psnr | r(100)) dB (means; lowest white \(.min_white_snr | r(100)))"
+        elif $k == "dropouts" then "dropouts: \(.total_dropouts) totalling \(.total_dropout_samples) samples, in \(.frames_with_dropouts) frames"
+        else "burst: median level \(.mean_median_burst_10bit | r(10)) (10-bit, mean over frames)" end' "$dir/$csv.json")"
+    done
+    if [ "${#counts[@]}" -gt 1 ] && [ "$(printf '%s\n' "${counts[@]}" | sort -u | wc -l)" -ne 1 ]; then
+      fail "the analyses saw different numbers of frames: ${counts[*]}"
+    fi
+
+    # Everything the selection report (phase 4) reads from a set, in one file.
+    jq -n --arg set "$id" --arg decode "$SET_DECODE" --arg image "$efm" \
+          --argjson bytes "$size" --argjson sectors "$sectors" --argjson bad "$bad" \
+          --arg result "$result" --arg assessment "$assessment" \
+          --arg good "$good" --arg corrected "$corrected" --arg uncorrectable "$uncorrectable" \
+          --arg c1 "$c1" --arg c2 "$c2" --arg loss "$loss" --arg missing "$missing" \
+          --rawfile snr "$dir/snr.json" --rawfile dropouts "$dir/dropouts.json" --rawfile burst "$dir/burst.json" '
+      def num: if . == "" then null else (tonumber? // null) end;
+      def stats: (fromjson? // {}) | .nodes[0] // {} | if .status == "success" then .statistics else null end;
+      { set: $set, decode: $decode,
+        efm: { image: $image, bytes: $bytes, sectors: $sectors, bad_sectors: $bad,
+               result: $result, assessment: $assessment,
+               good: ($good | num), corrected: ($corrected | num), uncorrectable: ($uncorrectable | num),
+               c1_uncorrectable_pct: ($c1 | num), c2_uncorrectable_pct: ($c2 | num),
+               data_loss_pct: ($loss | num), sections_missing: ($missing | num) },
+        snr: ($snr | stats), dropouts: ($dropouts | stats), burst: ($burst | stats) }' \
+      > "$(stage_tmp quality.json)" || fail "could not write quality.json"
+
+    printf '\nresult: %s\n' "$([ "$fails" = 0 ] && echo pass || echo "FAIL ($fails)")"
+  } > "$out"
+
+  if [ "$fails" != 0 ]; then
+    mv -- "$out" "$dir/check.failed.txt"
+    return 1
+  fi
+  rm -f -- "$dir/check.failed.txt"
 }
 
 verify_tool() {

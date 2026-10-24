@@ -34,7 +34,15 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         lddecode = ld-decode.packages.${system}.ld-decode;
-        decodeorc = decode-orc.packages.${system}.decode-orc;
+        # decode-orc as pinned, plus the fixes in patches/decode-orc-*.patch
+        # that it does not have yet. Each patch says why; each goes once the
+        # pinned revision has its fix. The patches are part of every decode-orc
+        # stage's stamp (lib/stage.sh), so changing one rebuilds those stages.
+        decodeorc = decode-orc.packages.${system}.decode-orc.overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ [
+            ./patches/decode-orc-efm-sync.patch
+          ];
+        });
         vfstools = vfs-verifier.packages.${system}.vfs-tools;
 
         # Everything the decode scripts shell out to. ld-decode wraps its own

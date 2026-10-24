@@ -12,7 +12,8 @@ reserved capacity and goes unnoticed; macOS's hardened libc++ traps it
 Waiting for the rest of the sector is enough: the next call finds the sync
 again at position 0.
 
-Applied by flake.nix to the pinned decode-orc until decode-orc itself has it.
+Reported as https://github.com/decode-orc/decode-orc/issues/342. Applied by
+flake.nix to the pinned decode-orc until decode-orc itself has it.
 
 --- a/orc/plugins/stages/common/efm-decode/decoders/dec_data24torawsector.cpp
 +++ b/orc/plugins/stages/common/efm-decode/decoders/dec_data24torawsector.cpp

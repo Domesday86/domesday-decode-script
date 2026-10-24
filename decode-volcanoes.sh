@@ -725,7 +725,7 @@ check_decode() {
     printf 'decode:  %s/%s\nchecked: %s\n\n' "$dest" "$base" "$(date '+%F %T')"
 
     # Every file the later stages read.
-    for ext in cvbs meta efm efm.meta; do
+    for ext in cvbs meta efm efm.meta dropouts.meta; do
       f="$dest/$base.$ext"
       if [ -s "$f" ]; then ok "$base.$ext is there ($(file_size "$f") bytes)"
       else bad "$base.$ext is missing or empty"; fi
