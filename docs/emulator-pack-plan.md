@@ -1,6 +1,7 @@
 # Plan: from captures to a VP415e disc pack
 
-Status: **phases 0–2 are built. Phases 3–8 are not.** Volcanoes is the pilot
+Status: **phases 0–4 are built; `selection.yaml` is still to be decided.
+Phases 5–8 are not built.** Volcanoes is the pilot
 disc; the other discs follow once the process is proven on it.
 
 ## Goal
@@ -702,6 +703,58 @@ change in mapping shows up in review. Nothing is processed in this phase.
 
 **Exit criteria:** `analysis.json` covering every set, and committed maps.
 
+**As built.** The `map` stage, under `orc-<rev>/map/`. Both exit criteria are
+met once `discs/volcanoes/framemaps/` is committed.
+
+- **Its own project.** `discs/<disc>/map.orcprj` holds every set, not
+  `stack.orcprj`, which holds only the selected ones.
+  - Each source is labelled with its set id, and its frame map "`<set>` map".
+    Both feed one "Align".
+  - The refresh tools are recorded with `tools refresh-config`.
+  - There is no sink.
+  - The stage copies the project beside its outputs, points each source at
+    its decode with `nodes set`, and runs `tools refresh --json`. That run
+    is not a `--dry-run`: it saves into the copy, so the mapped and aligned
+    project opens in the GUI. Nothing is processed.
+- **A set that cannot be mapped** stops the stage, which names it. It is
+  dropped by deleting its source and frame map from `map.orcprj`. The stage
+  maps whatever sets that project names.
+- **Outputs:**
+  - `analysis.json`;
+  - `refresh.json`, decode-orc's report;
+  - `framemaps/<set>.ranges`, one entry per line, 0-based as the project
+    stores them;
+  - `framemaps/alignment`, each set's padding;
+  - `check.txt`.
+
+  The frame maps are copied into `discs/<disc>/framemaps/`, and the stage
+  says when they differ from the committed copies.
+- **The stamp:** the decode stamps, decode-orc's rev and patches, and
+  `map.orcprj`.
+- **Parsing.** Source Alignment's capture comparison exists only as summary
+  text, so `analysis.json` parses it. At the pinned `31d22e6` the refresh
+  report also leaves Align's `statistics` empty: the first picture, the frame
+  coverage and the pressing count. Those are read from the summary as well,
+  and the report's own figures are used whenever it carries them. With a
+  single pressing the summary names no group, and every set compared is given
+  pressing A.
+- **Time.** The Disc Mapper reads every decode in full, one after another:
+  57 minutes for the five sets over NFS, about 11 minutes a set.
+- **The results:**
+
+  | Set | Frames | Padding (gaps) | Split-field dropped | Duplicates | Unmappable | Noise σ | 5–6 MHz |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | DS1 | 54,002 | 17 (17) | 4 | 0 | 14 | 8.6 | 1.00 |
+  | DS2 | 54,002 | 39 (25) | 1 | 0 | 39 | 9.7 | 1.02 |
+  | DS3 | 54,001 | 10 (10) | 3 | 1 | 10 | 9.5 | 0.99 |
+  | DS4 | 54,002 | 14 (13) | 3 | 0 | 12 | 11.0 | 1.00 |
+  | DS5 | 54,002 | 14 (13) | 5 | 0 | 11 | 11.7 | 0.99 |
+
+  - Every set's lead-in and lead-out frames are kept.
+  - Every alignment offset is 0. Output frame 1 is picture 0, the kept
+    lead-in frame, and all 54,002 frames have 3 or more sources.
+  - All five sets come from **one pressing**, and none is soft.
+
 ### Phase 4: Pressing and outlier selection
 
 Not every set necessarily shares a pressing. Two mechanisms deal with that.
@@ -779,6 +832,51 @@ This phase is what tells capture damage from a different pressing.
 
 **Exit criteria:** a committed `selection.yaml`, with the video sets, the VFS
 sets, their orders, and the reason for every exclusion.
+
+**As built.** The report is built; `selection.yaml` is not yet decided.
+
+- **No `compare-sets.sh`.** The report is a stamped stage of
+  `build-pack.sh`, `compare`, between `map` and `select`, under
+  `orc-<rev>/compare/`. It is regenerated whenever its inputs change: the set
+  and map stamps, decode-orc's rev and patches, and vfs-verifier's rev.
+  - It writes `report.txt` to read, `compare.json` (the same evidence, by
+    set), `metadata/<set>.yaml`, `vfs-stacker.txt` and `check.txt`.
+  - It fails only when a measurement could not be made. What the evidence
+    says is for the person reading it.
+- **The disc metadata.** decode-orc decodes the user code and the programme
+  status only for the video sink's embedded document. So the stage runs a
+  clip of each decode through a video sink: its first and last 250 source
+  frames, with the `mono` decoder and `mkv-ffv1`. It keeps the clip's
+  `orc-disc-metadata.yaml` and deletes the clip.
+  - That takes about 12 s a set.
+  - It compares the fields the disc states about itself.
+  - The first and last picture, lead-in and lead-out are reported per set.
+    They depend on the capture too: DS3's decode opens on two frames with
+    stray picture numbers, and stops before its lead-out.
+- **The EFM comparison** is `vfs-stacker --dry-run --show-conflicts` over every
+  set's image, in `map.orcprj`'s order. It takes about 20–70 s.
+- **The `select` check.** `select` is still unstamped and decided by hand, but
+  once `selection.yaml` exists it must hold to these rules, or `status` calls
+  it invalid and the build stops there:
+  - each of `video` and `vfs` lists its `sets`, best first, each from
+    `map.orcprj`, each once;
+  - every other mapped set is listed under `dropped`, with a `reason`.
+
+  It also records the `pressing` chosen.
+- **The evidence for Volcanoes.** All five sets are one pressing, on every
+  count:
+  - **Source Alignment:** one group.
+  - **Disc metadata:** every set reads the same: CAV side 1, 12 inch, user
+    code 1986, CX off, Amendment 2 present.
+  - **EFM content:** all ten pairs of images hold the same bytes wherever both
+    recovered a sector, and stacking all five is GOOD, with nothing the
+    filesystem needs missing.
+
+  Within that pressing:
+  - **Video:** none is soft. Noise orders the sets DS1, DS3, DS2, DS4, DS5. The
+    2026 captures, DS4 and DS5, are the noisiest, and have the most dropouts.
+  - **VFS:** DS3 loses 1.74% after C2. The others lose 0.06% or less, and
+    their data loss orders them DS1, DS2, DS4, DS5.
 
 ### Phase 5: Stack the video
 

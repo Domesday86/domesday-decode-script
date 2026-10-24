@@ -954,6 +954,39 @@ inputs, so a re-run with nothing changed does nothing.
   for committing, so a change in mapping shows up in `git diff`. A set that
   cannot be mapped stops the stage and is named; drop it by deleting its
   source and frame map from `map.orcprj`.
+- **Phase 4 is in place:** the `compare` stage and the `select` check. The
+  `compare` stage lays every mapped set's evidence side by side, in
+  `orc-<rev>/compare/report.txt`, for a person to decide the selection from.
+  It selects nothing. Besides what the `set` and `map` stages found, it
+  measures two things:
+  - the disc metadata each set reads (user code, CX, Amendment 2, side, first
+    and last picture), from its first and last 250 frames through decode-orc's
+    video sink (`metadata/<set>.yaml`);
+  - whether the sets' EFM images agree sector for sector, from
+    `vfs-stacker --dry-run --show-conflicts` over all of them
+    (`vfs-stacker.txt`).
+
+  It also writes `compare.json` (the same evidence, by set) and `check.txt`.
+  The decision goes in `discs/<disc>/selection.yaml`, written and committed
+  by hand. Its shape, with made-up choices:
+
+  ```yaml
+  pressing: A                # the pressing chosen: the one with the most sets
+  video:
+    sets: [DS1, DS2, DS3]    # best first: input 1 is the stacker's reference grid
+    dropped:
+      - set: DS5
+        reason: soft at 5-6 MHz
+  vfs:
+    sets: [DS1, DS2, DS4]    # best first: vfs-stacker breaks split votes towards it
+    dropped:
+      - set: DS3
+        reason: loses 1.7% of its EFM after C2
+  ```
+
+  Every set `map.orcprj` maps is either used or dropped with a reason, in
+  each stack. `select` is not stamped: it is waiting until the file exists,
+  and stops the build if the file breaks those rules.
 - **The later stages arrive phase by phase.** Until they do, a build stops at
   the first stage not yet written.
 
@@ -965,6 +998,7 @@ inputs, so a re-run with nothing changed does nothing.
 ./build-pack.sh volcanoes --force decode:DS3     # decode one set again
 ./build-pack.sh volcanoes --force set:DS3        # redo one set's EFM image and quality
 ./build-pack.sh volcanoes --until map            # ...then map and align every set
+./build-pack.sh volcanoes --until compare        # ...then the report to decide selection.yaml from
 ```
 
 Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read
