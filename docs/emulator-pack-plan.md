@@ -2,8 +2,9 @@
 
 Status: **phases 0–7 are built, and `selection.yaml` is decided.** The
 Volcanoes pack awaits its hand check on the player, the last of phase 7's
-exit criteria. Phase 8 is not built. Volcanoes is the pilot disc; the other
-discs follow once the process is proven on it.
+exit criteria. Phase 8 has started, with Domesday Community South.
+Volcanoes is the pilot disc; the other discs follow once the process is
+proven on it.
 
 ## Goal
 
@@ -1364,6 +1365,31 @@ discs. The differences from Volcanoes:
   from two pressings each (decode-orc's stacker study). These are the real
   test of phase 4.
 
+**Under way: Community South** (`discs/community-south`, stem
+`dd_comS_stack`), from its 12 captures, one per Domesday set.
+
+- `decode-community-south.sh` is `decode-volcanoes.sh` with this side's set
+  table, the same flags, and two checks changed:
+  - the EFM data runs from about picture 1950 to 45040, found from the
+    hand-built image's bad sector map (three sectors to a picture), so the
+    EFM check runs from picture 2000;
+  - DS3's capture stops at picture 53040, so a decode's frame count is
+    checked against the last picture its file name gives, not 54000.
+- One decode script per pack: Community South's captures are listed only in
+  `decode-community-south.sh`, and `decode-domesday.sh` no longer lists them
+  (naming the side there points at its script). Its other three sides stay
+  in `decode-domesday.sh`, which does not stamp, until each gets a pack
+  script of its own.
+- The disc's `set-efm.orcprj` and `set-quality.orcprj` are Volcanoes' with
+  the names changed; `map.orcprj` holds all 12 sets. `selection.yaml` and
+  `stack.orcprj` follow from its compare report, as on Volcanoes.
+- The baselines are the hand-built stack in
+  `vp415e_projects/CommunityS_output` (DS4, DS6, DS8 and DS10). Its disc
+  metadata reads CAV side 1, pictures 1–54000, user code 1066, Amendment 2
+  present.
+- The dry run verified all 12 captures against `sources.sha256` and found
+  every start within three frames of the one noted by hand in the library.
+
 ## Decisions
 
 | Question | Decision |
@@ -1375,6 +1401,7 @@ discs. The differences from Volcanoes:
 | Outputs per title | One emulation output per AIV title (one stem per side); outlier sets are dropped, never made into a second output |
 | Choosing a pressing | The pressing with the most available sources; sets from other pressings are dropped |
 | Project files | Committed per disc side, built for its selected sets |
+| Decode scripts | One per pack (disc side), which lists that side's captures and stamps its decodes; `decode-domesday.sh` keeps the Domesday sides that have no pack yet |
 | Final pack check | By hand on the player (vp415e cannot run without its hardware) |
 | Old outputs | Keep the current version and the previous one only |
 | Linux mounts | No fstab or automount snippet in the repo; the script prints the mount command if a share is missing |

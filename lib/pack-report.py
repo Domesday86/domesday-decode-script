@@ -438,7 +438,7 @@ def main():
         inputs = dict(i.split(": ", 1) for i in stamp.get("inputs", []) if ": " in i)
         decoder = dict(l.split(":", 1) for l in read_text(ddir / "decoder.txt").splitlines() if ":" in l)
         log = read_text(ddir / f"{s['decode_base']}.log", tail=65536)
-        took = re.search(r"Took ([0-9.]+) seconds to decode (\d+) frames", log)
+        took = re.search(r"Took ([0-9.]+) seconds to decode (\d+) frames(?: \(([0-9.]+) FPS)?", log)
         wrote = re.search(r"CVBS: wrote (\d+) frames (\S+), (\S+), sequence (\S+)", log)
         efm_bsm = read_bsm(sdir / f"{sid.lower()}_efm.dat.bsm")
         per[sid] = {"figs": figs, "inputs": inputs, "decoder": {k.strip(): v.strip() for k, v in decoder.items()},
@@ -602,7 +602,10 @@ def main():
         took, wrote = p["took"], p["wrote"]
         decodes.append([sid, p["decoder"].get("version", "–"), p["inputs"].get("start", "–"),
                         wrote.group(1) if wrote else "–", wrote.group(3) if wrote else "–",
-                        f"{float(took.group(1)) / 60:.0f} min" if took else "–"])
+                        f"{float(took.group(1)) / 60:.0f} min" if took else "–",
+                        # ld-decode's own rate (after its setup), or the frames over the time.
+                        (f"{float(took.group(3)):.1f}" if took.group(3) else
+                         f"{int(took.group(2)) / float(took.group(1)):.1f}" if float(took.group(1)) > 0 else "–") if took else "–"])
     flags = sorted({per[sid]["inputs"].get("flags", "") for sid in sets})
 
     quality_rows = []
@@ -760,8 +763,8 @@ def main():
         "captures": table(["set", "captured", "bytes", "video", "VFS", "library path"], captures,
                           ["left", "left", "right", "center", "center", "left"]),
         "fingerprints": table(["set", "sha256 of the first bytes"], fingerprints, ["left", "left"]), "head_bytes": fmt(head_bytes),
-        "decodes": table(["set", "ld-decode", "start", "frames", "signal", "time"], decodes,
-                         ["left", "left", "right", "right", "left", "right"]),
+        "decodes": table(["set", "ld-decode", "start", "frames", "signal", "time", "fps"], decodes,
+                         ["left", "left", "right", "right", "left", "right", "right"]),
         "flags": flags, "lead_in": man.get("lead_in"), "frames": man.get("decode_frames"),
         "quality": table(["set", "noise σ", "5–6 MHz", "white SNR", "lowest", "black PSNR", "dropouts", "samples", "burst"], quality_rows),
         "mapping": table(["set", "frames", "padded", "gaps", "split", "dups", "unmappable", "signal"], mapping,

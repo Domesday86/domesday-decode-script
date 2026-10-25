@@ -219,8 +219,14 @@ decode scripts' tables, so a capture added to a table cannot be left out.
 
 `decode-domesday.sh` decodes the twelve PAL Domesday disc sets. Each set is two
 double-sided discs — the Community disc carries **North** and **South**, the
-National disc carries **A** and **B** — so 12 sets × 4 sides. Three sides of
-every set are CAV; **National B is CLV**.
+National disc carries **A** and **B**. Three sides of every set are CAV;
+**National B is CLV**.
+
+Each VP415e pack has its own decode script, which stamps its decodes for
+`build-pack.sh`. **Community South** has one, `decode-community-south.sh`
+(see [Building a VP415e pack](#building-a-vp415e-pack)), so it is no longer in
+this script's table, and naming it here says so. The other three sides stay
+here, 12 sets × 3 sides, until each gets a pack script of its own.
 
 ```sh
 nix develop
@@ -243,18 +249,18 @@ A selector picks sides, and selectors add together:
 
 | Selector | Means |
 | --- | --- |
-| *(none)* | every side of every set — 49 decodes |
+| *(none)* | every side of every set — 37 decodes |
 | `DS4` | every side of disc set 4 |
 | `DS4:NationalA` | one side of one set |
 | `NationalB` | that side of every set |
-| `NB` | the same, by short name (`CN` `CS` `NA` `NB`) |
+| `NB` | the same, by short name (`CN` `NA` `NB`) |
 
 `--side` narrows whatever the selectors chose rather than adding to it, so
 `--side NB DS4 DS7` and `DS4:NB DS7:NB` are the same request. Set and side names
 are matched regardless of case, and naming a side twice still decodes it once.
 
-The sides come out in table order — set by set, and within a set North, South,
-A, B — however the selectors were written.
+The sides come out in table order — set by set, and within a set North, A,
+B — however the selectors were written.
 
 ### Sides captured in more than one pass
 
@@ -269,7 +275,6 @@ Both parts are selected together — `DS1:NationalA` means the whole side — an
 ```
 $ ./decode-domesday.sh --list DS1
 DS1:CommunityNorth       CAV  picture #1      …_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf
-DS1:CommunitySouth       CAV  picture #1      …_CommunitySouth_20191014_CAV_PAL_00001-54000.ldf
 DS1:NationalA part 1/2   CAV  picture #1      …_NationalA_PP_20191014_CAV_PAL_00001-37480.ldf
 DS1:NationalA part 2/2   CAV  picture #39001  …_NationalA_PP_20191014_CAV_PAL_39000-54000.ldf
 DS1:NationalB            CLV  picture #1      …_NationalB_PP_20191014_CLV_PAL_00-60.ldf
@@ -1100,12 +1105,30 @@ inputs, so a re-run with nothing changed does nothing.
 
   The stack's figures come from the `quality` stage, which measures the
   stacker's output with the same SNR and dropout analyses the set stage runs
-  on each set. It stacks the disc again for each analysis, so it takes about
-  as long as the video stage, but only once for each stack. The report is
+  on each set. It also measures the SNR of the same stack in Mean, every set
+  weighted equally, as a check on the stacker's weights. It stacks the disc
+  again for each analysis, so it takes about as long as the video stage, but
+  only once for each stack. The report is
   drawn by `lib/pack-report.py` (Matplotlib) and set by `typst` from
   `lib/pack-report.typ`, in IBM Plex from the dev shell rather than the host's
   fonts. Its working files (the graphs as SVG, and `report.json`) stay in
   `pack-<key>/report/`.
+- **Phase 8 is under way:** the other discs, one at a time, each a directory
+  under `discs/` and a decode script of its own that stamps its decodes: one
+  script per pack. A disc's
+  outputs go under its own `decode-script/<disc>/`, so two discs can be built
+  at once. Each runs its decodes two at a time, and two discs' decodes
+  together take the host past its measured best, so start the second when the
+  first is past its decodes.
+  - **Domesday Community South** (`community-south`, stem `dd_comS_stack`):
+    the 12 Community South captures, decoded by `decode-community-south.sh`,
+    which is `decode-volcanoes.sh` with this side's set table and checks. Its
+    EFM data runs from about picture 1950 to 45040, not to the end of the
+    side as on Volcanoes, and DS3's capture stops at picture 53040, which the
+    frame count check takes from the file name. The baselines are the
+    hand-built stack in `vp415e_projects/CommunityS_output`, which stacked
+    DS4, DS6, DS8 and DS10. Its `selection.yaml` and `stack.orcprj` are
+    written once the compare report is in.
 
 ```sh
 ./build-pack.sh volcanoes status                 # each stage: up to date, or stale and why
