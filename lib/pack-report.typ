@@ -98,7 +98,8 @@
 
 #block(below: 4pt, text(size: 8pt, fill: ink2, tracking: 0.4pt, upper[VP415e pack report]))
 #block(below: 4pt, text(size: 24pt, weight: "semibold", data.title))
-#block(below: 12pt, text(size: 9.5pt, fill: ink2)[#data.side · #mono(data.stem, size: 9pt) · pack #mono(data.id, size: 9pt)])
+#block(below: 3pt, text(size: 9.5pt, fill: ink2)[#data.side · #mono(data.stem, size: 9pt) · pack #mono(data.id, size: 9pt)])
+#block(below: 12pt, text(size: 9.5pt, fill: ink2)[Directory #mono(data.place + "/" + data.version + "/", size: 9pt) on the decodes share])
 
 #block(below: 10pt, text(size: 8.5pt)[Made by build-pack.sh from #data.captures.rows.len() RF captures of the side: decoded by ld-decode, mapped, stacked and measured by decode-orc, and the data area stacked and verified by vfs-verifier, each at the exact revision in @tools. Every step is automatic except the selection of the sets, which is a person's (@selection); @pipeline lists the steps.])
 
@@ -127,8 +128,8 @@
   [#heading(level: 2, numbering: none)[The pack]
 #kv(
   ("Disc", [#data.title (#data.disc), #data.side]),
-  ("Pack id", [#mono(data.id) — the first 16 hex digits of the sha256 of the three files' lines of SHA256SUMS]),
-  ("Version", mono(data.version)),
+  ("Pack id", [#mono(data.id) — the first 16 hex digits of the sha256 of the three files' lines of SHA256SUMS. It names the files the player loads, not the directory]),
+  ("Directory", [#mono(data.place + "/" + data.version + "/") on the decodes share; #mono(data.place + "/pack") points at the current pack]),
   ("Built", [#data.built, by build-pack.sh at #mono(data.script.commit)#if data.script.dirty [ (with uncommitted changes)]]),
   ("Video stack", data.video_sets.join(", ") + [, best first]),
   ("VFS stack", data.vfs_sets.join(", ") + [, best first]),
@@ -248,13 +249,15 @@ Every set is measured over every frame by decode-orc's SNR, dropout and burst le
 
 Both picture measures come from the test signals in the vertical interval (VITS), so they measure the same thing on every frame whatever the picture: white SNR on the white flag, against its mean, and black PSNR on the black level reference, against peak white. Together they cover the luminance range.
 
+They measure the test lines, not the picture. The stacker weights each set by a different measure: how much it differs from the others across the active picture. So the two can disagree. When they do, a set that reads best here may carry something in its picture that the test lines do not show, or the stacker may be counting as noise a difference that is not noise. Where the stack falls below a single set here, the loss in the picture can be much smaller than these graphs show. Noise that every set of one pressing shares, recorded into the stamper, shows here and cannot be stacked away.#if data.have_mean [ The same stack in Mean, with every set weighted equally, is measured too (the dashed line). Where Mean reads better than the stack as built, the stacker's weights do not favour the sets these figures do.]
+
 #for (k, name) in (("white", "White SNR"), ("black", "Black PSNR")) [
   == #name
   #if k in data.graphs { graph(data.graphs.at(k)) }
   #if ("gain_" + k) in data.graphs [
     #let g = data.key.at("gain_" + k)
     #graph(data.graphs.at("gain_" + k))
-    #text(size: 8pt)[The stack is better than the best single set in #g.better of #g.bins blocks, worse in #g.worse (by more than 0.05 dB). Worst: #(g.worst).]
+    #text(size: 8pt)[The stack is better than the best single set in #g.better of #g.bins blocks, worse in #g.worse (by more than 0.05 dB). Worst: #(g.worst).#if "vs_mean" in g [ Against the same stack in Mean, it is better in #g.weighted_better blocks and worse in #g.mean_better, and #g.vs_mean dB over the disc.]]
   ]
   #if ("distribution_" + k) in data.graphs { graph(data.graphs.at("distribution_" + k)) }
 ]

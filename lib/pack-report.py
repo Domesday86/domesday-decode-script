@@ -247,12 +247,14 @@ def frame_axis(ax, n):
     ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda x, _: f"{int(x):,}".replace(",", " ")))
 
 
-def line_graph(work, name, title, ylabel, n, series, stack, log=False):
+def line_graph(work, name, title, ylabel, n, series, stack, log=False, mean=None):
     """Sources as thin lines in their colours, the stack thicker in ink, along
-    the disc."""
+    the disc; with mean, the same stack in Mean as a dashed ink line."""
     fig, ax = plt.subplots(figsize=(7.0, 2.5))
     for s in series:
         ax.plot(s["x"], s["y"], color=s["colour"], lw=0.9, label=s["set"])
+    if mean is not None:
+        ax.plot(mean["x"], mean["y"], color=STACK_COLOUR, lw=1.0, ls=(0, (3, 2)), label="Stack in Mean")
     if stack is not None:
         ax.plot(stack["x"], stack["y"], color=STACK_COLOUR, lw=1.8, label="Stack")
         # A point with no finite neighbour draws no line, so it is a dot.
@@ -268,7 +270,7 @@ def line_graph(work, name, title, ylabel, n, series, stack, log=False):
     ax.set_ylabel(ylabel)
     frame_axis(ax, n)
     ax.set_title(title)
-    legend_row(ax, len(series) + 1)
+    legend_row(ax, len(series) + 1 + (mean is not None))
     return save(fig, work, name)
 
 
@@ -448,7 +450,11 @@ def main():
     stackq = read_json(qdir / "quality.json") or {}
     stack = {"white": read_csv(qdir / "snr.csv", "white_snr_db"), "black": read_csv(qdir / "snr.csv", "black_psnr_db"),
              "dropouts": read_csv(qdir / "dropouts.csv", "dropout_count")}
+    # The same stack in Mean, every input weighted equally: a check on the
+    # stacker's weights.
+    stack_mean = {"white": read_csv(qdir / "mean-snr.csv", "white_snr_db"), "black": read_csv(qdir / "mean-snr.csv", "black_psnr_db")}
     have_stack = len(stack["white"]) > 0
+    have_mean = have_stack and len(stack_mean["white"]) > 0
 
     graphs = {}
     key_figures = {}
@@ -465,12 +471,15 @@ def main():
                     continue
                 x, mean, total = bins(v, n)
                 series.append({"set": sid, "colour": colours[sid], "x": x, "y": total if key == "dropouts" else mean})
-            st = None
+            st = sm = None
             if key in stack and len(stack[key]):
                 x, mean, total = bins(stack[key], n)
                 st = {"x": x, "y": total if key == "dropouts" else mean}
+            if have_mean and key in stack_mean:
+                x, mean, _ = bins(stack_mean[key], n)
+                sm = {"x": x, "y": mean}
             if series:
-                graphs[key] = line_graph(work, f"along-{key}", title, ylabel, n, series, st, log=log)
+                graphs[key] = line_graph(work, f"along-{key}", title, ylabel, n, series, st, log=log, mean=sm)
 
         # For each measure, the stack against the best video set in each
         # block, and the spread of its per-frame values against theirs.
@@ -489,6 +498,14 @@ def main():
             if finite.any():
                 worst = int(np.nanargmin(gain))
                 g["worst"] = f"frames {worst * BIN}–{min(n, worst * BIN + BIN) - 1}: {gain[worst]:+.2f} dB"
+            if have_mean:
+                # The stack as built against the same stack in Mean.
+                _, mmean, _ = bins(stack_mean[key], n)
+                vm = smean - mmean
+                ok = np.isfinite(vm)
+                g["mean_better"] = int((vm[ok] < -0.05).sum())
+                g["weighted_better"] = int((vm[ok] > 0.05).sum())
+                g["vs_mean"] = f"{np.nanmean(stack[key]) - np.nanmean(stack_mean[key]):+.2f}"
             key_figures[f"gain_{key}"] = g
             graphs[f"distribution_{key}"] = distribution_graph(
                 work, key, label, [{"set": sid, "colour": colours[sid], "v": per[sid]["figs"][key]} for sid in vs],
@@ -600,6 +617,10 @@ def main():
         snr, dro = stackq.get("snr") or {}, stackq.get("dropouts") or {}
         quality_rows.append(["Stack", None, None, snr.get("mean_white_snr"), snr.get("min_white_snr"),
                              snr.get("mean_black_psnr"), dro.get("total_dropouts"), dro.get("total_dropout_samples"), None])
+    if have_mean:
+        snr = stackq.get("mean_snr") or {}
+        quality_rows.append(["Stack in Mean", None, None, snr.get("mean_white_snr"), snr.get("min_white_snr"),
+                             snr.get("mean_black_psnr"), None, None, None])
 
     mapping = []
     for sid in sets:
@@ -728,7 +749,9 @@ def main():
     first = man["sets"][0] if man["sets"] else None
     data = {
         "title": man["title"], "disc": man["disc"], "stem": man["stem"], "side": f"{man['format']} side {man['side']}, pictures {man['pictures']}",
-        "built": pack.get("built", "–"), "version": man["pack_version"], "id": pack.get("id", "–"),
+        "built": pack.get("built", "–"), "version": man["pack_version"],
+        # Where the pack directory sits on the decodes share, whatever its mount point.
+        "place": "/".join(Path(man["out"]).parts[-2:]), "id": pack.get("id", "–"),
         "status": pack.get("status", "–"), "complete": bool(pack.get("complete")),
         "script": man["script"], "pipeline": table(["step", "tool", "what it does", "what it made here", "checks"], pipeline, ["left"] * 5),
         "files": table(["file", "bytes", "sha256", "in the pack"], files, ["left", "right", "left", "left"]),
@@ -743,7 +766,7 @@ def main():
         "quality": table(["set", "noise σ", "5–6 MHz", "white SNR", "lowest", "black PSNR", "dropouts", "samples", "burst"], quality_rows),
         "mapping": table(["set", "frames", "padded", "gaps", "split", "dups", "unmappable", "signal"], mapping,
                          ["left"] + ["right"] * 6 + ["left"]),
-        "graphs": graphs, "key": key_figures, "bin": BIN, "have_stack": have_stack,
+        "graphs": graphs, "key": key_figures, "bin": BIN, "have_stack": have_stack, "have_mean": have_mean,
         "stack_quality": stackq,
         "video_sets": video_sets, "vfs_sets": vfs_sets, "pressing": sel.get("pressing"),
         "selection_text": read_text(man["selection"]),
@@ -795,7 +818,8 @@ def main():
     (work / "report.json").write_text(json.dumps(data, indent=1, default=str))
 
     typ = Path(__file__).with_name("pack-report.typ")
-    cmd = ["typst", "compile", "--root", "/", "--ignore-system-fonts", "--input", f"data={(work / 'report.json').resolve()}",
+    # The format is given, since the pack stage writes to <name>.pdf.partial.
+    cmd = ["typst", "compile", "--format", "pdf", "--root", "/", "--ignore-system-fonts", "--input", f"data={(work / 'report.json').resolve()}",
            "--input", f"graphs={work.resolve()}"]
     if os.environ.get("PACK_REPORT_FONTS"):
         cmd += ["--font-path", os.environ["PACK_REPORT_FONTS"]]

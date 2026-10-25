@@ -447,7 +447,9 @@ describe_quality() {
   stage_input_stamp video "$QUALITY_VIDEO"
   stage_input_tool decode-orc
   stage_input_file "quality project" "$DISC_DIR/set-quality.orcprj"
+  stage_input "comparison" "SNR of the same stack in Mean"
   stage_output snr.csv
+  stage_output mean-snr.csv
   stage_output dropouts.csv
   stage_output quality.json
   stage_output check.txt
@@ -1920,9 +1922,15 @@ vfs_coverage() {
 # (dropouts). Burst level is the capture's, not something stacking improves,
 # so it is not measured again.
 #
+# The SNR is also measured on the same stack in Mean, every input weighted
+# equally, as a check on the stacker's weighting: where Mean measures better,
+# the weights favour the wrong inputs (or the test lines the SNR analysis
+# reads disagree with the active picture the stacker weighs).
+#
 # Each sink's tool is run as the set stage runs it, and each run stacks the
-# whole disc again: about two hours in all for Volcanoes. Its own stamp keeps
-# it to once per stack.
+# whole disc again: about an hour and a quarter in all for Volcanoes over the
+# 10G link, Mean being the quickest. Its own stamp keeps it to once per
+# stack.
 
 # The set analyses this stage runs on the stack.
 QUALITY_ANALYSES=(snr dropouts)
@@ -1961,7 +1969,7 @@ quality_project() {
 }
 
 build_quality() {
-  local dir a tool node csv t
+  local dir a tool node csv t stacker
   describe_quality
   dir="$STAGE_DIR"
 
@@ -1984,6 +1992,18 @@ build_quality() {
       --csv "$(stage_tmp "$csv.csv")" > "$dir/$csv.json" 2> "$dir/$csv.log" || true
     printf 'quality: %s analysed in %ss\n' "$node" "$(( SECONDS - t ))"
   done
+
+  # The same SNR on the stack in Mean.
+  stacker=$(yq '.dag.nodes[] | select(.stage == "stacker") | .user_label' "$dir/quality.orcprj")
+  if orc-cli nodes set "$dir/quality.orcprj" "$stacker" mode=Mean --output "$dir/quality-mean.orcprj" > /dev/null; then
+    printf 'quality: SNR of the same stack in Mean; this stacks the whole disc again\n'
+    t=$SECONDS
+    orc-cli tools run "$dir/quality-mean.orcprj" snr_analysis --node SNR --json --quiet \
+      --csv "$(stage_tmp mean-snr.csv)" > "$dir/mean-snr.json" 2> "$dir/mean-snr.log" || true
+    printf 'quality: SNR in Mean analysed in %ss\n' "$(( SECONDS - t ))"
+  else
+    printf 'quality: could not make the Mean project\n' > "$dir/mean-snr.log"
+  fi
 
   if ! check_quality "$dir"; then
     cat -- "$dir/check.failed.txt" >&2
@@ -2028,11 +2048,27 @@ check_quality() {
         else "dropouts left by the stack: \(.total_dropouts) totalling \(.total_dropout_samples) samples, in \(.frames_with_dropouts) frames" end' "$dir/$csv.json")"
     done
 
+    # The same SNR in Mean, over the same frames.
+    status=$(jq -r '.nodes[0].status // empty' "$dir/mean-snr.json" 2>/dev/null) || status=""
+    if [ "$status" != success ]; then
+      fail "SNR analysis in Mean: ${status:-no report} ($(head -c 300 "$dir/mean-snr.log" 2>/dev/null | tr '\n' ' '))"
+    else
+      read -r frames total < <(jq -r '.nodes[0].statistics | "\(.frames_analysed) \(.total_frames)"' "$dir/mean-snr.json") || true
+      rows=$(( $(wc -l < "$dir/mean-snr.csv.partial" 2>/dev/null || echo 1) - 1 ))
+      if [ "$frames" = "$total" ] && [ "$frames" = "$expect" ] && [ "$rows" = "$frames" ]; then
+        ok "SNR analysis in Mean over all $frames frames of the stack, per frame in mean-snr.csv"
+      else
+        fail "SNR analysis in Mean covered ${frames:-no} of ${total:-unknown} frames, with $rows in mean-snr.csv; the stack has ${expect:-unknown}"
+      fi
+      note "$(jq -r '.nodes[0].statistics | def r(n): . * n | round / n;
+        "SNR of the stack in Mean: white \(.mean_white_snr | r(100)) dB, black PSNR \(.mean_black_psnr | r(100)) dB (means)"' "$dir/mean-snr.json")"
+    fi
+
     jq -n --arg video "${QUALITY_VIDEO#"$OUT"/}" --arg sets "$(selected_sets video | paste -sd' ' -)" \
-          --rawfile snr "$dir/snr.json" --rawfile dropouts "$dir/dropouts.json" '
+          --rawfile snr "$dir/snr.json" --rawfile dropouts "$dir/dropouts.json" --rawfile mean "$dir/mean-snr.json" '
       def stats: (fromjson? // {}) | .nodes[0] // {} | if .status == "success" then .statistics else null end;
       { video: $video, sets: ($sets | split(" ")), measured: "the stacker output, before dropout correction",
-        snr: ($snr | stats), dropouts: ($dropouts | stats) }' \
+        snr: ($snr | stats), dropouts: ($dropouts | stats), mean_snr: ($mean | stats) }' \
       > "$(stage_tmp quality.json)" || fail "could not write quality.json"
 
     printf '\nresult: %s\n' "$([ "$fails" = 0 ] && echo pass || echo "FAIL ($fails)")"
@@ -2103,8 +2139,14 @@ build_pack() {
   printf 'pack: assembled %s from %s and %s; checking it again\n' "$STEM" "${PACK_VIDEO#"$OUT"/}" "${PACK_VFS#"$OUT"/}"
 
   if ! check_pack "$dir" "${assembled[@]}"; then
-    cat -- "$dir/check.failed.txt" >&2
-    printf 'pack: failed its checks and is not stamped (see %s/check.failed.txt)\n' "$dir" >&2
+    # A failed check leaves check.failed.txt; a step after the checks (the
+    # provenance, the report) says what went wrong itself, above.
+    if [ -f "$dir/check.failed.txt" ]; then
+      cat -- "$dir/check.failed.txt" >&2
+      printf 'pack: failed its checks and is not stamped (see %s/check.failed.txt)\n' "$dir" >&2
+    else
+      printf 'pack: not stamped (above)\n' >&2
+    fi
     return 1
   fi
   cat -- "$dir/check.txt.partial"
