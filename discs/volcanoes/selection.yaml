@@ -15,13 +15,13 @@ pressing: A
 
 video:
   # By what each adds, the predicted stack σ without it, from Source
-  # Alignment's capture comparison (orc-2611e5b, 2026-10-26), and its share of
-  # the weight: DS1 4.90 (26%), DS3 4.77 (22%), DS2 4.72 (21%), DS4 4.61 (17%),
-  # DS5 4.53 (14%); 4.21 with all five. Every set adds, so none is left out.
-  # DS1 is first: sample_align lines the others up on its sample grid. The
-  # compare report suggests DS5 as the reference instead (it has one padding
-  # frame fewer than DS1, 14 against 15); every set's grid offset is 0.
-  sets: [DS1, DS3, DS2, DS4, DS5]
+  # Alignment's capture comparison (orc-1a152d6, 2026-10-27), and its share of
+  # the weight: DS1 5.05 (24%), DS2 5.03 (23%), DS3 4.96 (21%), DS4 4.87 (18%),
+  # DS5 4.75 (14%); 4.41 with all five. Every set adds, so none is left out.
+  # DS1 is first: it is the compare report's suggested reference (15 padding
+  # frames, adds the most), and sample_align lines the others up on its sample
+  # grid. The next choice is DS4 (16 padding frames, adds 4.87).
+  sets: [DS1, DS2, DS3, DS4, DS5]
   dropped: []
 
 vfs:

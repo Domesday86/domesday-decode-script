@@ -925,6 +925,26 @@ noise) and VFS DS1 DS2 DS4 DS5 DS3 (by data loss), with nothing dropped.
   stamper group is now evidence of shared noise, not of content, the video
   sets are ordered suggested reference first and then by what each adds,
   and noise σ alone decides nothing.
+- **decode-orc 1a152d6 (2026-10-27)** answers the feedback from the
+  Community South run (its `docs-tech/decode-script-feedback-response.md`):
+  - **The suggested reference** goes to the set that adds the most when
+    padding differs by 10 frames or fewer, and a next choice is given
+    (`referenceRunnerUp`). The compare report shows both, with what each
+    adds and its padding, so a close call shows as one. Volcanoes' suggested
+    reference becomes DS1, the committed order, with DS4 next.
+  - **White SNR** read the white bar's rising edge as well as its flat top
+    (PAL line 19, from 12 µs; now from 14 µs). The old figures were 4–6 dB
+    low and depended on the stack's first set, which explains Community
+    South's fall from 31.58 to 30.62 dB. White SNR is not compared across
+    that revision; black PSNR is unchanged and can be.
+  - **Source Alignment** samples the 16 frames the stacker does, so the two
+    find the same stamper groups: four on Community South, with DS6, DS9 and
+    DS10 a group of their own, from the same mother as group A.
+  - **Each `weights` record** names the pair the noise model fits worst
+    (`worstPair`, `worstMisfitPercent`). The video stage and the pack report
+    give it as the reason for a block stacked with equal weights. A set
+    under a quarter of an even share of the weight that shares a family
+    with other sets is said to share their noise.
 - **The evidence for Volcanoes.** All five sets are one pressing, on every
   count:
   - **Source Alignment:** one stamper group.
@@ -1497,7 +1517,11 @@ discs. The differences from Volcanoes:
   sets alone in theirs, DS3, DS5 and DS11, add the most. Against the f7f3094
   pack's five sets, black PSNR rises from 32.45 to 36.61 dB and the dropouts
   left fall from 775,353 to 420,088; white SNR falls from 31.58 to 30.62 dB,
-  not yet explained. Four 500-frame blocks fell back to equal weights where
+  which decode-orc 1a152d6 traced to its measurement window (above): the
+  5-set stack had DS4 first and the 11-set stack DS2. decode-orc reports
+  that on that revision Source Alignment reads four stamper groups and white
+  SNR is about 40 dB; neither is rebuilt here yet.
+  Four 500-frame blocks fell back to equal weights where
   the noise model was not trusted, one of them the test card (1501-2000).
   Until then the video stacked DS4 DS12 DS2 DS1 DS8 only: that decode-orc
   read DS3, DS5 and DS11 as soft and the sharp sets as two pressings.

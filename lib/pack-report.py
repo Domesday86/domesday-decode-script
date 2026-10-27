@@ -196,7 +196,9 @@ def stacker_blocks(log, sets, n):
                     "groups": [i.get("stamperGroup") for i in inputs],
                     "fit_trusted": r.get("fitTrusted"), "fell_back_to_mean": r.get("fellBackToMean"),
                     "weighted_sigma": r.get("weightedSigma"), "equal_sigma": r.get("equalSigma"),
-                    "best_single_sigma": r.get("bestSingleSigma")})
+                    "best_single_sigma": r.get("bestSingleSigma"),
+                    "worst_pair": [sets[i - 1] for i in r["worstPair"]] if r.get("worstPair") else None,
+                    "worst_misfit": r.get("worstMisfitPercent")})
     out.sort(key=lambda b: b["from"])
     for k, b in enumerate(out):
         b["to"] = out[k + 1]["from"] - 1 if k + 1 < len(out) else max(n, b["to"])
@@ -224,6 +226,17 @@ QUALITY_KEY = ("group: the set's stamper group, as Source Alignment found it. "
                "noise σ, adds, weight and 5–6 MHz response: Source Alignment's capture comparison (10-bit codes). noise σ is "
                "the set's own noise; adds is the predicted noise σ of the stack without the set, the higher the more it "
                "adds; weight is its share of the Weighted stack of every set compared; a response of 1 is typical.")
+
+
+def sample_text(sample, n):
+    """What the stack was measured on, when it was a sample; empty otherwise."""
+    if not sample:
+        return ""
+    blocks = [f"{a}–{b}" for a, b in sample.get("blocks") or []]
+    return (f"The stack is measured on a sample of {sample.get('frames'):,} of its {n:,} frames, at the beginning, the "
+            f"middle and the end of the side: frames {', '.join(blocks[:-1])} and {blocks[-1]}. Wherever it is set against the "
+            "sets, the figures at the top, the bars and the graphs, the sets are taken over the same frames; the sets' own "
+            "rows of the table are over every frame, and the stack's rows over the sample.")
 
 
 # --- figures ------------------------------------------------------------------
@@ -344,8 +357,9 @@ def gain_graph(work, key, label, x, gain, n):
     return save(fig, work, f"{key}-gain")
 
 
-def distribution_graph(work, key, label, sets, stack):
-    """Per-frame white SNR or black PSNR, as the share of frames at each 0.25 dB."""
+def distribution_graph(work, key, label, sets, stack, over="every frame"):
+    """Per-frame white SNR or black PSNR, as the share of frames at each 0.25 dB,
+    over the frames named by over."""
     allv = np.concatenate([s["v"][np.isfinite(s["v"])] for s in sets + ([stack] if stack else [])])
     lo, hi = np.percentile(allv, 0.2), np.percentile(allv, 99.9)
     edges = np.arange(math.floor(lo * 4) / 4, hi + 0.25, 0.25)
@@ -358,7 +372,7 @@ def distribution_graph(work, key, label, sets, stack):
     ax.set_xlim(edges[0], edges[-1])
     ax.set_xlabel(f"{label} of a frame (dB)")
     ax.set_ylabel("% of frames")
-    ax.set_title(f"Per-frame {label}, every frame of each set and of the stack")
+    ax.set_title(f"Per-frame {label}, {over} of each set and of the stack")
     legend_row(ax, len(sets) + 1)
     return save(fig, work, f"{key}-distribution")
 
@@ -549,6 +563,9 @@ def markdown(data, graphs):
       f"| {v.get('result', '–')}; {v.get('objects', '–')} objects, {v.get('objects_damaged', '–')} damaged "
       f"| pictures {md.get('addresses', '–')}; {md.get('undecoded_n', '–')} undecoded |")
     w("")
+    if data.get("sample_text"):
+        w(data["sample_text"])
+        w("")
     for g in ("bars_white", "bars_black", "bars_dropouts"):
         graph(g)
     w("## The pack")
@@ -687,13 +704,19 @@ def markdown(data, graphs):
       "(the quality stage). The frame maps put both on the frames of the pack's mkv, so each graph compares like with "
       f"like. The graphs along the disc show one point per {data.get('bin')} frames.")
     w("")
+    if data.get("sample_text"):
+        w(data["sample_text"])
+        w("")
     tbl(data.get("quality"))
     w(f"{QUALITY_KEY} White SNR, its lowest frame, and black PSNR in dB; dropouts and their samples over the whole disc; burst level as a "
       "10-bit median, mean over frames.")
     w("")
     w("Both picture measures come from the test signals in the vertical interval (VITS), so they measure the same thing on "
       "every frame whatever the picture: white SNR on the white flag, against its mean, and black PSNR on the black level "
-      "reference, against peak white. Together they cover the luminance range.")
+      "reference, against peak white. Together they cover the luminance range. "
+      "White SNR is read on the flat top of the bar, from 2 µs after its nominal start (decode-orc's SNR measurement "
+      "1.1.0, from decode-orc 1a152d6). Packs built on earlier decode-orc read the bar's rising edge as well, 4–6 dB "
+      "lower and depending on the stack's first set, so their white SNR cannot be compared with this one's; black PSNR can.")
     w("")
     w("They measure the test lines, not the picture. The stacker weights each set by a different measure: how much it "
       "differs from the others across the active picture. So the two can disagree. When they do, a set that reads best "
@@ -884,6 +907,19 @@ def main():
     stack_mean = {"white": read_csv(qdir / "mean-snr.csv", "white_snr_db"), "black": read_csv(qdir / "mean-snr.csv", "black_psnr_db")}
     have_stack = len(stack["white"]) > 0
     have_mean = have_stack and len(stack_mean["white"]) > 0
+    # The frames the stack was measured on, when the quality stage measured a
+    # sample (blocks of the stack's frames, from 1) rather than all of them.
+    # Wherever the stack is set against the sets, the sets are taken over the
+    # same frames.
+    sample = stackq.get("sample") or None
+    sampled = np.zeros(n, dtype=bool)
+    for a, b in (sample or {}).get("blocks") or []:
+        sampled[max(0, a - 1):min(n, b)] = True
+
+    def over_sample(v):
+        if not sample or not len(v):
+            return v
+        return np.where(sampled[:len(v)], v[:n], np.nan)
 
     graphs = {}
     key_figures = {}
@@ -937,21 +973,35 @@ def main():
                 g["vs_mean"] = f"{np.nanmean(stack[key]) - np.nanmean(stack_mean[key]):+.2f}"
             key_figures[f"gain_{key}"] = g
             graphs[f"distribution_{key}"] = distribution_graph(
-                work, key, label, [{"set": sid, "colour": colours[sid], "ls": dashes[sid], "v": per[sid]["figs"][key]} for sid in vs],
-                {"set": "Stack", "colour": STACK_COLOUR, "v": stack[key]})
+                work, key, label, [{"set": sid, "colour": colours[sid], "ls": dashes[sid], "v": over_sample(per[sid]["figs"][key])}
+                                   for sid in vs],
+                {"set": "Stack", "colour": STACK_COLOUR, "v": stack[key]},
+                "the sampled frames" if sample else "every frame")
 
     def stat(sid, group, field):
         return ((evidence.get(sid) or {}).get(group) or {}).get(field)
 
+    # A set's figure to set beside the stack's: its mean SNR or PSNR, or its
+    # total dropouts, over the same frames as the stack.
+    def against_stack(sid, key, group, field):
+        if not sample:
+            return stat(sid, group, field)
+        v = over_sample(per[sid]["figs"][key])
+        if not len(v) or not np.isfinite(v).any():
+            return None
+        return int(np.nansum(v)) if key == "dropouts" else float(np.nanmean(v))
+
     # The headline: the stack against the best of the video sets.
     for key, _, _, field in MEASURES:
-        best = [(stat(sid, "snr", field), sid) for sid in video_sets if stat(sid, "snr", field) is not None]
+        best = [(against_stack(sid, key, "snr", field), sid) for sid in video_sets]
+        best = [b for b in best if b[0] is not None]
         if best:
             v, sid = max(best)
             key_figures[f"best_{key}"] = {"set": sid, "value": fmt(v)}
         if have_stack:
             key_figures[f"stack_{key}"] = fmt((stackq.get("snr") or {}).get(field))
-    drops = [(stat(sid, "dropouts", "total_dropouts"), sid) for sid in video_sets if stat(sid, "dropouts", "total_dropouts") is not None]
+    drops = [(against_stack(sid, "dropouts", "dropouts", "total_dropouts"), sid) for sid in video_sets]
+    drops = [d for d in drops if d[0] is not None]
     if drops:
         v, sid = min(drops)
         key_figures.update(best_dropouts_set=sid, best_dropouts=fmt(v))
@@ -959,18 +1009,21 @@ def main():
         key_figures.update(stack_dropouts=fmt((stackq.get("dropouts") or {}).get("total_dropouts")))
 
     for key, _, title, field in MEASURES:
-        bar_rows = [{"set": sid, "colour": colours[sid], "value": stat(sid, "snr", field)}
-                    for sid in sets if stat(sid, "snr", field) is not None]
+        bar_rows = [{"set": sid, "colour": colours[sid], "value": against_stack(sid, key, "snr", field)} for sid in sets]
+        bar_rows = [r for r in bar_rows if r["value"] is not None]
         if have_stack and (stackq.get("snr") or {}).get(field) is not None:
             bar_rows.append({"set": "Stack", "colour": STACK_COLOUR, "value": stackq["snr"][field]})
         if bar_rows:
-            graphs[f"bars_{key}"] = summary_bars(work, f"bars-{key}", f"Mean {title[0].lower()}{title[1:]}", "dB", bar_rows, dots=True)
-    bar_rows = [{"set": sid, "colour": colours[sid], "value": stat(sid, "dropouts", "total_dropouts")}
-                for sid in sets if stat(sid, "dropouts", "total_dropouts") is not None]
+            graphs[f"bars_{key}"] = summary_bars(work, f"bars-{key}", f"Mean {title[0].lower()}{title[1:]}"
+                                                 + (", the sampled frames" if sample else ""), "dB", bar_rows, dots=True)
+    bar_rows = [{"set": sid, "colour": colours[sid], "value": against_stack(sid, "dropouts", "dropouts", "total_dropouts")}
+                for sid in sets]
+    bar_rows = [r for r in bar_rows if r["value"] is not None]
     if have_stack and (stackq.get("dropouts") or {}).get("total_dropouts") is not None:
         bar_rows.append({"set": "Stack", "colour": STACK_COLOUR, "value": stackq["dropouts"]["total_dropouts"]})
     if bar_rows:
-        graphs["bars_dropouts"] = summary_bars(work, "bars-dropouts", "Dropouts, whole disc", "dropouts", bar_rows, 0)
+        graphs["bars_dropouts"] = summary_bars(work, "bars-dropouts", "Dropouts, the sampled frames" if sample else "Dropouts, whole disc",
+                                               "dropouts", bar_rows, 0)
 
     # --- the stacker -------------------------------------------------------------
     vdir = Path(man["video_dir"])
@@ -1051,11 +1104,13 @@ def main():
                              dro.get("total_dropout_samples"), bur.get("mean_median_burst_10bit")])
     if have_stack:
         snr, dro = stackq.get("snr") or {}, stackq.get("dropouts") or {}
-        quality_rows.append(["Stack", None, None, None, None, None, snr.get("mean_white_snr"), snr.get("min_white_snr"),
+        quality_rows.append(["Stack, sampled" if sample else "Stack", None, None, None, None, None,
+                             snr.get("mean_white_snr"), snr.get("min_white_snr"),
                              snr.get("mean_black_psnr"), dro.get("total_dropouts"), dro.get("total_dropout_samples"), None])
     if have_mean:
         snr = stackq.get("mean_snr") or {}
-        quality_rows.append(["Stack in Mean", None, None, None, None, None, snr.get("mean_white_snr"), snr.get("min_white_snr"),
+        quality_rows.append(["Stack in Mean, sampled" if sample else "Stack in Mean", None, None, None, None, None,
+                             snr.get("mean_white_snr"), snr.get("min_white_snr"),
                              snr.get("mean_black_psnr"), None, None, None])
 
     mapping = []
@@ -1072,7 +1127,9 @@ def main():
                         fmt(sum(x[0] * x[2] for x in m) / f if f else None, 1), fmt(min((x[2] for x in m), default=None), 1)])
     split_blocks = [[f"{b['from']}–{b['to']}",
                      " · ".join(f"{s} {v:.0f}%" for s, v in zip(video_sets, b["share"]) if v is not None),
-                     "equal weights: model not trusted" if b["fell_back_to_mean"] else "model not trusted"]
+                     ("equal weights: model not trusted" if b["fell_back_to_mean"] else "model not trusted")
+                     + (f" ({' and '.join(b['worst_pair'])} misfit by {b['worst_misfit']:.0f}%)"
+                        if b["worst_pair"] and b["worst_misfit"] is not None else "")]
                     for b in blocks if b["fit_trusted"] is False]
     untrusted = len(split_blocks)
     untrusted_frames = sum(b["frames"] for b in blocks if b["fit_trusted"] is False)
@@ -1267,6 +1324,7 @@ def main():
         "split_blocks": table(["frames", "share of the weight", "stacked with"], split_blocks, ["left", "left", "left"]),
         "records": records, "trust": trust,
         "stacker_text": STACKER_TEXT, "untrusted_text": UNTRUSTED_TEXT, "quality_key": QUALITY_KEY,
+        "sample_text": sample_text(sample, n),
         "noise_reduction": (f"Noise reduction: {fmt(nr['db'], 1)} dB, {nr.get('mode')}: averaged only across the frames the "
                             "stacker marks as one held picture, so every single-frame still is as stacked."
                             if nr.get("db") else None),

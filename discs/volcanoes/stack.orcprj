@@ -58,7 +58,7 @@ dag:
       stage: PAL_CVBS_Source
       node_type: SOURCE
       display_name: CVBS Source
-      user_label: DS3
+      user_label: DS2
       x: 50
       y: 175
       parameters:
@@ -78,7 +78,7 @@ dag:
       stage: PAL_CVBS_Source
       node_type: SOURCE
       display_name: CVBS Source
-      user_label: DS2
+      user_label: DS3
       x: 50
       y: 300
       parameters:
@@ -149,7 +149,7 @@ dag:
       stage: frame_map
       node_type: TRANSFORM
       display_name: Frame Map
-      user_label: DS3 map
+      user_label: DS2 map
       x: 275
       y: 175
       parameters:
@@ -160,7 +160,7 @@ dag:
       stage: frame_map
       node_type: TRANSFORM
       display_name: Frame Map
-      user_label: DS2 map
+      user_label: DS3 map
       x: 275
       y: 300
       parameters:

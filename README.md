@@ -992,7 +992,9 @@ inputs, so a re-run with nothing changed does nothing.
   identity and vfs-stacker's systematic dissent tell versions apart. The
   report ends the video section with a suggested order: the suggested
   reference first, which sets the stacker's sample grid, then the rest by
-  what they add.
+  what they add. Beside the suggested reference it gives Source Alignment's
+  next choice, with what each adds and its padding, so a close call shows
+  as one.
 
   It also writes `compare.json` (the same evidence, by set) and `check.txt`.
   The decision goes in `discs/<disc>/selection.yaml`, written and committed
@@ -1158,11 +1160,16 @@ inputs, so a re-run with nothing changed does nothing.
   The stack's figures come from the `quality` stage, which measures the
   stacker's output with the same SNR and dropout analyses the set stage runs
   on each set. It also measures the SNR of the same stack in Mean, every set
-  weighted equally, as a check on the stacker's weights. It stacks the disc
-  again for each analysis, so it is the slowest stage, though it runs only
-  once for each stack: on Community South's eleven sets (decode-orc 2611e5b)
-  each analysis took about 95 minutes, 4 h 48 m in all, against 2 h 58 m
-  for the video stage. The report is
+  weighted equally, as a check on the stacker's weights. Each analysis
+  stacks again, so over the whole side it was the slowest stage: on
+  Community South's eleven sets (decode-orc 2611e5b) each took about 95
+  minutes, 4 h 48 m in all, against 2 h 58 m for the video stage. It now
+  measures a sample instead: three blocks of 1,500 frames
+  (`QUALITY_SAMPLE_BLOCK`, which a `disc.conf` may change) at the
+  beginning, the middle and the end of the side, kept by a Frame Map after
+  the stacker. A frame reads the same in the sample as over the whole side,
+  so only the means become estimates. The report sets the stack against the
+  sets over the same frames. The report is
   drawn by `lib/pack-report.py` (Matplotlib) and set by `typst` from
   `lib/pack-report.typ`, in IBM Plex from the dev shell rather than the host's
   fonts. Its working files (the graphs as SVG, and `report.json`) stay in

@@ -120,6 +120,8 @@
     [pictures #(data.metadata.addresses); #data.metadata.undecoded_n undecoded]),
 )
 
+#if data.sample_text != "" { block(above: 8pt, text(size: 8pt, fill: ink2, data.sample_text)) }
+
 #v(8pt)
 #grid(columns: (1fr, 1fr), column-gutter: 14pt, row-gutter: 10pt,
   if "bars_white" in data.graphs { graph(data.graphs.bars_white) },
@@ -251,10 +253,12 @@ The orc-disc-metadata document attached to the mkv, as vp415e reads it.
 
 Every set is measured over every frame by decode-orc's SNR, dropout and burst level analyses (the set stage); the stack is measured by the same analyses, with the same settings, on the stacker's output before dropout correction (the quality stage). The frame maps put both on the frames of the pack's mkv, so each graph compares like with like. The graphs along the disc show one point per #data.bin frames.
 
+#if data.sample_text != "" [#data.sample_text]
+
 #tbl(data.quality)
 #text(size: 7.5pt, fill: ink2)[#data.quality_key White SNR, its lowest frame, and black PSNR in dB; dropouts and their samples over the whole disc; burst level as a 10-bit median, mean over frames.]
 
-Both picture measures come from the test signals in the vertical interval (VITS), so they measure the same thing on every frame whatever the picture: white SNR on the white flag, against its mean, and black PSNR on the black level reference, against peak white. Together they cover the luminance range.
+Both picture measures come from the test signals in the vertical interval (VITS), so they measure the same thing on every frame whatever the picture: white SNR on the white flag, against its mean, and black PSNR on the black level reference, against peak white. Together they cover the luminance range. White SNR is read on the flat top of the bar, from 2 µs after its nominal start (decode-orc's SNR measurement 1.1.0, from decode-orc 1a152d6). Packs built on earlier decode-orc read the bar's rising edge as well, 4–6 dB lower and depending on the stack's first set, so their white SNR cannot be compared with this one's; black PSNR can.
 
 They measure the test lines, not the picture. The stacker weights each set by a different measure: how much it differs from the others across the active picture. So the two can disagree. When they do, a set that reads best here may carry something in its picture that the test lines do not show, or the stacker may be counting as noise a difference that is not noise. Where the stack falls below a single set here, the loss in the picture can be much smaller than these graphs show. Noise that every set of one stamper group shares, recorded into the stamper, shows here and cannot be stacked away.#if data.have_mean [ The same stack in Mean, with every set weighted equally, is measured too (the dashed line). Where Mean reads better than the stack as built, the stacker's weights do not favour the sets these figures do.]
 

@@ -495,6 +495,7 @@ describe_quality() {
   stage_input_tool decode-orc
   stage_input_file "quality project" "$DISC_DIR/set-quality.orcprj"
   stage_input "comparison" "SNR of the same stack in Mean"
+  stage_input "sample" "three blocks of $QUALITY_SAMPLE_BLOCK frames: the beginning, middle and end"
   stage_output snr.csv
   stage_output mean-snr.csv
   stage_output dropouts.csv
@@ -1051,7 +1052,9 @@ check_map() {
                 (.items[]? | select(.type != "info") | .message) | named),
                (.statistics | select(.stackSigma != null)
                 | "\(.pressingGroups) stamper group(s), \(.families) famil\(if .families == 1 then "y" else "ies" end); predicted stack σ \(.stackSigma | r) (equal weights \(.equalSigma | r), best single set \(.bestSingleSigma | r)); noise model \(if .fitTrusted then "trusted" else "not trusted (worst misfit \(.worstMisfit | r)%)" end)"),
-               (.statistics.suggestedReference | select(. != null) | "suggested reference: \($ARGS.positional[. - 1])")' \
+               (.statistics | select(.suggestedReference != null)
+                | "suggested reference: \($ARGS.positional[.suggestedReference - 1])"
+                  + (.referenceRunnerUp | if . == null then "" else ", next choice \($ARGS.positional[. - 1])" end))' \
              "${order[@]}" < "$report" \
         | while IFS= read -r line; do note "$line"; done
     else
@@ -1107,7 +1110,8 @@ map_digest() {
         pressing_groups: $stats.pressingGroups,
         stack_sigma: $stats.stackSigma,
         fit_trusted: $stats.fitTrusted,
-        suggested_reference: ($stats.suggestedReference | if . == null then null else $ARGS.positional[. - 1] end) }' \
+        suggested_reference: ($stats.suggestedReference | if . == null then null else $ARGS.positional[. - 1] end),
+        reference_runner_up: ($stats.referenceRunnerUp | if . == null then null else $ARGS.positional[. - 1] end) }' \
     "$@" < "$report"
 }
 
@@ -1296,6 +1300,7 @@ compare_digest() {
         video_by_contribution: [ $sets | sort_by(if .capture.stack_sigma_without == null then 1 else 0 end,
                                                  -(.capture.stack_sigma_without // 0))[] | .set ],
         suggested_reference: $a.suggested_reference,
+        reference_runner_up: $a.reference_runner_up,
         stack_sigma: $a.stack_sigma,
         fit_trusted: $a.fit_trusted,
         vfs_by_loss: [ $sets | sort_by(.efm.data_loss_pct // 1e9, .efm.uncorrectable // 1e9)[] | .set ] }
@@ -1374,7 +1379,13 @@ compare_report() {
       "  Most added first: \(.video_by_contribution | join(" "))",
       (.stack_sigma | select(. != null) | "  Predicted stack σ: \(r(100)) (all sets, Weighted); adds = the predicted σ without that set."),
       (if .suggested_reference == null then "  Suggested reference: not given (no capture comparison)"
-       else "  Suggested order: \(.video_suggested_order | join(" ")) (input 1 is the suggested reference, which sets the stack'"'"'s sample grid; the rest by what they add)" end),
+       else "  Suggested order: \(.video_suggested_order | join(" ")) (input 1 is the suggested reference, which sets the stack'"'"'s sample grid; the rest by what they add)",
+         # The reference and the next choice side by side, so a close call
+         # shows as one.
+         (.sets as $all | [ .suggested_reference, .reference_runner_up ] | select(.[1] != null)
+          | map(. as $id | $all[] | select(.set == $id)
+                | "\(.set) (adds \(.capture.stack_sigma_without | r(100)), \(.capture.padding_frames // "?") padding frames)")
+          | "  Suggested reference: \(.[0]); next choice: \(.[1])") end),
       (if .fit_trusted == false then "  Noise model not trusted: the stacker weights every set equally, and adds/weight describe that equal stack." else empty end),
       (([ .sets[].capture.last_frame | select(. != null) ] | max) as $end
        | .sets[] | select(.capture.last_frame != null and .capture.last_frame < $end)
@@ -1552,17 +1563,21 @@ check_video() {
 
     # The stacker's view of each set: its noise and share of the weight,
     # over the frames each of its records holds for. A set carries almost no
-    # weight below a quarter of an even share, whatever the number of sets.
+    # weight below a quarter of an even share, whatever the number of sets;
+    # when it shares a family with other sets, that shared noise is why.
     video_weights "$dir/stack.log" "$frames" "${sets[@]}" > "$dir/weights.json" || fail "could not read the stacker's weights from stack.log"
     while IFS= read -r text; do note "$text"; done < <(jq -r '
       if .measurements == 0 then "the stacker logged no weights" else
         "stack weights, over the frames each of the stacker'"'"'s \(.measurements) record(s) holds for: "
           + ([ .sets[] | "\(.set) σ \(.mean_sigma // "-") at \(.mean_share // "-")% (least \(.least_share // "-")%)" ] | join(", ")),
-        (25 / (.sets | length)) as $low
-        | (.sets[] | select((.mean_share // 0) < $low)
-           | "\(.set) carries almost no weight (\(.mean_share // 0)%, under a quarter of an even share)"),
+        (25 / (.sets | length)) as $low | .sets as $all
+        | (.sets[] | select((.mean_share // 0) < $low) | . as $s
+           | [ $all[] | select(.set != $s.set and .family != null and .family == $s.family) | .set ] as $kin
+           | "\(.set) carries almost no weight (\(.mean_share // 0)%, under a quarter of an even share)"
+             + (if ($kin | length) > 0 then ": it shares its noise with \($kin | join(", ")) (family \(.family))" else "" end)),
         (.sample_grid[] | "\(.set): sample grid \(.samples | if . > 0 then "+\(.)" else tostring end) from the first set'"'"'s, from frame \(.from_frame)\(if .reference != .set and .reference != null and .reference != $first then " (measured against \(.reference))" else "" end)"),
-        (.blocks[] | select(.fell_back_to_mean) | "frames \(.from_frame)-\(.to_frame) stacked with equal weights: the noise model was not trusted"),
+        (.blocks[] | select(.fell_back_to_mean) | "frames \(.from_frame)-\(.to_frame) stacked with equal weights: the noise model was not trusted"
+           + (if .worst_pair then " (\(.worst_pair | join(" and ")) misfit by \(.worst_misfit_percent | round)%, \(.rms_misfit_percent | round)% rms over \(.pairs) pairs)" else "" end)),
         (.reference_substitutions[] | select(.stand_in != null)
          | "frames \(.from_frame)-\(.to_frame): the first set has no frame; \(.stand_in) stands in for its sample grid (offset \(.offset))") end' \
       --arg first "${sets[0]}" "$dir/weights.json")
@@ -1704,12 +1719,16 @@ video_weights() {
                 | [ $weights[] | .held as $f | .inputs[$i] | select(. != null and .sigma != null) | . + { f: $f } ] as $m
                 | ([ $m[].f ] | add // 0) as $fs
                 | { set: .value, measurements: ($m | length), frames: $fs,
+                    family: ([ $weights[] | .inputs[$i].family? | select(. != null) ] | last),
                     mean_sigma: (if $fs > 0 then [ $m[] | .sigma * .f ] | add / $fs | . * 100 | round / 100 else null end),
                     mean_share: (if $fs > 0 then [ $m[] | .share * .f ] | add / $fs | r else null end),
                     least_share: ([ $m[].share ] | min) } ],
         blocks: [ $weights[] | { from_frame: .frames[0], to_frame: .frames[1], frames: .held, fit_trusted: .fitTrusted,
                                  fell_back_to_mean: .fellBackToMean, weighted_sigma: .weightedSigma,
-                                 equal_sigma: .equalSigma, best_single_sigma: .bestSingleSigma } ],
+                                 equal_sigma: .equalSigma, best_single_sigma: .bestSingleSigma,
+                                 worst_pair: (if .worstPair then [ .worstPair[] | $ARGS.positional[. - 1] ] else null end),
+                                 worst_misfit_percent: .worstMisfitPercent, rms_misfit_percent: .rmsMisfitPercent,
+                                 pairs } ],
         untrusted_blocks: ([ $weights[] | select(.fitTrusted == false) ] | length),
         untrusted_frames: ([ $weights[] | select(.fitTrusted == false) | .held ] | add // 0),
         fell_back_blocks: ([ $weights[] | select(.fellBackToMean == true) ] | length),
@@ -2060,13 +2079,57 @@ vfs_coverage() {
 # the weights favour the wrong inputs (or the test lines the SNR analysis
 # reads disagree with the active picture the stacker weighs).
 #
-# Each sink's tool is run as the set stage runs it, and each run stacks the
-# whole disc again: about an hour and a quarter in all for Volcanoes over the
-# 10G link, Mean being the quickest. Its own stamp keeps it to once per
-# stack.
+# Each sink's tool is run as the set stage runs it, and each run stacks
+# again: orc-cli builds a DAG of its own for every sink it triggers, so sinks
+# in one project would not share the stacking either. Over the whole side
+# that took 2.5 hours for Volcanoes, the share's reads being the limit. So
+# the stack is measured on a sample: three blocks of QUALITY_SAMPLE_BLOCK
+# frames, at the beginning, the middle and the end of the side, each starting
+# on a 500-frame boundary so that it fills whole bins of the pack report's
+# graphs. A Frame Map after the stacker keeps them. The stacker makes a frame
+# the same however it is reached, so each frame measured reads as it would
+# over the whole side; the means are of the sample. 4,500 frames take about
+# 15 minutes for the three passes. A side shorter than three blocks is
+# measured whole. Its own stamp keeps it to once per stack.
 
 # The set analyses this stage runs on the stack.
 QUALITY_ANALYSES=(snr dropouts)
+
+# The frames in each block of the sample; a disc.conf may set it.
+QUALITY_SAMPLE_BLOCK="${QUALITY_SAMPLE_BLOCK:-1500}"
+
+# quality_sample <frames>: the sample of a stack of <frames> frames, as a
+# Frame Map's ranges (0-based, comma-separated), or nothing for the whole
+# stack.
+quality_sample() {
+  local n="$1" b="$QUALITY_SAMPLE_BLOCK" mid end
+  [ "$n" -ge $(( 3 * b )) ] || return 0
+  mid=$(( (n / 2 - b / 2) / 500 * 500 ))
+  end=$(( n / 500 * 500 - b ))
+  printf '0-%d,%d-%d,%d-%d\n' $(( b - 1 )) "$mid" $(( mid + b - 1 )) "$end" $(( end + b - 1 ))
+}
+
+# quality_sample_text, quality_sample_count: QUALITY_RANGES as frames of the
+# stack from 1 ("1-1500, 26001-27500, ..."), and how many frames it holds.
+quality_sample_text() {
+  tr ',' '\n' <<< "$QUALITY_RANGES" | awk -F- '{ printf "%s%d-%d", (NR > 1 ? ", " : ""), $1 + 1, $2 + 1 }'
+}
+quality_sample_count() {
+  tr ',' '\n' <<< "$QUALITY_RANGES" | awk -F- '{ n += $2 - $1 + 1 } END { print n + 0 }'
+}
+
+# quality_renumber <csv>: an analysis sink's CSV numbers the frames it was
+# given from 1; this gives each row its frame of the stack instead, from 1,
+# as the set stage's CSVs and the pack report count them.
+quality_renumber() {
+  [ -n "$QUALITY_RANGES" ] || return 0
+  awk -F, -v OFS=, -v r="$QUALITY_RANGES" '
+    BEGIN { n = split(r, b, ","); for (i = 1; i <= n; i++) { split(b[i], e, "-"); for (f = e[1]; f <= e[2]; f++) at[++k] = f + 1 } }
+    NR == 1 { print; next }
+    !($1 in at) { bad = 1; exit }
+    { $1 = at[$1]; print }
+    END { exit bad }' "$1" > "$1.renumbered" && mv -- "$1.renumbered" "$1"
+}
 
 run_quality() {
   local state
@@ -2074,9 +2137,10 @@ run_quality() {
   state=$(unit_state quality) || die "quality: still $state after building"
 }
 
-# quality_project <stack project> <set quality project>: the stack project
-# cut back to its stacker and what feeds it, with the set quality project's
-# SNR and dropout sinks fed from the stacker. Which stages stay is worked out
+# quality_project <stack project> <set quality project> [<ranges>]: the
+# stack project cut back to its stacker and what feeds it, with the set
+# quality project's SNR and dropout sinks fed from the stacker, through a
+# Frame Map keeping <ranges> when they are given. Which stages stay is worked out
 # from the project as JSON; the cut is made by yq on the YAML itself, since a
 # round trip through JSON loses the form of its numbers (version 2.0 is read
 # back as 2, which decode-orc refuses).
@@ -2089,20 +2153,26 @@ quality_project() {
     | if ($s | length) != 1 then error("the stack project has \($s | length) stacker stages, not one") else $s[0] end as $sid
     | { stacker: $sid, keep: feeds([ $sid ]), top: ([ $stack.dag.nodes[].id ] | max) }') || return 1
   # shellcheck disable=SC2016 # yq's own variables
-  PLAN="$plan" SINKS="$2" yq '
+  PLAN="$plan" SINKS="$2" RANGES="${3:-}" yq '
     (strenv(PLAN) | from_json) as $p
     | (load(strenv(SINKS)).dag.nodes | map(select(.stage == "snr_analysis_sink" or .stage == "dropout_analysis_sink"))) as $sinks
+    | [ strenv(RANGES) | select(. != "")
+        | { "id": $p.top + 1, "stage": "frame_map", "node_type": "TRANSFORM", "display_name": "Frame Map",
+            "user_label": "Sample", "x": 950, "y": 50, "parameters": { "ranges": { "type": "string", "value": . } } } ] as $sample
+    | ([ $sample[].id ] + [ $p.stacker ] | .[0]) as $feed
     | .project.name += " quality"
     | .dag.nodes |= map(select(.id as $i | $p.keep | any_c(. == $i)))
     | .dag.edges |= map(select(.to as $i | $p.keep | any_c(. == $i)))
-    | .dag.nodes += ($sinks | to_entries | map(.value.id = $p.top + 1 + .key | .value))
-    | .dag.edges += ($sinks | to_entries | map({"from": $p.stacker, "to": $p.top + 1 + .key}))' "$1" || return 1
+    | .dag.nodes += $sample
+    | .dag.edges += [ $sample[] | { "from": $p.stacker, "to": .id } ]
+    | .dag.nodes += ($sinks | to_entries | map(.value.id = $p.top + 2 + .key | .value))
+    | .dag.edges += ($sinks | to_entries | map({"from": $feed, "to": $p.top + 2 + .key}))' "$1" || return 1
   [ "$(yq '[.dag.nodes[] | select(.stage == "snr_analysis_sink" or .stage == "dropout_analysis_sink")] | length' "$2")" = 2 ] \
     || { printf 'quality: %s has not one SNR and one dropout sink\n' "${2#"$SELF_DIR"/}" >&2; return 1; }
 }
 
 build_quality() {
-  local dir a tool node csv t stacker
+  local dir a tool node csv t stacker frames over
   describe_quality
   dir="$STAGE_DIR"
 
@@ -2111,29 +2181,40 @@ build_quality() {
   rm -f -- "$dir"/*.csv* "$dir"/*.json* "$dir"/*.log "$dir"/*.orcprj \
            "$dir"/check.txt* "$dir"/check.failed.txt "$dir"/crash_bundle_*.zip
 
+  # The sample, from the stack's frames as the video stage made them.
+  frames=$(jq -r '.metadata.frame_count // empty' "$QUALITY_VIDEO/video.json" 2>/dev/null) || frames=""
+  [ -n "$frames" ] || { printf 'quality: %s gives no frame count\n' "$QUALITY_VIDEO/video.json" >&2; return 1; }
+  QUALITY_RANGES=$(quality_sample "$frames")
+
   # Beside the video stage's directory, so the sources' relative paths hold.
-  quality_project "$QUALITY_VIDEO/stack.orcprj" "$DISC_DIR/set-quality.orcprj" > "$dir/quality.orcprj" \
+  quality_project "$QUALITY_VIDEO/stack.orcprj" "$DISC_DIR/set-quality.orcprj" "$QUALITY_RANGES" > "$dir/quality.orcprj" \
     || { printf 'quality: could not make the project\n' >&2; return 1; }
 
   cd -- "$dir" || return 1
+  over="the whole disc"
+  [ -z "$QUALITY_RANGES" ] || over="the sample, frames $(quality_sample_text) of $frames"
   for a in "${SET_ANALYSES[@]}"; do
     IFS='|' read -r tool node csv <<< "$a"
     [[ " ${QUALITY_ANALYSES[*]} " = *" $csv "* ]] || continue
-    printf 'quality: %s of the stack of %s; this stacks the whole disc again\n' "$node" "$(selected_sets video | paste -sd' ' -)"
+    printf 'quality: %s of the stack of %s; this stacks %s again\n' "$node" "$(selected_sets video | paste -sd' ' -)" "$over"
     t=$SECONDS
     orc-cli tools run "$dir/quality.orcprj" "$tool" --node "$node" --json --quiet \
       --csv "$(stage_tmp "$csv.csv")" > "$dir/$csv.json" 2> "$dir/$csv.log" || true
     printf 'quality: %s analysed in %ss\n' "$node" "$(( SECONDS - t ))"
+    [ ! -f "$dir/$csv.csv.partial" ] || quality_renumber "$dir/$csv.csv.partial" \
+      || { printf 'quality: %s.csv has a frame outside the sample\n' "$csv" >&2; return 1; }
   done
 
   # The same SNR on the stack in Mean.
   stacker=$(yq '.dag.nodes[] | select(.stage == "stacker") | .user_label' "$dir/quality.orcprj")
   if orc-cli nodes set "$dir/quality.orcprj" "$stacker" mode=Mean --output "$dir/quality-mean.orcprj" > /dev/null; then
-    printf 'quality: SNR of the same stack in Mean; this stacks the whole disc again\n'
+    printf 'quality: SNR of the same stack in Mean; this stacks %s again\n' "$over"
     t=$SECONDS
     orc-cli tools run "$dir/quality-mean.orcprj" snr_analysis --node SNR --json --quiet \
       --csv "$(stage_tmp mean-snr.csv)" > "$dir/mean-snr.json" 2> "$dir/mean-snr.log" || true
     printf 'quality: SNR in Mean analysed in %ss\n' "$(( SECONDS - t ))"
+    [ ! -f "$dir/mean-snr.csv.partial" ] || quality_renumber "$dir/mean-snr.csv.partial" \
+      || { printf 'quality: mean-snr.csv has a frame outside the sample\n' >&2; return 1; }
   else
     printf 'quality: could not make the Mean project\n' > "$dir/mean-snr.log"
   fi
@@ -2151,16 +2232,22 @@ build_quality() {
 # check_quality <dir>: run the checks, write check.txt and quality.json to
 # their stage_tmp names, and return non-zero if any failed.
 check_quality() {
-  local dir="$1" out fails=0 a tool node csv status frames total rows expect
+  local dir="$1" out fails=0 a tool node csv status frames total rows expect over
   out=$(stage_tmp check.txt) || return 1
   ok()   { printf 'ok    %s\n' "$*"; }
   fail() { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
   note() { printf 'note  %s\n' "$*"; }
   expect=$(jq -r '.metadata.frame_count // empty' "$QUALITY_VIDEO/video.json" 2>/dev/null) || expect=""
+  over="all $expect frames of the stack"
+  if [ -n "$QUALITY_RANGES" ]; then
+    over="the $(quality_sample_count) frames of the sample ($(quality_sample_text) of $expect)"
+    expect=$(quality_sample_count)
+  fi
 
   {
     printf 'stage:   quality\nvideo:   %s\nchecked: %s\n\n' "${QUALITY_VIDEO#"$OUT"/}" "$(date '+%F %T')"
-    # Each analysis ran, over every frame of the stack: the mkv's frames.
+    # Each analysis ran, over every frame of the sample, or of the stack (the
+    # mkv's frames) when it is measured whole.
     for a in "${SET_ANALYSES[@]}"; do
       IFS='|' read -r tool node csv <<< "$a"
       [[ " ${QUALITY_ANALYSES[*]} " = *" $csv "* ]] || continue
@@ -2172,9 +2259,9 @@ check_quality() {
       read -r frames total < <(jq -r '.nodes[0].statistics | "\(.frames_analysed) \(.total_frames)"' "$dir/$csv.json") || true
       rows=$(( $(wc -l < "$dir/$csv.csv.partial" 2>/dev/null || echo 1) - 1 ))
       if [ "$frames" = "$total" ] && [ "$frames" = "$expect" ] && [ "$rows" = "$frames" ]; then
-        ok "$node analysis over all $frames frames of the stack, per frame in $csv.csv"
+        ok "$node analysis over $over, per frame in $csv.csv"
       else
-        fail "$node analysis covered ${frames:-no} of ${total:-unknown} frames, with $rows in $csv.csv; the stack has ${expect:-unknown}"
+        fail "$node analysis covered ${frames:-no} of ${total:-unknown} frames, with $rows in $csv.csv; ${expect:-unknown} expected"
       fi
       note "$(jq -r --arg k "$csv" '.nodes[0].statistics | def r(n): . * n | round / n;
         if $k == "snr" then "SNR of the stack: white \(.mean_white_snr | r(100)) dB, black PSNR \(.mean_black_psnr | r(100)) dB (means; lowest white \(.min_white_snr | r(100)))"
@@ -2189,18 +2276,23 @@ check_quality() {
       read -r frames total < <(jq -r '.nodes[0].statistics | "\(.frames_analysed) \(.total_frames)"' "$dir/mean-snr.json") || true
       rows=$(( $(wc -l < "$dir/mean-snr.csv.partial" 2>/dev/null || echo 1) - 1 ))
       if [ "$frames" = "$total" ] && [ "$frames" = "$expect" ] && [ "$rows" = "$frames" ]; then
-        ok "SNR analysis in Mean over all $frames frames of the stack, per frame in mean-snr.csv"
+        ok "SNR analysis in Mean over $over, per frame in mean-snr.csv"
       else
-        fail "SNR analysis in Mean covered ${frames:-no} of ${total:-unknown} frames, with $rows in mean-snr.csv; the stack has ${expect:-unknown}"
+        fail "SNR analysis in Mean covered ${frames:-no} of ${total:-unknown} frames, with $rows in mean-snr.csv; ${expect:-unknown} expected"
       fi
       note "$(jq -r '.nodes[0].statistics | def r(n): . * n | round / n;
         "SNR of the stack in Mean: white \(.mean_white_snr | r(100)) dB, black PSNR \(.mean_black_psnr | r(100)) dB (means)"' "$dir/mean-snr.json")"
     fi
 
+    # The sample, as blocks of the stack's frames from 1, as the CSVs number
+    # them; null when the stack was measured whole.
     jq -n --arg video "${QUALITY_VIDEO#"$OUT"/}" --arg sets "$(selected_sets video | paste -sd' ' -)" \
+          --arg ranges "$QUALITY_RANGES" --argjson n "${expect:-0}" \
           --rawfile snr "$dir/snr.json" --rawfile dropouts "$dir/dropouts.json" --rawfile mean "$dir/mean-snr.json" '
       def stats: (fromjson? // {}) | .nodes[0] // {} | if .status == "success" then .statistics else null end;
       { video: $video, sets: ($sets | split(" ")), measured: "the stacker output, before dropout correction",
+        sample: (if $ranges == "" then null else
+                   { frames: $n, blocks: [ $ranges | split(",")[] | split("-") | map(tonumber + 1) ] } end),
         snr: ($snr | stats), dropouts: ($dropouts | stats), mean_snr: ($mean | stats) }' \
       > "$(stage_tmp quality.json)" || fail "could not write quality.json"
 
