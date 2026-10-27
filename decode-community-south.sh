@@ -65,7 +65,8 @@ shares_load || exit 1
 LIBRARY="$DD_LIBRARY"
 
 # Root of the decode output tree. Decodes are filed under
-# <root>/<set>/<decoder>/, where <decoder> names the ld-decode build.
+# <root>/<set>/<decoder>-<date>/, where <decoder> names the ld-decode build
+# and <date> (YYYYMMDD-HHMMSS) is when the run that first made it started.
 OUTPUT="${DD_OUTPUT:-$DD_DECODES/decode-script/community-south}"
 
 # Name of the decoder directory. Empty means work it out from flake.lock (see
@@ -199,10 +200,12 @@ Environment: DD_LIBRARY DD_DECODES DD_NO_MOUNT DD_OUTPUT DD_DECODER
              DD_VERIFY_DECODER DD_FRAMES
              DD_LEAD_IN DD_PROBE DD_JOBS DD_THREADS DD_THREADS_TARGET DD_CVBS
 
-Decodes go to <output>/<set>/<decoder>/<capture basename>.*, where <decoder> is
-the ld-decode commit flake.lock pins. Decoding a set again after updating
-ld-decode therefore writes a new directory rather than overwriting the earlier
-decode; the newest two such directories are kept for each set.
+Decodes go to <output>/<set>/<decoder>-<date>/<capture basename>.*, where
+<decoder> is the ld-decode commit flake.lock pins and <date> (YYYYMMDD-HHMMSS)
+is when the run that first made the directory started; one run dates all of
+its directories the same. Decoding a set again after updating ld-decode
+therefore writes a new directory rather than overwriting the earlier decode;
+the newest two such directories are kept for each set.
 
 The captures are verified against sources.sha256 first. Each finished decode
 is then checked -- every file present, a signal state decode-orc accepts, the
@@ -599,8 +602,8 @@ existing_product() {
 resolve_one() {
   local i="$1" id="$2" target="$3" rel="$4" prefix="$5"
   local src="$LIBRARY/$rel"
-  local dest="$OUTPUT/$id/$DECODER"
-  local base content start opens cache product report action state
+  local dest base content start opens cache product report action state
+  dest="$OUTPUT/$id/$(stage_version_name "$OUTPUT/$id" "$DECODER")"
 
   # The decode is named after the capture, minus its extension and with spaces
   # turned into dashes: a capture name with a space in it would otherwise need

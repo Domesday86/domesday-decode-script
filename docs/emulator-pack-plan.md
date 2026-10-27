@@ -451,6 +451,14 @@ Where the build settles something the text above left open:
   Each directory holds a `stage.stamp`. An `orc-<rev>` version counts as
   complete once `video/stage.stamp` exists; the other directories are
   complete once their own stamp exists.
+
+  Each version's name also ends in a date, `-YYYYMMDD-HHMMSS`, for whoever
+  reads the listing (`orc-2611e5b-20261027-101500`). It is the time the run
+  that first made the version started, taken once per run, so every version
+  one run makes carries the same date; the decode script that `build-pack.sh`
+  runs inherits it. A version a later run reuses keeps its date, because the
+  version is found by its revision or key, never by its date. Versions named
+  before dates were added are found and reused as they are.
 - **`select`** has no stamp of its own. It is decided once
   `discs/<disc>/selection.yaml` exists. `video`, `vfs` and `pack` take that
   file's content as an input, and read their sets from `.video.sets[]` and

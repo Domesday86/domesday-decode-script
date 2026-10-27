@@ -110,5 +110,23 @@ check "and leaves an incomplete one alone" [ -d "$P/tool-0" ]
 stage_prune "$P" tool stage.stamp >/dev/null
 check "pruning again removes nothing more" [ -d "$P/tool-3" ] && [ -d "$P/tool-2" ]
 
+# --- dated versions --------------------------------------------------------
+
+D="$T/dated"
+mkdir -p "$D"
+check "the run is dated YYYYMMDD-HHMMSS: $STAGE_RUN_TIME" grep -Eqx '[0-9]{8}-[0-9]{6}' <<< "$STAGE_RUN_TIME"
+n=$(stage_version_name "$D" orc-abc1234)
+check "a new version is dated by the run: $n" [ "$n" = "orc-abc1234-$STAGE_RUN_TIME" ]
+mkdir -p "$D/orc-abc1234-20200101-000000"
+n=$(stage_version_name "$D" orc-abc1234)
+check "a dated version already there is reused with its date: $n" [ "$n" = orc-abc1234-20200101-000000 ]
+mkdir -p "$D/orc-old0000"
+n=$(stage_version_name "$D" orc-old0000)
+check "and so is one from before dates: $n" [ "$n" = orc-old0000 ]
+n=$(stage_version_name "$D" orc-abc)
+check "a shorter revision does not take another's version: $n" [ "$n" = "orc-abc-$STAGE_RUN_TIME" ]
+n=$(bash -c '. "$0/lib/shares.sh"; . "$0/lib/stage.sh"; printf %s "$STAGE_RUN_TIME"' "$ROOT")
+check "a script this one runs is dated the same: $n" [ "$n" = "$STAGE_RUN_TIME" ]
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

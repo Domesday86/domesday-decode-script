@@ -21,6 +21,11 @@
 #            the pack's report (<stem>.report.pdf,
 #            and as Markdown, <stem>.report.md)
 #
+# Each <rev> and <key> directory's name ends in the date the run that first
+# made it started, as -YYYYMMDD-HHMMSS (orc-2611e5b-20261027-101500): one run
+# dates every directory it makes the same, and a directory a later run reuses
+# keeps its date.
+#
 # Each stage keeps a stamp of its inputs (lib/stage.sh): the captures'
 # fingerprints, the locked tool revisions, its parameters and project files,
 # and the stamps of the stages before it. A stage whose stamp matches is
@@ -298,9 +303,16 @@ check_shares() {
 check_shares
 OUT="$DD_DECODES/decode-script/$DISC_OUT"
 
+# Each version is found by its revision and dated by the run that first made
+# it (lib/stage.sh). A decode is dated in its set's directory, by set_decode.
 LDD_DIR=$(stage_tool_dir ld-decode)    || die "flake.lock pins no ld-decode"
 ORC_DIR=$(stage_tool_dir decode-orc)   || die "flake.lock pins no decode-orc"
 VFS_DIR=$(stage_tool_dir vfs-verifier) || die "flake.lock pins no vfs-verifier"
+ORC_DIR=$(stage_version_name "$OUT" "$ORC_DIR")
+VFS_DIR=$(stage_version_name "$OUT" "$VFS_DIR")
+
+# set_decode <set>: the set's decode directory, relative to OUT.
+set_decode() { printf '%s/%s\n' "$1" "$(stage_version_name "$OUT/$1" "$LDD_DIR")"; }
 
 # Which tools each stage runs, one per line: <flake input>|<flake package>|<command>.
 stage_tool() {
@@ -328,7 +340,7 @@ describe_decode() {
   local id="$1" rel base dir report start
   rel=$(set_field "$id" 3)
   base=$(decode_base "$rel")
-  dir="$OUT/$id/$LDD_DIR"
+  dir="$OUT/$(set_decode "$id")"
   if report=$(decode_cached_start "$dir/$base.start" "$DECODE_LEAD_IN" "$(set_field "$id" 2)"); then
     start=$(decode_report_field "$report" start) || start="unresolved"
   else
@@ -512,7 +524,7 @@ describe_pack() {
   stage_input_stamp vfs "$PACK_VFS"
   stage_input "stem" "$STEM"
   key=$(stage_key)
-  STAGE_DIR="$OUT/pack-${key:0:12}"
+  STAGE_DIR="$OUT/$(stage_version_name "$OUT" "pack-${key:0:12}")"
   stage_input_stamp compare "$PACK_COMPARE"
   stage_input_file "selection" "$SELECTION"
   stage_input_file "player check" "$PLAYER_CHECK"
@@ -2469,7 +2481,7 @@ pack_provenance() {
   local dir="$1" id weights
   local -a captures=() patches=() vsets=()
   for id in $(map_sets); do
-    captures+=("$id|$(set_field "$id" 2)|$(set_field "$id" 3)|$id/$LDD_DIR")
+    captures+=("$id|$(set_field "$id" 2)|$(set_field "$id" 3)|$(set_decode "$id")")
   done
   for id in "$SELF_DIR"/patches/*.patch; do
     [ -f "$id" ] && patches+=("${id##*/}|$(sha256_stdin < "$id")")

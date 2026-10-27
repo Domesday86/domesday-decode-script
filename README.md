@@ -497,6 +497,13 @@ scripts follow once the process is proven here.
 - **Two versions are kept.** After a new ld-decode revision's decode is
   stamped, all but the newest two `ld-decode-<rev>` directories of that set
   are removed.
+- **Each directory is dated.** A decode directory is named
+  `ld-decode-<rev>-<date>`, where `<date>` (`YYYYMMDD-HHMMSS`) is when the
+  run that first made it started. One run gives every directory it makes the
+  same date, `build-pack.sh` included, and a directory a later run reuses
+  keeps its date. The revision is what finds a directory again; the date is
+  for reading the listing. Directories made before dates were added are
+  still found and reused under their old names.
 
 Only a decode made by the `flake.lock` build, checked as above, in CVBS, is
 stamped. `--decoder`, `--no-verify-decoder` and `--tbc` decode as before,

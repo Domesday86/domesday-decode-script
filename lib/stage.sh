@@ -90,6 +90,31 @@ stage_tool_dir() {
   printf '%s-%s\n' "$prefix" "$rev"
 }
 
+# --- dating versions -------------------------------------------------------
+#
+# A version's name says what made it (orc-2611e5b, pack-<key>), which is what
+# finds it again, and also when, for whoever reads the listing: the time the
+# run that first made it started, as <name>-YYYYMMDD-HHMMSS. A run takes the
+# time once, when it starts, so every version it makes carries the same one;
+# it is exported, so a decode script build-pack.sh runs dates its decodes the
+# same. A version that is already there keeps the date it was made with.
+: "${STAGE_RUN_TIME:=$(date +%Y%m%d-%H%M%S)}"
+export STAGE_RUN_TIME
+
+# stage_version_name <parent> <name>: the directory in <parent> that version
+# <name> is filed in, as a name: the dated one there (the newest, if a person
+# has left more than one), or one made before versions were dated, or else a
+# new one dated by this run.
+stage_version_name() {
+  local parent="$1" name="$2" d found=""
+  for d in "$parent/$name"-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]/; do
+    [ -d "$d" ] && found="${d%/}"
+  done
+  [ -n "$found" ] || { [ -d "$parent/$name" ] && [ ! -L "$parent/$name" ] && found="$parent/$name"; }
+  [ -n "$found" ] || found="$name-$STAGE_RUN_TIME"
+  printf '%s\n' "${found##*/}"
+}
+
 # stage_tool_verify <flake package> <command>: the command on PATH is the
 # build flake.lock pins, so an output filed under a revision was made by it.
 # Prints what is wrong and returns non-zero if not.
@@ -244,10 +269,10 @@ stage_unstamp() {
 
 # --- keeping two versions --------------------------------------------------
 #
-# Each rev-named output (ld-decode-<rev>, orc-<rev>, vfs-<rev>, pack-<n>)
-# keeps the current version and the one before it, and no more. A version is
-# complete when <version>/<marker> -- the stamp of the last stage that writes
-# into it -- exists. Versions are ordered by that stamp's time.
+# Each rev-named output (ld-decode-<rev>, orc-<rev>, vfs-<rev>, pack-<key>,
+# each dated as above) keeps the current version and the one before it, and no
+# more. A version is complete when <version>/<marker> -- the stamp of the last
+# stage that writes into it -- exists. Versions are ordered by that stamp's time.
 
 # stage_versions <parent> <prefix> <marker>: complete versions, newest first,
 # as "<stamped> <dir>".
