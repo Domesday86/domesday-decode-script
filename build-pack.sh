@@ -18,7 +18,8 @@
 #   quality  the stacked video's SNR and dropouts,   orc-<rev>/quality/
 #            measured as each set's are
 #   pack     the three files, their provenance and   pack-<key>/
-#            the pack's report (<stem>.report.pdf)
+#            the pack's report (<stem>.report.pdf,
+#            and as Markdown, <stem>.report.md)
 #
 # Each stage keeps a stamp of its inputs (lib/stage.sh): the captures'
 # fingerprints, the locked tool revisions, its parameters and project files,
@@ -145,6 +146,17 @@ selected_sets() {
   yq -r ".$1.sets[]" "$SELECTION"
 }
 
+# video_noise_reduction: the video sink's noise reduction in dB, from
+# video.noise_reduction; 0, the default, for none. It is a presentation
+# choice for the selection's owner, to check on vp415e first. It is always
+# applied in still_only mode: averaged only across the frames the stacker
+# marks as one held picture, so every single-frame still stays as stacked.
+video_noise_reduction() {
+  local a=""
+  [ ! -f "$SELECTION" ] || a=$(yq -r '.video.noise_reduction // ""' "$SELECTION" 2>/dev/null)
+  printf '%s\n' "${a:-0}"
+}
+
 # vfs_accept: what the selection accepts of the VFS stack: "bit-perfect", or
 # "incomplete" when vfs.accept says a pack may ship with sectors the
 # filesystem needs still bad (served by vp415e as MEDIUM ERROR).
@@ -152,6 +164,15 @@ vfs_accept() {
   local a=""
   [ ! -f "$SELECTION" ] || a=$(yq -r '.vfs.accept // ""' "$SELECTION" 2>/dev/null)
   printf '%s\n' "${a:-bit-perfect}"
+}
+
+# vfs_baseline_differs: the sectors where the hand-built image (VFS_BASELINE)
+# is known to hold different bytes, reviewed and explained in
+# vfs.baseline_differs, as a JSON array; [] when there are none.
+vfs_baseline_differs() {
+  local a=""
+  [ ! -f "$SELECTION" ] || a=$(yq -o=json -I=0 '[.vfs.baseline_differs.sectors[]?] | sort' "$SELECTION" 2>/dev/null)
+  printf '%s\n' "${a:-[]}"
 }
 
 # The VFS image's reference hash, recorded once the image has passed and been
@@ -187,9 +208,11 @@ player_check_for() {
 }
 
 # selection_problems: what is wrong with selection.yaml, one line each, or
-# nothing. Each stack names its sets, best first, from the sets map.orcprj
-# maps, each once, and lists every mapped set it leaves out under dropped,
-# with a reason. The VFS stack may also accept an incomplete image.
+# nothing. Each stack names its sets in its order (the video's suggested
+# reference first, then by what each adds; the VFS's best first), from the
+# sets map.orcprj maps, each once, and lists every mapped set it leaves out
+# under dropped, with a reason. The VFS stack may also accept an incomplete
+# image, and the video may take a noise reduction.
 selection_problems() {
   local stack
   local -a mapped=()
@@ -209,9 +232,24 @@ selection_problems() {
              | "\($stack) neither uses nor drops \(.)"),
             (.dropped[]? | select((.reason // "") == "") | "\($stack) drops \(.set) without a reason"),
             (if has("accept") and ($stack != "vfs" or .accept != "incomplete")
-             then "\($stack) accept is \(.accept); only vfs takes one, and only incomplete" else empty end)
+             then "\($stack) accept is \(.accept); only vfs takes one, and only incomplete" else empty end),
+            (if has("noise_reduction") and ($stack != "video" or (.noise_reduction | type) != "number" or .noise_reduction < 0)
+             then "\($stack) noise_reduction is \(.noise_reduction); only video takes one, a number of dB" else empty end)
         end' "${mapped[@]}"
   done
+}
+
+# selection_warnings: what the selection does that the evidence would not,
+# one line each, or nothing. A warning is not a failure: the person may have
+# a reason. Today one: the first video set is not the compare report's
+# suggested reference, which sets the stacker's sample grid.
+selection_warnings() {
+  local compare="$OUT/$ORC_DIR/compare/compare.json" first suggested
+  [ -f "$SELECTION" ] && [ -f "$compare" ] || return 0
+  suggested=$(jq -r '.suggested_reference // empty' "$compare" 2>/dev/null) || suggested=""
+  first=$(selected_sets video | head -1)
+  [ -z "$suggested" ] || [ -z "$first" ] || [ "$first" = "$suggested" ] \
+    || printf 'video input 1 is %s, not the suggested reference %s (compare/report.txt)\n' "$first" "$suggested"
 }
 
 MAP_PROJECT="$DISC_DIR/map.orcprj"
@@ -245,10 +283,6 @@ stack_problems() {
       || printf 'has no one stage named "%s"\n' "$id"
   done
 }
-
-# How many frames from each end of a decode the compare stage reads the disc
-# metadata from.
-COMPARE_PROBE_FRAMES=250
 
 for id in $(map_sets); do
   set_field "$id" 1 >/dev/null || die "${MAP_PROJECT#"$SELF_DIR"/} has a source labelled $id, which is not a set in $DISC_SCRIPT"
@@ -345,8 +379,9 @@ describe_map() {
   stage_output check.txt
 }
 
-# Every mapped set's figures and EFM image (set), the map and alignment
-# (map), and the two measurements the compare stage makes itself.
+# Every mapped set's figures and EFM image (set), the map and alignment, with
+# each set's disc identity from its Disc Mapper (map), and the one
+# measurement the compare stage makes itself.
 # COMPARE_SETS is left as "<set>|<decode>|<set stage dir>", and COMPARE_MAP
 # names the map stage's directory.
 describe_compare() {
@@ -363,10 +398,8 @@ describe_compare() {
   stage_input_stamp map "$COMPARE_MAP"
   stage_input_tool decode-orc
   stage_input_tool vfs-verifier
-  stage_input "metadata probe" "first and last $COMPARE_PROBE_FRAMES frames, video_sink mono mkv-ffv1"
   stage_output report.txt
   stage_output compare.json
-  for id in "${ups[@]}"; do stage_output "metadata/${id%%|*}.yaml"; done
   stage_output vfs-stacker.txt
   stage_output check.txt
 }
@@ -404,7 +437,8 @@ describe_video() {
   stage_input "video sets" "$(selected_sets video | paste -sd' ' -)"
   stage_input_file "project" "$DISC_DIR/stack.orcprj"
   stage_input_tool decode-orc
-  stage_input "decoder" "$VIDEO_DECODER"
+  stage_input "decoder" "$VIDEO_DECODER${VIDEO_DECODER_SCHEDULE:+, schedule $VIDEO_DECODER_SCHEDULE}"
+  stage_input "noise reduction" "$(video_noise_reduction) dB still_only"
   stage_input "disc" "$DISC_FORMAT side $DISC_SIDE, pictures $DISC_PICTURES, user code and Amendment 2 $VIDEO_EXPECT"
   stage_input_file "metadata check" "$SELF_DIR/lib/check-disc-metadata.py"
   stage_input "baseline" "${VIDEO_BASELINE:-none}"
@@ -430,6 +464,7 @@ describe_vfs() {
   stage_input_tool vfs-verifier
   stage_input_file "reference" "$VFS_REFERENCE"
   stage_input "baseline" "${VFS_BASELINE:-none}"
+  stage_input "baseline differs" "$(vfs_baseline_differs)"
   stage_output "$STEM.dat"
   stage_output "$STEM.dat.bsm"
   stage_output vfs.sha256
@@ -488,6 +523,7 @@ describe_pack() {
   stage_output "$STEM.dat.bsm"
   stage_output "$STEM.provenance.yaml"
   stage_output "$STEM.report.pdf"
+  stage_output "$STEM.report.md"
   stage_output SHA256SUMS
   stage_output pack.json
   stage_output check.txt
@@ -526,8 +562,10 @@ unit_state() {
         printf 'invalid: %s %s\n' "${SELECTION#"$SELF_DIR"/}" "$(paste -sd';' - <<< "$problems" | sed 's/;/; /g')"
         return 1
       fi
-      printf 'decided: video %s; vfs %s\n' \
-        "$(selected_sets video | paste -sd' ' -)" "$(selected_sets vfs | paste -sd' ' -)"
+      problems=$(selection_warnings)
+      printf 'decided: video %s; vfs %s%s\n' \
+        "$(selected_sets video | paste -sd' ' -)" "$(selected_sets vfs | paste -sd' ' -)" \
+        "$([ -z "$problems" ] || paste -sd';' - <<< "$problems" | sed 's/;/; warning: /g; s/^/; warning: /')"
       return 0
     fi
     printf 'waiting: %s is not written yet (a person decides it from the compare report)\n' "${SELECTION#"$SELF_DIR"/}"
@@ -855,8 +893,10 @@ check_set() {
 # A copy of the disc's committed map.orcprj, pointed at the decodes, is
 # refreshed with tools refresh: the Disc Mapper builds each set's frame map,
 # then Source Alignment places the sets against each other and compares the
-# captures (noise, pressing groups, softness). Nothing is processed. The
-# refresh saves into the copy, so the mapped project can be opened in the GUI.
+# captures (noise, stamper groups, what each set adds, softness), and each
+# set's Disc Mapper reads the disc's identity over the whole side. Nothing is
+# processed. The refresh saves into the copy, so the mapped project can be
+# opened in the GUI.
 #
 # The Disc Mapper reads the whole of every decode, one set after another, so
 # the stage takes about as long as reading them all over the share.
@@ -989,13 +1029,18 @@ check_map() {
         done
       } > "$(stage_tmp framemaps/alignment)"
       ok "aligned: $(jq -r '.alignment | "map \(.map); output frame 1 is picture \(.statistics.globalFirstVBIFrame); \(.statistics.framesWith3PlusSources) frames have 3 or more sources, \(.statistics.framesWith2Sources) two, \(.statistics.framesWith1Source) one"' "$dir/analysis.json.partial")"
-      # The capture comparison and its warnings, with "Source N" (the Nth
-      # input of Align) given its set id.
+      # The capture comparison, one item per input, and its warnings, with
+      # "Source N" (the Nth input of Align) given its set id; then what the
+      # comparison predicts for the stack, from its statistics.
       jq -r --args 'def named: gsub("Source (?<n>[0-9]+)"; $ARGS.positional[(.n | tonumber) - 1]);
+             def r: if . == null then "?" else . * 100 | round / 100 end;
              .nodes[] | select(.tool == "source_alignment")
-             | (.summary | split("\n")[] | select(test("^  Source [0-9]+: (noise|not compared)|^Pressings:|stands alone"))
-                | ltrimstr("  ")), (.items[]? | select(.type != "info") | .message)
-             | named' "${order[@]}" < "$report" \
+             | ((.items[]? | select(.data.source? != null) | .message),
+                (.items[]? | select(.type != "info") | .message) | named),
+               (.statistics | select(.stackSigma != null)
+                | "\(.pressingGroups) stamper group(s), \(.families) famil\(if .families == 1 then "y" else "ies" end); predicted stack σ \(.stackSigma | r) (equal weights \(.equalSigma | r), best single set \(.bestSingleSigma | r)); noise model \(if .fitTrusted then "trusted" else "not trusted (worst misfit \(.worstMisfit | r)%)" end)"),
+               (.statistics.suggestedReference | select(. != null) | "suggested reference: \($ARGS.positional[. - 1])")' \
+             "${order[@]}" < "$report" \
         | while IFS= read -r line; do note "$line"; done
     else
       fail "Source Alignment did not run to success (${status:-no report})"
@@ -1012,34 +1057,26 @@ check_map() {
 }
 
 # map_digest <refresh report> <set>...: analysis.json, the refresh report by
-# set. Source Alignment's capture comparison exists only as text in its
-# summary, so each source's line of it is parsed here; "Source N" is the Nth
-# input of Align. Its statistics (the first picture, the frame coverage and
-# the number of pressings) are missing from the refresh report at the pinned
-# decode-orc, so they are read from the summary too when they are absent.
-# With a single pressing the summary names none, and every source compared is
-# given pressing A.
+# set. Source Alignment's capture comparison gives one info item per Align
+# input, its figures in .data with .data.source the input (from 1, the sets
+# in the order given), and the comparison's and the alignment's figures in
+# its statistics. Items are picked by .data.source, never by position or
+# message, and nothing is read from the summary text. With no item carrying
+# .data.source the comparison was not made, and every set's capture is null.
 map_digest() {
   local report="$1"; shift
   jq --args '
     def align: .nodes[] | select(.tool == "source_alignment");
-    def summary: align.summary // "";
     def pads: (align.parameter_changes.alignmentMap // "") | split(", ") | map(select(. != "") | split("+")
               | { key: .[0], value: (.[1] | tonumber) }) | from_entries;
-    def found(re): [ summary | capture(re) | .n | tonumber ] | first;
-    def statistics: (align.statistics // {}) as $s
-      | if ($s | length) > 0 then $s else
-          { globalFirstVBIFrame: found("output frame 1 holds picture (?<n>-?[0-9]+)"),
-            framesWith1Source: found("\n  1 source: +(?<n>[0-9]+) frames"),
-            framesWith2Sources: found("\n  2 sources: +(?<n>[0-9]+) frames"),
-            framesWith3PlusSources: found("\n  3\\+ sources: +(?<n>[0-9]+) frames"),
-            pressingGroups: (if summary | test("\nPressings: all [0-9]+ sources appear to come from one pressing") then 1
-                             else found("\nPressings: (?<n>[0-9]+) groups") end) } end;
-    def comparison($i): summary | split("\n")[]
-      | capture("^  Source (?<n>[0-9]+): noise σ (?<sigma>[0-9.]+) codes(, 5–6 MHz response (?<response>[0-9.]+))?(, pressing (?<pressing>[A-Z]+))?(, sample grid (?<grid>[-+][0-9]+))?$")
-      | select(.n == ($i | tostring))
-      | { noise_sigma: (.sigma | tonumber), response_5_6mhz: (.response | if . then tonumber else null end),
-          pressing, sample_grid: (.grid | if . then tonumber else 0 end) };
+    def statistics: align.statistics // {};
+    def source_data($i): [ align.items[]? | select(.data.source? == $i) | .data ] | first // null;
+    def capture($i): source_data($i)
+      | if . == null or .compared != true then null else
+          { noise_sigma, response_5_6mhz, response_note, pressing: .stamper_group, stamper_group, family,
+            own_sigma, pressing_sigma, family_sigma, gain_percent, level_codes,
+            sample_grid: (.sample_grid // 0), weight_share, stack_sigma_without,
+            first_frame, last_frame, padding_frames } end;
     . as $r
     | ([ $r | align ] | first | if . then $r | statistics else null end) as $stats
     | { project: .project, completed: .completed,
@@ -1050,13 +1087,15 @@ map_digest() {
                     map: { status: $m.status, statistics: $m.statistics, summary: $m.summary,
                            warnings: [ $m.items[]? | select(.type != "info") | .message ] },
                     alignment_padding: ($r | pads["\($i)"]),
-                    capture: ([ $r | comparison($i)
-                                | .pressing //= (if $stats.pressingGroups == 1 then "A" else null end) ] | first // null),
-                    soft: ([ $r | align.items[]? | select(.message | startswith("Source \($i) is soft")) ] | length > 0) } ],
+                    capture: ($r | capture($i)),
+                    soft: (($r | source_data($i) | .soft?) // false) } ],
         alignment: ($r | [ align ] | first // null | if . then
                      { status, mode: .parameter_changes.alignmentMode, map: .parameter_changes.alignmentMap,
                        statistics: $stats, summary, warnings: [ .items[]? | select(.type != "info") | .message ] } else null end),
-        pressing_groups: $stats.pressingGroups }' \
+        pressing_groups: $stats.pressingGroups,
+        stack_sigma: $stats.stackSigma,
+        fit_trusted: $stats.fitTrusted,
+        suggested_reference: ($stats.suggestedReference | if . == null then null else $ARGS.positional[. - 1] end) }' \
     "$@" < "$report"
 }
 
@@ -1064,18 +1103,15 @@ map_digest() {
 #
 # What the earlier stages found about each set, in one report a person reads
 # to write selection.yaml (docs/emulator-pack-plan.md, phase 4). It selects
-# nothing. Two more things are measured here, both quickly:
-#
-# - The disc's metadata as each set reads it: the user code, the programme
-#   status (CX, Amendment 2, side) and the first and last picture, which can
-#   tell pressings apart. decode-orc decodes these only for the video sink's
-#   embedded disc metadata, so the first and last COMPARE_PROBE_FRAMES frames
-#   of each decode go through a video sink, and the document is kept from the
-#   clip, which is not.
-# - vfs-stacker --dry-run --show-conflicts over every set's EFM image: whether
-#   the images agree sector for sector, and where they do not, whether the
-#   same sets always dissent (a different version of the disc) or not
-#   (damage).
+# nothing. The disc's identity as each set reads it -- the user code, the
+# programme status (CX, Amendment 2, side) and the first and last picture,
+# which tell versions of the disc apart -- comes from the map stage: each
+# set's Disc Mapper reads it over the whole side, by the same vote that
+# builds the video sink's embedded disc metadata. No video sink runs here.
+# One thing is measured here, in seconds: vfs-stacker --dry-run
+# --show-conflicts over every set's EFM image, whether the images agree
+# sector for sector, and where they do not, whether the same sets always
+# dissent (a different version of the disc) or not (damage).
 
 run_compare() {
   local state
@@ -1084,7 +1120,7 @@ run_compare() {
 }
 
 build_compare() {
-  local dir s id decode sdir stage frames n="$COMPARE_PROBE_FRAMES" meta clip rc t
+  local dir s id decode sdir rc t
   local -a images=()
   describe_compare
   dir="$STAGE_DIR"
@@ -1098,20 +1134,6 @@ build_compare() {
   for s in "${COMPARE_SETS[@]}"; do
     IFS='|' read -r id decode sdir <<< "$s"
     images+=("$(realpath --relative-to="$dir" -- "$sdir/${id,,}_efm.dat")")
-    stage=$(yq -r ".dag.nodes[] | select(.user_label == \"$id\") | .stage" "$MAP_PROJECT")
-    frames=$(jq -r --arg id "$id" '.sets[] | select(.set == $id) | .map.statistics.totalFields / 2 | floor' "$COMPARE_MAP/analysis.json")
-    meta=$(stage_tmp "metadata/$id.yaml") || return 1
-    clip="$dir/metadata/$id.mkv"
-    printf 'compare: %s: reading the disc metadata from its first and last %s frames\n' "$id" "$n"
-    t=$SECONDS rc=0
-    orc-cli -i "$stage=input_path=$decode" \
-            -f "frame_map=ranges=\"0-$(( n - 1 )),$(( frames - n ))-$(( frames - 1 ))\"" \
-            -o "video_sink=output_path=$clip:decoder_type=mono:ffmpeg_format=mkv-ffv1:embed_disc_metadata=true" \
-            > "$dir/metadata/$id.log" 2>&1 || rc=$?
-    [ "$rc" != 0 ] || ffmpeg -v error -y -dump_attachment:t:0 "$meta" -i "$clip" -frames:v 1 -f null - \
-                        >> "$dir/metadata/$id.log" 2>&1 || rc=$?
-    rm -f -- "$clip"
-    printf 'compare: %s: done in %ss (exit %s)\n' "$id" "$(( SECONDS - t ))" "$rc"
   done
 
   printf 'compare: vfs-stacker --dry-run over the EFM images of %s\n' "$(map_sets | paste -sd' ' -)"
@@ -1134,7 +1156,7 @@ build_compare() {
 # any failed. What the evidence says is for the person reading the report,
 # not a pass or a fail: vfs-stacker refusing sets that disagree is evidence.
 check_compare() {
-  local dir="$1" rc="$2" out log fails=0 s id decode sdir meta line
+  local dir="$1" rc="$2" out log fails=0 s id decode sdir line
   local -a args=() sets=()
   out=$(stage_tmp check.txt) || return 1
   log="$dir/vfs-stacker.txt.partial"
@@ -1148,13 +1170,13 @@ check_compare() {
 
     for s in "${COMPARE_SETS[@]}"; do
       IFS='|' read -r id decode sdir <<< "$s"
-      meta="$dir/metadata/$id.yaml.partial"
-      if [ "$(yq -r .format "$meta" 2>/dev/null)" = orc-disc-metadata ]; then
-        ok "$id: disc metadata read"
+      if jq -e --arg id "$id" '.sets[] | select(.set == $id) | .map.statistics
+           | has("userCode") or has("discSide")' "$COMPARE_MAP/analysis.json" > /dev/null 2>&1; then
+        ok "$id: disc identity read from the Disc Mapper"
       else
-        fail "$id: no disc metadata from the video sink (metadata/$id.log)"
+        fail "$id: no disc identity from the Disc Mapper: is decode-orc at cfa3997a or later?"
       fi
-      args+=("$id|$sdir/quality.json|$meta")
+      args+=("$id|$sdir/quality.json")
     done
     if grep -q 'Alignment cross-check:' "$log"; then
       ok "vfs-stacker compared the EFM images (exit $rc)"
@@ -1182,20 +1204,18 @@ check_compare() {
   rm -f -- "$dir/check.failed.txt"
 }
 
-# compare_digest <analysis.json> <vfs-stacker log> <set>|<quality.json>|<metadata yaml>...:
-# compare.json, every set's evidence side by side, and the pressing groups as
-# each kind of evidence draws them. The disc metadata is the video sink's
-# document; vfs-stacker's findings exist only as text in its log, so they are
-# parsed here, its sources being the sets in the order given.
+# compare_digest <analysis.json> <vfs-stacker log> <set>|<quality.json>...:
+# compare.json, every set's evidence side by side, and the groups each kind
+# of evidence draws. The disc identity is each set's Disc Mapper statistics
+# (map stage), put in the shape of the video sink's disc metadata document;
+# vfs-stacker's findings exist only as text in its log, so they are parsed
+# here, its sources being the sets in the order given.
 compare_digest() {
-  local analysis="$1" log="$2" s id quality meta; shift 2
-  local -a ids=()
+  local analysis="$1" log="$2" s id quality; shift 2
   {
     for s; do
-      IFS='|' read -r id quality meta <<< "$s"
-      ids+=("$id")
-      jq -c --arg id "$id" --rawfile meta <(yq -o=json . "$meta" 2>/dev/null || echo null) \
-        '{ set: $id, quality: ., metadata: ($meta | fromjson? // null) }' "$quality" || return 1
+      IFS='|' read -r id quality <<< "$s"
+      jq -c --arg id "$id" '{ set: $id, quality: . }' "$quality" || return 1
     done
   } | jq -s --slurpfile analysis "$analysis" --rawfile log "$log" '
     def lines: $log | split("\n") | map(sub("^\\[[a-z]+\\] "; ""));
@@ -1206,27 +1226,36 @@ compare_digest() {
     # confidence and the lead-in and lead-out depend on the capture as well.
     def disc_key: { format, side, size_inches, cx_enabled, teletext, digital_video, sound_mode,
                     fm_multiplex, programme_dump, user_code, amendment2 };
+    # The disc identity the Disc Mapper read, in the shape of the document; a
+    # statistic never read is absent, and so is its key.
+    def identity: . as $t
+      | if has("userCode") or has("discSide") | not then null else
+          [ ["format", "discType"], ["side", "discSide"], ["size_inches", "discSizeInches"], ["cx_enabled", "cx"],
+            ["teletext", "teletext"], ["digital_video", "digitalVideo"], ["sound_mode", "soundMode"],
+            ["fm_multiplex", "fmMultiplex"], ["programme_dump", "programmeDump"], ["user_code", "userCode"],
+            ["first_picture", "firstPicture"], ["last_picture", "lastPicture"],
+            ["lead_in", "leadInSeen"], ["lead_out", "leadOutSeen"] ]
+          | map(select(.[1] as $k | $t | has($k)) | { key: .[0], value: $t[.[1]] }) | from_entries
+          | if $t | has("amendment2") then .amendment2 = ({ present: $t.amendment2, copy_permitted: $t.amendment2CopyPermitted,
+                video_standard: $t.amendment2VideoStandard, sound_mode: $t.amendment2SoundMode } | with_entries(select(.value != null)))
+            else . end
+          | if $t | has("statusAgreement") then .confidence = { agreement: $t.statusAgreement } else . end end;
     ($analysis[0]) as $a
     | [ .[] | . as $s | ($a.sets[] | select(.set == $s.set)) as $m
-        | ($s.metadata // {}) as $md
-        | (($md.address_map // {}).runs // []) as $runs
         | { set,
             decode: .quality.decode,
             capture: { noise_sigma: $m.capture.noise_sigma, response_5_6mhz: $m.capture.response_5_6mhz,
-                       pressing: $m.capture.pressing, sample_grid: $m.capture.sample_grid, soft: $m.soft },
+                       pressing: $m.capture.pressing, sample_grid: $m.capture.sample_grid, soft: $m.soft,
+                       stamper_group: $m.capture.stamper_group, family: $m.capture.family,
+                       weight_share: $m.capture.weight_share, stack_sigma_without: $m.capture.stack_sigma_without,
+                       first_frame: $m.capture.first_frame, last_frame: $m.capture.last_frame,
+                       padding_frames: $m.capture.padding_frames },
             map: ($m.map.statistics // {} | { outputFrames, paddingFrames, gapsPadded, splitFieldFrames,
                    removedDuplicates, duplicateGroups, removedUnmappable, gapsTooWideToPad, correctedVBIErrors })
                  + { signal_state: $m.source.signal_state, alignment_padding: $m.alignment_padding,
                      warnings: $m.map.warnings },
             snr: .quality.snr, dropouts: .quality.dropouts, burst: .quality.burst, efm: .quality.efm,
-            metadata: (if $s.metadata == null then null else
-                        ($md.disc // {}) + {
-                          # The lowest and highest picture: a decode can open
-                          # on a frame or two of stray picture numbers.
-                          first_picture: ([ $runs[] | .picture? // empty ] | min),
-                          last_picture: ([ $runs[] | select(.picture?) | .picture + .count - 1 ] | max),
-                          lead_in: (($md.events.lead_in // []) | length > 0),
-                          lead_out: (($md.events.lead_out // []) | length > 0) } end) } ] as $sets
+            metadata: ($m.map.statistics // {} | identity) } ] as $sets
     | [ lines[] | capture("^    (?<a>[0-9]+) vs (?<b>[0-9]+) +(?<compared>[0-9]+) +(?<disagreed>[0-9]+) ")?
         | { a: $sets[(.a | tonumber) - 1].set, b: $sets[(.b | tonumber) - 1].set,
             compared: (.compared | tonumber), disagreed: (.disagreed | tonumber) } ] as $pairs
@@ -1250,7 +1279,16 @@ compare_digest() {
                  result: first_capture("RESULT: (?<verdict>[A-Z_]+) - (?<text>.*)$"),
                  recovered_over_best: (first_capture("^  Stacking recovered (?<n>[0-9]+) EFM sector") | .n? | num) } },
         video_by_noise: [ $sets | sort_by(.capture.noise_sigma // 1e9, -(.snr.mean_white_snr // 0))[] | .set ],
-        vfs_by_loss: [ $sets | sort_by(.efm.data_loss_pct // 1e9, .efm.uncorrectable // 1e9)[] | .set ] }'
+        # What each set adds: the predicted stack σ without it, highest
+        # first; sets without the figure last.
+        video_by_contribution: [ $sets | sort_by(if .capture.stack_sigma_without == null then 1 else 0 end,
+                                                 -(.capture.stack_sigma_without // 0))[] | .set ],
+        suggested_reference: $a.suggested_reference,
+        stack_sigma: $a.stack_sigma,
+        fit_trusted: $a.fit_trusted,
+        vfs_by_loss: [ $sets | sort_by(.efm.data_loss_pct // 1e9, .efm.uncorrectable // 1e9)[] | .set ] }
+    | .video_suggested_order = (if .suggested_reference == null then .video_by_contribution
+                                else [ .suggested_reference ] + (.video_by_contribution - [ .suggested_reference ]) end)'
 }
 
 # compare_report <compare.json> <vfs-stacker log>: report.txt, the evidence laid
@@ -1270,15 +1308,16 @@ compare_report() {
       "made \($when), from the sets map.orcprj maps: \([.sets[].set] | join(" "))",
       "",
       "This report selects nothing. A person reads it and writes \($selection):",
-      "the video sets and the VFS sets, each best first, and a reason for every set",
-      "left out (docs/emulator-pack-plan.md, phase 4).",
+      "the video sets, the suggested reference first and then by what each adds, the VFS",
+      "sets best first, and a reason for every set left out (docs/emulator-pack-plan.md,",
+      "phase 4).",
       "",
       "PRESSINGS",
       "",
       (if .pressings.capture == null then
-         "  Capture comparison: not made (Source Alignment compares pressings only with 4 or more sources)"
+         "  Stamper groups: not compared (Source Alignment compares captures only with 4 or more sources)"
        else
-         "  Capture comparison (Source Alignment): \(.pressings.capture | length) pressing(s): \([.pressings.capture[] | "\(.pressing) = \(.sets | join(" "))"] | join("; "))"
+         "  Stamper groups (Source Alignment, shared noise, not content): \([.pressings.capture[] | "\(.pressing) = \(.sets | join(" "))"] | join("; "))"
        end),
       (.pressings.metadata | if (.groups | length) == 0 then "  Disc metadata: read from no set"
        elif (.groups | length) == 1 then "  Disc metadata: every set reads the same: \(.groups[0].disc | disc_text)"
@@ -1292,27 +1331,42 @@ compare_report() {
          (if .versions_differ then "    the same sets dissent every time: vfs-stacker reads these as different versions of the disc"
           else "    which sets dissent varies: vfs-stacker reads this as damage rather than a different version" end)
        end),
-      (.pressings.capture // (.pressings.metadata.groups | map({ pressing: (.sets | join("+")), sets }))
+      (.pressings.metadata.groups | map({ pressing: (.sets | join(" ")), sets })
        | (map(.sets | length) | max) as $most
        | [ .[] | select((.sets | length) == $most) ] as $top
        | if length == 0 then empty
-         elif ($top | length) > 1 then "  Most sources: a tie, \([$top[] | .pressing] | join(" and ")) with \($most) each; the pressing is chosen by hand"
-         else "  Most sources: \($top[0].pressing), \($most) of \($c.sets | length) sets" end),
+         elif length == 1 then "  Most sources: one version of the disc, read from \($most) of \($c.sets | length) sets"
+         elif ($top | length) > 1 then "  Most sources: a tie between versions, \([$top[] | .pressing] | join(" and ")) with \($most) each; the version is chosen by hand"
+         else "  Most sources: the version \($top[0].pressing) reads, \($most) of \($c.sets | length) sets" end),
       "",
       "VIDEO",
       "",
-      ([["set", "noise σ", "5-6 MHz", "soft", "white SNR", "black PSNR", "dropouts", "samples", "burst", "padding", "gaps", "split", "dups", "unmappable", "pad"]]
-       + [ .sets[] | [ .set, (.capture.noise_sigma | r(100)), (.capture.response_5_6mhz | r(100)), (.capture.soft | yn),
+      ([["set", "noise σ", "adds", "weight", "group", "5-6 MHz", "soft", "white SNR", "black PSNR", "dropouts", "samples", "burst", "padding", "gaps", "split", "dups", "unmappable", "pad"]]
+       + [ .sets as $all | .video_by_contribution[] as $id | $all[] | select(.set == $id)
+           | [ .set, (.capture.noise_sigma | r(100)), (.capture.stack_sigma_without | r(100)),
+               (.capture.weight_share | if . == null then "-" else "\(round)%" end), (.capture.stamper_group // "-"),
+               (.capture.response_5_6mhz | r(100)), (.capture.soft | yn),
                        (.snr.mean_white_snr | r(100)), (.snr.mean_black_psnr | r(100)),
                        (.dropouts.total_dropouts // "-"), (.dropouts.total_dropout_samples // "-"), (.burst.mean_median_burst_10bit | r(10)),
                        (.map.paddingFrames // "-"), (.map.gapsPadded // "-"), (.map.splitFieldFrames // "-"),
                        (.map.removedDuplicates // "-"), (.map.removedUnmappable // "-"), (.map.alignment_padding // "-") ] ]
-       | table([4, 7, 7, 4, 9, 10, 8, 9, 6, 7, 4, 5, 4, 10, 3])),
+       | table([4, 7, 4, 6, 5, 7, 4, 9, 10, 8, 9, 6, 7, 4, 5, 4, 10, 3])),
       "",
-      "  noise σ and 5-6 MHz: Source Alignment capture comparison (10-bit codes; response 1 is typical,",
-      "  soft below 0.75). SNR, PSNR (dB) and burst: means over every frame (set stage). padding, gaps,",
-      "  split, dups, unmappable: the Disc Mapper. pad: frames Align puts before the set.",
-      "  Lowest noise first: \(.video_by_noise | join(" "))",
+      "  noise σ, adds, weight, group and 5-6 MHz: Source Alignment capture comparison (10-bit codes).",
+      "  noise σ is the set'"'"'s own noise; a set alone in its stamper group reads noisier but adds more,",
+      "  because no other set carries its noise. adds is the predicted stack σ without the set, the",
+      "  figure to choose by: the higher, the more the set adds. weight: its share of the Weighted",
+      "  stack. 5-6 MHz: response 1 is typical, soft below 0.75. SNR, PSNR (dB) and burst: means over",
+      "  every frame (set stage). padding, gaps, split, dups, unmappable: the Disc Mapper. pad: frames",
+      "  Align puts before the set.",
+      "  Most added first: \(.video_by_contribution | join(" "))",
+      (.stack_sigma | select(. != null) | "  Predicted stack σ: \(r(100)) (all sets, Weighted); adds = the predicted σ without that set."),
+      (if .suggested_reference == null then "  Suggested reference: not given (no capture comparison)"
+       else "  Suggested order: \(.video_suggested_order | join(" ")) (input 1 is the suggested reference, which sets the stack'"'"'s sample grid; the rest by what they add)" end),
+      (if .fit_trusted == false then "  Noise model not trusted: the stacker weights every set equally, and adds/weight describe that equal stack." else empty end),
+      (([ .sets[].capture.last_frame | select(. != null) ] | max) as $end
+       | .sets[] | select(.capture.last_frame != null and .capture.last_frame < $end)
+       | "  \(.set) covers output frames \(.capture.first_frame)-\(.capture.last_frame) of 1-\($end)"),
       (.sets[] | .set as $id | .map.warnings[]? | "  \($id): \(.)"),
       (.sets[] | select(.map.signal_state != null) | "  \(.set) signal: \(.map.signal_state)") ,
       "",
@@ -1335,7 +1389,7 @@ compare_report() {
       "",
       "DISC METADATA, AS EACH SET READS IT",
       "",
-      "  From the first and last frames of each decode, through the decode-orc video sink.",
+      "  From each set'"'"'s Disc Mapper (map stage), over the whole side.",
       (.sets[] | if .metadata == null then "  \(.set): not read" else
          "  \(.set): \(.metadata | disc_text); pictures \(.metadata.first_picture // "?")-\(.metadata.last_picture // "?"); lead-in \(.metadata.lead_in | if . then "seen" else "not seen" end), lead-out \(.metadata.lead_out | if . then "seen" else "not seen" end); \(.metadata.confidence.agreement // "-") of status fields agree" end),
       "",
@@ -1376,6 +1430,8 @@ build_video() {
   dir="$STAGE_DIR"
   problems=$(stack_problems)
   [ -z "$problems" ] || { printf 'video: %s %s\n' "${STACK_PROJECT#"$SELF_DIR"/}" "$problems" >&2; return 1; }
+  problems=$(selection_warnings)
+  [ -z "$problems" ] || printf 'video: warning: %s\n' "$problems"
   if [ "$VIDEO_EXPECT" = unknown ]; then
     printf 'video: the compare stage gives no one user code and Amendment 2 for the video sets (%s/compare/report.txt)\n' "$OUT/$ORC_DIR" >&2
     return 1
@@ -1417,14 +1473,17 @@ build_video() {
     fi
   done
   if ! { orc-cli nodes set "$dir/stack.orcprj" Align "alignmentMode=$mode" "alignmentMap=$map" \
-         && orc-cli nodes set "$dir/stack.orcprj" "Video Out" "output_path=$mkv" "decoder_type=$VIDEO_DECODER"; } >/dev/null; then
+         && orc-cli nodes set "$dir/stack.orcprj" "Video Out" "output_path=$mkv" "decoder_type=$VIDEO_DECODER" \
+              "decoder_schedule=${VIDEO_DECODER_SCHEDULE:-}" \
+              "noise_reduction=$(video_noise_reduction)" noise_reduction_mode=still_only; } >/dev/null; then
     printf 'video: could not set the alignment and the video sink\n' >&2
     return 1
   fi
 
   cd -- "$dir" || return 1
-  printf 'video: stacking %s (alignment %s), decoder %s; progress is in %s/stack.log\n' \
-    "$(selected_sets video | paste -sd' ' -)" "$map" "$VIDEO_DECODER" "$dir"
+  printf 'video: stacking %s (alignment %s), decoder %s%s, noise reduction %s dB; progress is in %s/stack.log\n' \
+    "$(selected_sets video | paste -sd' ' -)" "$map" "$VIDEO_DECODER" "${VIDEO_DECODER_SCHEDULE:+ ($VIDEO_DECODER_SCHEDULE)}" \
+    "$(video_noise_reduction)" "$dir"
   t=$SECONDS rc=0
   orc-cli "$dir/stack.orcprj" --process --log-file "$dir/stack.log" --log-out file > "$dir/console.log" 2>&1 || rc=$?
   printf 'video: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
@@ -1453,7 +1512,8 @@ check_video() {
   mapfile -t sets < <(selected_sets video)
 
   {
-    printf 'stage:   video\nsets:    %s\ndecoder: %s\nchecked: %s\n\n' "${sets[*]}" "$VIDEO_DECODER" "$(date '+%F %T')"
+    printf 'stage:   video\nsets:    %s\ndecoder: %s\nnoise reduction: %s dB still_only\nchecked: %s\n\n' "${sets[*]}" \
+      "$VIDEO_DECODER${VIDEO_DECODER_SCHEDULE:+ ($VIDEO_DECODER_SCHEDULE)}" "$(video_noise_reduction)" "$(date '+%F %T')"
 
     if [ "$rc" = 0 ] && grep -q 'VideoSink: Successfully wrote' "$dir/stack.log" 2>/dev/null; then
       ok "the stack was processed: $(sed -n 's/.*VideoSink: Successfully wrote \([0-9]*\) frames.*/\1/p' "$dir/stack.log" | tail -1) frames written"
@@ -1463,15 +1523,40 @@ check_video() {
 
     check_mkv "$mkv" "$dir" "$(stage_tmp metadata.yaml)"
 
+    # The embedded document's sound mode and status agreement against what
+    # the Disc Mapper read from the same sets over the whole side (the
+    # compare stage): they come from the same vote, so they should agree.
+    if [ -f "$OUT/$ORC_DIR/compare/compare.json" ]; then
+      while IFS= read -r text; do note "$text"; done < <(
+        yq -o=json '.disc' "$(stage_tmp metadata.yaml)" 2>/dev/null \
+          | jq -r --slurpfile c "$OUT/$ORC_DIR/compare/compare.json" --args '
+              . as $d | [ $c[0].sets[] | select(.set | IN($ARGS.positional[])) | .metadata // {} ] as $m
+              | ([ $m[].sound_mode ] | unique) as $sound | ([ $m[].confidence.agreement | select(. != null) ]) as $agree
+              | "metadata: sound mode \($d.sound_mode // "?") in the mkv, \($sound | map(tostring) | join("/")) from the Disc Mapper"
+                + (if ($sound | length) == 1 and $sound[0] == $d.sound_mode then " (they agree)" else " (they differ)" end),
+                "metadata: status agreement \($d.confidence.agreement // "?") in the mkv, \(if ($agree | length) > 0 then "\($agree | min)-\($agree | max)" else "?" end) from the Disc Mapper"' \
+              "${sets[@]}" 2>/dev/null)
+    fi
+
     # The stacker's view of each set: its noise and share of the weight,
-    # every 500 frames.
-    video_weights "$dir/stack.log" "${sets[@]}" > "$dir/weights.json" || fail "could not read the stacker's weights from stack.log"
+    # over the frames each of its records holds for. A set carries almost no
+    # weight below a quarter of an even share, whatever the number of sets.
+    video_weights "$dir/stack.log" "$frames" "${sets[@]}" > "$dir/weights.json" || fail "could not read the stacker's weights from stack.log"
     while IFS= read -r text; do note "$text"; done < <(jq -r '
       if .measurements == 0 then "the stacker logged no weights" else
-        "stack weights, the mean of \(.measurements) measurement(s): "
+        "stack weights, over the frames each of the stacker'"'"'s \(.measurements) record(s) holds for: "
           + ([ .sets[] | "\(.set) σ \(.mean_sigma // "-") at \(.mean_share // "-")% (least \(.least_share // "-")%)" ] | join(", ")),
-        (.sets[] | select((.mean_share // 0) < 5) | "\(.set) carries almost no weight (\(.mean_share // 0)%)"),
-        (.sample_grid[] | "\(.set): sample grid \(.samples | if . > 0 then "+\(.)" else tostring end) from the first set'"'"'s, from frame \(.from_frame)") end' "$dir/weights.json")
+        (25 / (.sets | length)) as $low
+        | (.sets[] | select((.mean_share // 0) < $low)
+           | "\(.set) carries almost no weight (\(.mean_share // 0)%, under a quarter of an even share)"),
+        (.sample_grid[] | "\(.set): sample grid \(.samples | if . > 0 then "+\(.)" else tostring end) from the first set'"'"'s, from frame \(.from_frame)\(if .reference != .set and .reference != null and .reference != $first then " (measured against \(.reference))" else "" end)"),
+        (.blocks[] | select(.fell_back_to_mean) | "frames \(.from_frame)-\(.to_frame) stacked with equal weights: the noise model was not trusted"),
+        (.reference_substitutions[] | select(.stand_in != null)
+         | "frames \(.from_frame)-\(.to_frame): the first set has no frame; \(.stand_in) stands in for its sample grid (offset \(.offset))") end' \
+      --arg first "${sets[0]}" "$dir/weights.json")
+    while IFS= read -r text; do fail "$text"; done < <(jq -r '
+      .reference_substitutions[]? | select(.stand_in == null)
+      | "frames \(.from_frame)-\(.to_frame) stacked without grid correction: no set links to the first set there"' "$dir/weights.json")
 
     # The hand-built stack, for comparison: not a pass or a fail.
     if [ -n "${VIDEO_BASELINE:-}" ] && [ -f "$DD_DECODES/$VIDEO_BASELINE" ] \
@@ -1495,9 +1580,11 @@ check_video() {
     # Everything the pack's provenance (phase 7) takes from this stage.
     jq -n --args --slurpfile probe "$dir/probe.json" --slurpfile weights "$dir/weights.json" \
           --rawfile meta "$dir/metadata-check.json" --rawfile base "${base:-/dev/null}" \
-          --arg decoder "$VIDEO_DECODER" --argjson frames "$frames" --argjson keys "$keys" \
+          --arg decoder "$VIDEO_DECODER" --arg schedule "${VIDEO_DECODER_SCHEDULE:-}" \
+          --argjson nr "$(video_noise_reduction)" --argjson frames "$frames" --argjson keys "$keys" \
           --arg baseline "${VIDEO_BASELINE:-}" '
-      { sets: $ARGS.positional, decoder: $decoder,
+      { sets: $ARGS.positional, decoder: $decoder, decoder_schedule: (if $schedule == "" then null else $schedule end),
+        noise_reduction: { db: $nr, mode: "still_only" },
         container: ($probe[0] | { format: .format.format_name, tags: .format.tags,
                                   streams: [ .streams[] | del(.tags.filename, .tags.mimetype) ] })
                    + { packets: $frames, keyframes: $keys },
@@ -1577,29 +1664,49 @@ check_mkv() {
   fi
 }
 
-# video_weights <stack.log> <set>...: the stacker's measured noise and share
-# of the weight for each set, averaged over the measurements it logs (one
-# whenever they change, for a block of frames), and each shift of a set's
-# sample grid onto the first set's. Its sources are the sets in the order
-# given; the noise lines list them in order, "-" for one not measured, and
-# the grid lines number them from 0.
+# video_weights <stack.log> <frames> <set>...: the stacker's measured noise
+# and share of the weight for each set over the stack of <frames> frames,
+# whether its noise model was trusted, each shift of a set's sample grid onto
+# the first set's, and where the first set has no frame and another stands
+# in for it. The stacker measures every block of frames but writes a weights
+# record only when the weights, or its trust in the model, change, so each
+# record holds from its block until the next record's: a block's to_frame is
+# where it stops holding, and the means are weighted by the frames each
+# holds for. All of it is read from the stacker's report records: the lines
+# holding "StackerStage report: " and a JSON object with "v": 1 after it,
+# whose inputs and frames count from 1. Its sources are the sets in the
+# order given.
 video_weights() {
-  local log="$1"; shift
-  jq -R -s --args '
+  local log="$1" frames="$2"; shift 2
+  jq -R -s --argjson n "$frames" --args '
     def r: . * 10 | round / 10;
-    split("\n") as $lines
-    | [ $lines[] | capture("StackerStage: frames [0-9]+-[0-9]+: input noise σ in codes \\(share of the weight\\) (?<list>[^;]*)")?
-        | [ .list | split(", ")[] | (capture("^(?<sigma>[0-9.]+) \\((?<share>[0-9.]+)%\\)$") | map_values(tonumber)) // null ] ] as $logged
-    | [ $lines[] | capture("StackerStage: frames (?<from>[0-9]+)-[0-9]+: source (?<n>[0-9]+) sample grid is (?<lag>[-+][0-9]+) ")?
-        | map_values(tonumber) ] as $shifts
-    | { measurements: ($logged | length),
+    [ split("\n")[] | split("StackerStage report: ") | select(length > 1)
+      | .[1:] | join("StackerStage report: ") | fromjson? | select(.v == 1) ] as $records
+    | [ $records[] | select(.kind == "weights") ] | sort_by(.frames[0]) as $logged
+    | [ range(0; $logged | length) as $k | $logged[$k]
+        | .held = ((if $k + 1 < ($logged | length) then $logged[$k + 1].frames[0] - 1 else ([ $n, .frames[1] ] | max) end)
+                   - .frames[0] + 1)
+        | .frames[1] = .frames[0] + .held - 1 ] as $weights
+    | { measurements: ($weights | length),
         sets: [ $ARGS.positional | to_entries[] | .key as $i
-                | [ $logged[] | .[$i] | select(. != null) ] as $m
-                | { set: .value, measurements: ($m | length),
-                    mean_sigma: (if ($m | length) > 0 then [ $m[].sigma ] | add / length | r else null end),
-                    mean_share: (if ($m | length) > 0 then [ $m[].share ] | add / length | r else null end),
+                | [ $weights[] | .held as $f | .inputs[$i] | select(. != null and .sigma != null) | . + { f: $f } ] as $m
+                | ([ $m[].f ] | add // 0) as $fs
+                | { set: .value, measurements: ($m | length), frames: $fs,
+                    mean_sigma: (if $fs > 0 then [ $m[] | .sigma * .f ] | add / $fs | . * 100 | round / 100 else null end),
+                    mean_share: (if $fs > 0 then [ $m[] | .share * .f ] | add / $fs | r else null end),
                     least_share: ([ $m[].share ] | min) } ],
-        sample_grid: [ $shifts[] | { set: $ARGS.positional[.n], from_frame: .from, samples: .lag } ] }' \
+        blocks: [ $weights[] | { from_frame: .frames[0], to_frame: .frames[1], frames: .held, fit_trusted: .fitTrusted,
+                                 fell_back_to_mean: .fellBackToMean, weighted_sigma: .weightedSigma,
+                                 equal_sigma: .equalSigma, best_single_sigma: .bestSingleSigma } ],
+        untrusted_blocks: ([ $weights[] | select(.fitTrusted == false) ] | length),
+        untrusted_frames: ([ $weights[] | select(.fitTrusted == false) | .held ] | add // 0),
+        fell_back_blocks: ([ $weights[] | select(.fellBackToMean == true) ] | length),
+        sample_grid: [ $records[] | select(.kind == "grid")
+                       | { set: $ARGS.positional[.input - 1], from_frame: .frames[0], samples: .offset,
+                           reference: $ARGS.positional[.reference - 1] } ],
+        reference_substitutions: [ $records[] | select(.kind == "reference")
+                                   | { from_frame: .frames[0], to_frame: .frames[1],
+                                       stand_in: (if .input then $ARGS.positional[.input - 1] else null end), offset } ] }' \
     "$@" < "$log"
 }
 
@@ -1665,8 +1772,10 @@ build_vfs() {
   : > "$dir/baseline.txt"
   if [ -n "${VFS_BASELINE:-}" ] && [ -f "$DD_DECODES/$VFS_BASELINE" ] && [ -f "$dat" ]; then
     brc=0
-    vfs-stacker --dry-run "$dat" "$(realpath --relative-to="$dir" -- "$DD_DECODES/$VFS_BASELINE")" > "$dir/baseline.txt" 2>&1 || brc=$?
+    vfs-stacker --dry-run --show-conflicts "$dat" "$(realpath --relative-to="$dir" -- "$DD_DECODES/$VFS_BASELINE")" > "$dir/baseline.txt" 2>&1 || brc=$?
     printf 'vfs: compared with the hand-built image (exit %s)\n' "$brc"
+    pack-python "$SELF_DIR/lib/vfs-differing.py" "$dat" "$DD_DECODES/$VFS_BASELINE" > "$dir/baseline-differing.json" \
+      || : > "$dir/baseline-differing.json"
   fi
 
   if ! check_vfs "$dir" "$rc" "$vrc" "$brc" "$dat"; then
@@ -1717,6 +1826,12 @@ check_vfs() {
     vfs_digest "$dir/vfs-stacker.txt" "$dir/vfs-stacker.debug.log" "$dir/vfs-verifier.txt" "$dir/baseline.txt" \
                "$dat.bsm" "${size:-0}" "${hash:-}" "${bsmhash:-}" "${sets[@]}" > "$dir/digest.json" \
       || fail "could not read the vfs-stacker and vfs-verifier logs"
+    # vfs-stacker names at most 20 of the sectors it disagrees with the
+    # baseline on, so the full list comes from comparing the two images.
+    if [ "$brc" != none ]; then
+      jq --slurpfile d "$dir/baseline-differing.json" '.baseline.differing = ($d[0].differing // null)' "$dir/digest.json" > "$dir/digest.json.tmp" \
+        && mv -- "$dir/digest.json.tmp" "$dir/digest.json" || fail "could not read baseline-differing.json"
+    fi
 
     # The image itself.
     while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(jq -r '
@@ -1774,28 +1889,34 @@ check_vfs() {
 
     # The hand-built image, for comparison. Sectors both recovered must hold
     # the same bytes; otherwise there is a pipeline bug or a pressing
-    # difference to explain before the pack ships. Lacking more than it does
-    # of what the filesystem needs fails too, unless an incomplete image is
-    # accepted.
+    # difference to explain before the pack ships. Once explained, the
+    # sectors go in vfs.baseline_differs, and only exactly those may differ.
+    # Lacking more than it does of what the filesystem needs fails too,
+    # unless an incomplete image is accepted.
     if [ "$brc" = none ]; then
       note "no baseline to compare with${VFS_BASELINE:+ ($VFS_BASELINE not found)}"
     else
       while IFS=$'\t' read -r level text; do
         [ "$level" != lacks ] || { [ "$accept" = incomplete ] && level=note || level=fail; }
         "$level" "$text"
-      done < <(jq -r --arg path "$VFS_BASELINE" '
-        .baseline as $b
-        | if $b.compared == null then "fail\tvfs-stacker could not compare this image with \($path) (baseline.txt)" else
-            (if $b.disagreed == 0 then "ok\tthis image and \($path) hold the same bytes in all \($b.compared) sector(s) both recovered"
-             else "fail\tthis image and \($path) differ in \($b.disagreed) of the \($b.compared) sector(s) both recovered (a pipeline bug or a pressing difference; see baseline.txt)" end),
+      done < <(jq -r --arg path "$VFS_BASELINE" --argjson known "$(vfs_baseline_differs)" '
+        def list: map(tostring) | join(" ");
+        .baseline as $b | (($b.differing // []) - $known) as $new | ($known - ($b.differing // [])) as $gone
+        | if $b.compared == null then "fail\tvfs-stacker could not compare this image with \($path) (baseline.txt)"
+          elif $b.differing == null then "fail\tcould not list the sectors this image and \($path) differ in (baseline-differing.json)" else
+            (if $b.disagreed == 0 and ($known | length) == 0 then "ok\tthis image and \($path) hold the same bytes in all \($b.compared) sector(s) both recovered"
+             elif $b.disagreed == ($b.differing | length) and ($new | length) == 0 and ($gone | length) == 0
+             then "ok\tthis image and \($path) hold the same bytes in all \($b.compared) sector(s) both recovered, but for the \($known | length) the selection records as known (vfs.baseline_differs)"
+             elif $b.disagreed != ($b.differing | length) then "fail\tthis image and \($path) differ in \($b.disagreed) of the \($b.compared) sector(s) both recovered, but holding the images side by side finds \($b.differing | length)"
+             else "fail\tthis image and \($path) differ in \($b.disagreed) of the \($b.compared) sector(s) both recovered (a pipeline bug or a pressing difference; see baseline.txt)\(if ($new | length) > 0 then "; not known: \($new | list)" else "" end)\(if ($gone | length) > 0 then "; known but no longer differing: \($gone | list)" else "" end)" end),
             (if $b.ours.vital_bad > $b.theirs.vital_bad then "lacks\tthis image lacks \($b.ours.vital_bad) sector(s) the filesystem needs, the baseline \($b.theirs.vital_bad)"
              else "ok\tthis image lacks no more of what the filesystem needs than the baseline (\($b.ours.vital_bad) against \($b.theirs.vital_bad))" end),
             "note\tbad sectors: \($b.ours.bad) here, \($b.theirs.bad) in the baseline; \($b.ours.only_good) recovered only here, \($b.theirs.only_good) only there"
           end' "$dir/digest.json")
     fi
 
-    jq --arg accept "$accept" '
-      { sets, accept: $accept, image, stack, verify, baseline,
+    jq --arg accept "$accept" --argjson known "$(vfs_baseline_differs)" '
+      { sets, accept: $accept, image, stack, verify, baseline: (.baseline + { known: $known }),
         bit_perfect: (.stack.result.verdict == "GOOD" and .verify.passed and .stack.vital_only == 0
                       and .stack.majority == 0 and .stack.split == 0 and .stack.contested == 0 and .stack.disagreements == 0) }
       | .verdict = (if .bit_perfect then "bit-perfect" else "incomplete" end)' "$dir/digest.json" > "$(stage_tmp vfs.json)" \
@@ -2120,7 +2241,7 @@ build_pack() {
   stage_mkdir "$dir" || return 1
   stage_unstamp || return 1
   rm -f -- "${dir:?}"/*.mkv "${dir:?}"/*.dat "${dir:?}"/*.dat.* "${dir:?}"/*.yaml* "${dir:?}"/*.json* \
-           "${dir:?}"/*.txt* "${dir:?}"/*.log "${dir:?}"/*.pdf* "${dir:?}"/SHA256SUMS*
+           "${dir:?}"/*.txt* "${dir:?}"/*.log "${dir:?}"/*.pdf* "${dir:?}"/*.md* "${dir:?}"/SHA256SUMS*
   rm -rf -- "${dir:?}/report"
   cd -- "$dir" || return 1
 
@@ -2284,14 +2405,16 @@ check_pack() {
   printf '%s  %s\n' "$(sha256_stdin < "$dir/$STEM.provenance.yaml.partial")" "$STEM.provenance.yaml" >> "$sums"
   pack_report "$dir" || return 1
   printf '%s  %s\n' "$(sha256_stdin < "$dir/$STEM.report.pdf.partial")" "$STEM.report.pdf" >> "$sums"
+  printf '%s  %s\n' "$(sha256_stdin < "$dir/$STEM.report.md.partial")" "$STEM.report.md" >> "$sums"
 }
 
-# pack_report <dir>: <stem>.report.pdf, from the provenance and check results
-# in <dir> (their stage_tmp names) and the stages the pack was built from.
-# lib/pack-report.py reads them as a manifest names them, and keeps its
-# graphs and tables in <dir>/report.
+# pack_report <dir>: <stem>.report.pdf, and the same as Markdown in
+# <stem>.report.md, from the provenance and check results in <dir> (their
+# stage_tmp names) and the stages the pack was built from. lib/pack-report.py
+# reads them as a manifest names them, and keeps its graphs and tables in
+# <dir>/report, which the Markdown links its graphs from.
 pack_report() {
-  local dir="$1" s id cvbs sdir cmd path version pdf
+  local dir="$1" s id cvbs sdir cmd path version pdf md
   local -a sets=() tools=()
   for s in "${COMPARE_SETS[@]}"; do
     IFS='|' read -r id cvbs sdir <<< "$s"
@@ -2331,8 +2454,9 @@ pack_report() {
       tools: [ rows($tools)[] | { name: .[0], version: .[1], path: .[2] } ],
       epoch: $epoch }' > "$dir/report/manifest.json" || { printf 'pack: could not write the report manifest\n' >&2; return 1; }
   pdf=$(stage_tmp "$STEM.report.pdf") || return 1
-  if ! pack-python "$SELF_DIR/lib/pack-report.py" "$dir/report/manifest.json" "$pdf" --work "$dir/report" \
-       || [ "$(head -c 5 "$pdf" 2>/dev/null)" != "%PDF-" ]; then
+  md=$(stage_tmp "$STEM.report.md") || return 1
+  if ! pack-python "$SELF_DIR/lib/pack-report.py" "$dir/report/manifest.json" "$pdf" --work "$dir/report" --markdown "$md" \
+       || [ "$(head -c 5 "$pdf" 2>/dev/null)" != "%PDF-" ] || [ ! -s "$md" ]; then
     printf 'pack: could not make the report (the work is in %s/report)\n' "$dir" >&2
     return 1
   fi
@@ -2342,21 +2466,27 @@ pack_report() {
 # results in <dir> (their stage_tmp names) and what the stages before it
 # recorded.
 pack_provenance() {
-  local dir="$1" id
-  local -a captures=() patches=()
+  local dir="$1" id weights
+  local -a captures=() patches=() vsets=()
   for id in $(map_sets); do
     captures+=("$id|$(set_field "$id" 2)|$(set_field "$id" 3)|$id/$LDD_DIR")
   done
   for id in "$SELF_DIR"/patches/*.patch; do
     [ -f "$id" ] && patches+=("${id##*/}|$(sha256_stdin < "$id")")
   done
+  # The stacker's weights, read again from the video stage's log rather than
+  # taken from its video.json, so that they are read as this script reads
+  # them now (a video stage built before each record was held until the next
+  # averaged its records as if each were one block).
+  mapfile -t vsets < <(jq -r '.sets[]' "$PACK_VIDEO/video.json")
+  weights=$(video_weights "$PACK_VIDEO/stack.log" "$(jq '.metadata.frame_count // 0' "$PACK_VIDEO/video.json")" "${vsets[@]}") || return 1
   printf '# The provenance of the %s pack for %s: what it was made from, how,\n' "$STEM" "$DISC"
   printf '# and every check it passed. Written by build-pack.sh; vp415e ignores it.\n'
   jq -n --arg disc "$DISC" --arg stem "$STEM" --arg version "${dir##*/}" --arg built "$(date '+%FT%T%z')" \
         --arg script "$(git -C "$SELF_DIR" describe --always --dirty 2>/dev/null || echo unknown)" \
         --slurpfile pack "$dir/pack.json.partial" --slurpfile lock "$SELF_DIR/flake.lock" \
         --argjson selection "$(yq -o=json . "$SELECTION")" --slurpfile evidence "$PACK_COMPARE/compare.json" \
-        --slurpfile video "$PACK_VIDEO/video.json" --slurpfile vfs "$PACK_VFS/vfs.json" \
+        --slurpfile video "$PACK_VIDEO/video.json" --argjson weights "$weights" --slurpfile vfs "$PACK_VFS/vfs.json" \
         --rawfile sources "$SELF_DIR/sources.sha256" \
         --rawfile stamp_compare "$PACK_COMPARE/stage.stamp" --rawfile stamp_video "$PACK_VIDEO/stage.stamp" \
         --rawfile stamp_vfs "$PACK_VFS/stage.stamp" \
@@ -2393,7 +2523,7 @@ pack_provenance() {
                   | .["decode-orc"].patches = [ $patches | split("\n")[] | select(. != "") | split("|") | { name: .[0], sha256: .[1] } ]),
           selection: $selection,
           evidence: $evidence[0],
-          video: $video[0],
+          video: ($video[0] + { stacker: $weights }),
           vfs: $vfs[0],
           stamps: { compare: stamp($stamp_compare), video: stamp($stamp_video), vfs: stamp($stamp_vfs) },
           checks: { video: checks($check_video), vfs: checks($check_vfs), pack: checks($check_pack) } }' \

@@ -6,9 +6,9 @@
 # Community South is one CAV side of the Community disc of a Domesday set. The
 # library has twelve sets, each with one capture of this side, made between
 # 2019 and 2022; each is decoded in its own right, so they can be compared
-# against each other or combined. decode-domesday.sh lists the same captures
-# with the set's other three sides, for decoding by hand; this script is the
-# one the pack is built from, and the one that checks and stamps its decodes.
+# against each other or combined. Each pack has its own decode script: this is
+# Community South's, the only list of its captures, and it checks and stamps
+# its decodes for build-pack.sh.
 #
 # Each side is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
 # configurable number of lead-in frames before its first picture, so the
@@ -136,8 +136,7 @@ START_OVERRIDE=""
 # ---------------------------------------------------------------------------
 # Set table: set | first picture | source path relative to LIBRARY
 #
-# Every capture is PAL CAV, of the Community disc's South side, as
-# decode-domesday.sh lists them.
+# Every capture is PAL CAV, of the Community disc's South side.
 #
 # "first picture" is the picture number the start search converges on -- the
 # first frame of the side's content. It is 1 for every capture here, each of
@@ -153,7 +152,10 @@ SETS=(
   "DS4|1|BBC_AIV/Domesday/Domesday_DS4/Domesday_DD86-DS4_CommunitySouth_20191014_CAV_PAL_00001-54000.ldf"
   "DS5|1|BBC_AIV/Domesday/Domesday_DS5/Domesday_DD86-DS5_CommunitySouth_20191111_CAV_PAL_00001-54000.ldf"
   "DS6|1|BBC_AIV/Domesday/Domesday_DS6/Domesday_DD86-DS6_CommunitySouth_20200803_CAV_PAL_00001-54000.ldf"
-  "DS7|1|BBC_AIV/Domesday/Domesday_DS7/Domesday_DD86-DS7_CommunitySouth_20200215_CAV_PAL_00001-54000.ldf"
+  # DS7 is left out for now: ld-decode 6148260 hangs at the end of its capture
+  # (field 108011, in the lead-out after picture 54000), every time, and never
+  # writes the .meta. Restore this line once a pinned ld-decode finishes it.
+  # "DS7|1|BBC_AIV/Domesday/Domesday_DS7/Domesday_DD86-DS7_CommunitySouth_20200215_CAV_PAL_00001-54000.ldf"
   "DS8|1|BBC_AIV/Domesday/Domesday_DS8/Domesday_DD86-DS8_CommunitySouth_20210104_CAV_PAL_00001-54000.ldf"
   "DS9|1|BBC_AIV/Domesday/Domesday_DS9/Domesday_DD86-DS9_CommunitySouth_20200814_CAV_PAL_00001-54000.ldf"
   "DS10|1|BBC_AIV/Domesday/Domesday_DS10/Domesday_DD86-DS10_CommunitySouth_20200814_CAV_PAL_00001-54000.ldf"

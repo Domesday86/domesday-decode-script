@@ -131,7 +131,7 @@
   ("Pack id", [#mono(data.id) — the first 16 hex digits of the sha256 of the three files' lines of SHA256SUMS. It names the files the player loads, not the directory]),
   ("Directory", [#mono(data.place + "/" + data.version + "/") on the decodes share; #mono(data.place + "/pack") points at the current pack]),
   ("Built", [#data.built, by build-pack.sh at #mono(data.script.commit)#if data.script.dirty [ (with uncommitted changes)]]),
-  ("Video stack", data.video_sets.join(", ") + [, best first]),
+  ("Video stack", data.video_sets.join(", ") + [, in stack order (the first sets the sample grid)]),
   ("VFS stack", data.vfs_sets.join(", ") + [, best first]),
 )],
 )
@@ -192,7 +192,7 @@ The Disc Mapper puts each capture's frames in disc order: it pads pictures a cap
 
 = The selection <selection>
 
-Which sets go into each stack is a person's decision, made from the compare stage's report (in the appendix) and committed as discs/#data.disc/selection.yaml, quoted here in full with its reasons. Pressing #data.pressing.
+Which sets go into each stack is a person's decision, made from the compare stage's report (in the appendix) and committed as discs/#data.disc/selection.yaml, quoted here in full with its reasons. Pressing #data.pressing (the content version).
 
 #block(width: 100%, inset: 8pt, radius: 3pt, fill: rgb("#f6f6f3"), raw(data.selection_text, block: true, lang: "yaml"))
 
@@ -200,15 +200,22 @@ Which sets go into each stack is a person's decision, made from the compare stag
 
 = The video stack
 
-The sets #data.video_sets.join(", ") are stacked by decode-orc's stacker, then dropout-corrected and written by the video sink with the #mono(data.decoder) chroma decoder as FFV1 in Matroska. The stacker measures each input's noise in blocks of frames and weights the inputs by it; a block in which the inputs disagree too much is split into pressings, and the stack takes one group.
+The sets #data.video_sets.join(", ") are stacked by decode-orc's stacker, then dropout-corrected and written by the video sink with the #mono(data.decoder) chroma decoder as FFV1 in Matroska. #data.stacker_text#if data.noise_reduction != none [ #data.noise_reduction]
 
 #if "weights" in data.graphs { graph(data.graphs.weights) }
 #tbl(data.weights)
-#text(size: 7.5pt, fill: ink2)[Over the #data.blocks_logged blocks the stacker logged its weights for.#if data.sample_grid.len() > 0 [ Sample grid shifts: #data.sample_grid.map(s => [#s.set by #s.samples sample(s) from frame #s.from_frame]).join(", ").]]
+#text(size: 7.5pt, fill: ink2)[#data.records #data.trust#if data.sample_grid.len() > 0 [ Sample grid shifts: #data.sample_grid.map(s => [#s.set by #s.samples sample(s) from frame #s.from_frame]).join(", ").]]
+
+#if data.gain.len() > 0 [
+  == What the stacking is predicted to gain
+  #data.gain_text
+  #if "sigma" in data.graphs { graph(data.graphs.sigma) }
+  #kv(..data.gain)
+]
 
 #if data.split_blocks.rows.len() > 0 [
-  == Blocks the stacker split into pressings
-  All the sets are one pressing (the selection), so a split here is the stacker's, not the disc's.
+  == Frames where the noise model was not trusted
+  #data.untrusted_text
   #tbl(data.split_blocks, wide: true, size: 7pt)
 ]
 
@@ -245,11 +252,11 @@ The orc-disc-metadata document attached to the mkv, as vp415e reads it.
 Every set is measured over every frame by decode-orc's SNR, dropout and burst level analyses (the set stage); the stack is measured by the same analyses, with the same settings, on the stacker's output before dropout correction (the quality stage). The frame maps put both on the frames of the pack's mkv, so each graph compares like with like. The graphs along the disc show one point per #data.bin frames.
 
 #tbl(data.quality)
-#text(size: 7.5pt, fill: ink2)[noise σ and 5–6 MHz response: Source Alignment's capture comparison (10-bit codes; 1 is a typical response). White SNR, its lowest frame, and black PSNR in dB; dropouts and their samples over the whole disc; burst level as a 10-bit median, mean over frames.]
+#text(size: 7.5pt, fill: ink2)[#data.quality_key White SNR, its lowest frame, and black PSNR in dB; dropouts and their samples over the whole disc; burst level as a 10-bit median, mean over frames.]
 
 Both picture measures come from the test signals in the vertical interval (VITS), so they measure the same thing on every frame whatever the picture: white SNR on the white flag, against its mean, and black PSNR on the black level reference, against peak white. Together they cover the luminance range.
 
-They measure the test lines, not the picture. The stacker weights each set by a different measure: how much it differs from the others across the active picture. So the two can disagree. When they do, a set that reads best here may carry something in its picture that the test lines do not show, or the stacker may be counting as noise a difference that is not noise. Where the stack falls below a single set here, the loss in the picture can be much smaller than these graphs show. Noise that every set of one pressing shares, recorded into the stamper, shows here and cannot be stacked away.#if data.have_mean [ The same stack in Mean, with every set weighted equally, is measured too (the dashed line). Where Mean reads better than the stack as built, the stacker's weights do not favour the sets these figures do.]
+They measure the test lines, not the picture. The stacker weights each set by a different measure: how much it differs from the others across the active picture. So the two can disagree. When they do, a set that reads best here may carry something in its picture that the test lines do not show, or the stacker may be counting as noise a difference that is not noise. Where the stack falls below a single set here, the loss in the picture can be much smaller than these graphs show. Noise that every set of one stamper group shares, recorded into the stamper, shows here and cannot be stacked away.#if data.have_mean [ The same stack in Mean, with every set weighted equally, is measured too (the dashed line). Where Mean reads better than the stack as built, the stacker's weights do not favour the sets these figures do.]
 
 #for (k, name) in (("white", "White SNR"), ("black", "Black PSNR")) [
   == #name
@@ -264,6 +271,14 @@ They measure the test lines, not the picture. The stacker weights each set by a 
 
 == Dropouts and burst level
 #for k in ("dropouts", "burst") { if k in data.graphs { graph(data.graphs.at(k)) } }
+
+== The analyses' settings
+The quality stage's project (#mono(data.quality_dir + "/quality.orcprj")), its sources aside: the stack as the video stage builds it, measured by the analyses the set stage runs on each set.#if data.quality_mean_diff.rows.len() > 0 [ The stack in Mean (#mono("quality-mean.orcprj")) differs from it only in the rows of the second table.]
+#tbl(data.quality_params, mono-cols: (3,), wide: true, size: 7pt)
+#if data.quality_mean_diff.rows.len() > 0 {
+  v(4pt)
+  tbl(data.quality_mean_diff, mono-cols: (2,), wide: true, size: 7pt)
+}
 
 // --- EFM and VFS -------------------------------------------------------------------
 
@@ -285,6 +300,7 @@ Each set's EFM is decoded to an image of 2048-byte sectors and a map of the sect
   ("Not recovered", [#data.vfs.bad: #data.vfs.unrecovered bad in every set, #data.vfs.padded padding; #data.vfs.union sectors were recovered by some set]),
   ("Over the best set", [#data.vfs.recovered_over_best sector(s) recovered that the best single set (#data.vfs.best) lacks]),
   ("Filesystem", [#if data.vfs.verify_passed [vfs-verifier passes the image] else [vfs-verifier does not pass the image]: free space map #(data.vfs.fsm); directory #(data.vfs.directory); #data.vfs.objects objects, #data.vfs.objects_damaged damaged]),
+  ..if data.vfs.baseline != none { (("Hand-built image", data.vfs.baseline),) },
   ("Image", mono(data.vfs.image_sha256)),
   ("Bad sector map", mono(data.vfs.bsm_sha256)),
 )

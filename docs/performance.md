@@ -190,6 +190,38 @@ The outputs are internally consistent — every `.cvbs` is exactly
 reach the end of the decode without being emitted. It is a small variable tail
 rather than a property of one side, and it has not been chased further.
 
+## Pack stages
+
+Community South through `build-pack.sh`, on two decode-orc pins. The
+settings differ between the runs, so the columns are not like for like:
+f7f3094 stacked five sets with no repeat stacking and the 2D decoder; 2611e5b
+stacks all eleven mapped sets, stacks still frames with their repeats, and
+decodes held pictures in 3D (`decoder_schedule`). The set stage is all 12
+captures' EFM images and quality analyses at `-j 2`.
+
+| Stage | f7f3094 (5 sets) | 2611e5b (11 sets) |
+| --- | --- | --- |
+| set | about 81 min | 72 min |
+| map | 1,697 s | 1,732 s |
+| compare | about 85 s | 16 s |
+| video | 2,489 s | 10,661 s |
+| quality: SNR | 1,693 s | 5,526 s |
+| quality: dropouts | 1,596 s | 5,832 s |
+| quality: SNR in Mean | 1,296 s | 5,910 s |
+
+- **set** is read-bound. One set's SNR analysis took 576 s against 564 s on
+  f7f3094, at about 130 MB/s per reader; the rest of the difference has not
+  been chased.
+- **compare** no longer cuts probe clips and runs `ffmpeg` on them; the disc
+  identity comes from the Disc Mapper, which the map stage already ran.
+- **video and quality** scale with the sets read, roughly 2.2 times the data
+  here. The stack reads its inputs at about 155 MB/s in all, about 10 frames
+  a second, with orc-cli at under half of one core, against the share's
+  roughly 380 MB/s: the read looks serial. That is about 1.4 MB per set per
+  frame, some 840 GB for one pass over the disc from eleven sets, so even at
+  the share's full rate each pass has a floor of about 37 minutes, against
+  the 90-odd it takes now.
+
 ## Start caching
 
 Resolving a start is several short ld-decode probes — convergence probes plus

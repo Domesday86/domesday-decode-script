@@ -945,12 +945,18 @@ inputs, so a re-run with nothing changed does nothing.
 - **Phase 3 is in place:** the `map` stage. It copies the disc's committed
   `map.orcprj` to `orc-<rev>/map/`, points each set's source at its decode,
   and runs `orc-cli tools refresh`. The Disc Mapper builds each set's frame
-  map, then Source Alignment places the sets against each other and compares
-  the captures. Nothing is processed. It writes:
+  map and reads the disc's identity over the whole side (user code, CX,
+  Amendment 2, side, sound mode, first and last picture, lead-in and
+  lead-out), then Source Alignment places the sets against each other and
+  compares the captures. Nothing is processed. It writes:
   - `analysis.json`: by set, the Disc Mapper's figures (padding, split-field
-    frames, duplicates) and warnings, the alignment padding, and the capture
-    comparison (noise, 5–6 MHz response, pressing group, softness), for the
-    selection report in phase 4;
+    frames, duplicates), its disc identity and warnings, the alignment
+    padding, and the capture comparison (noise, 5–6 MHz response, stamper
+    group, what the set adds to the stack, its share of the weight, its
+    coverage, softness), for the selection report in phase 4. It also gives
+    the comparison's predicted stack σ, whether its noise model was trusted,
+    and the suggested reference. All of it is read from the data decode-orc
+    attaches to its report, not from its summary text;
   - `refresh.json`, decode-orc's own report, and `check.txt`;
   - `framemaps/<set>.ranges` (one entry per line, 0-based as a project
     stores them) and `framemaps/alignment` (each set's padding).
@@ -962,26 +968,38 @@ inputs, so a re-run with nothing changed does nothing.
 - **Phase 4 is in place:** the `compare` stage and the `select` check. The
   `compare` stage lays every mapped set's evidence side by side, in
   `orc-<rev>/compare/report.txt`, for a person to decide the selection from.
-  It selects nothing. Besides what the `set` and `map` stages found, it
-  measures two things:
-  - the disc metadata each set reads (user code, CX, Amendment 2, side, first
-    and last picture), from its first and last 250 frames through decode-orc's
-    video sink (`metadata/<set>.yaml`);
-  - whether the sets' EFM images agree sector for sector, from
-    `vfs-stacker --dry-run --show-conflicts` over all of them
-    (`vfs-stacker.txt`).
+  It selects nothing. The disc identity each set reads comes from the `map`
+  stage's Disc Mapper, over the whole side, so the stage runs no video sink
+  and takes seconds. Besides what the `set` and `map` stages found, it
+  measures one thing: whether the sets' EFM images agree sector for sector,
+  from `vfs-stacker --dry-run --show-conflicts` over all of them
+  (`vfs-stacker.txt`).
+
+  The report orders the video sets by what each adds to the stack: the
+  predicted stack σ without the set ("adds"), from Source Alignment, the
+  higher the more it adds. A set's own noise σ is not the figure to choose
+  by. A set alone in its stamper group (the discs whose noise one stamper
+  recorded) reads as noisy as the rest or noisier, but adds the most,
+  because no other set carries its noise, so it is not an outlier. A
+  stamper group is shared noise, not a version of the disc: the disc
+  identity and vfs-stacker's systematic dissent tell versions apart. The
+  report ends the video section with a suggested order: the suggested
+  reference first, which sets the stacker's sample grid, then the rest by
+  what they add.
 
   It also writes `compare.json` (the same evidence, by set) and `check.txt`.
   The decision goes in `discs/<disc>/selection.yaml`, written and committed
   by hand. Its shape, with made-up choices:
 
   ```yaml
-  pressing: A                # the pressing chosen: the one with the most sets
+  pressing: A                # the content version chosen: the one with the most sets
   video:
-    sets: [DS1, DS2, DS3]    # best first: input 1 is the stacker's reference grid
+    sets: [DS1, DS2, DS3]    # the suggested reference first (it sets the stacker's
+                             # sample grid), then by what each adds
     dropped:
       - set: DS5
         reason: soft at 5-6 MHz
+    noise_reduction: 6       # optional: the video sink's noise reduction, dB
   vfs:
     sets: [DS1, DS2, DS4]    # best first: vfs-stacker breaks split votes towards it
     dropped:
@@ -992,7 +1010,17 @@ inputs, so a re-run with nothing changed does nothing.
 
   Every set `map.orcprj` maps is either used or dropped with a reason, in
   each stack. `select` is not stamped: it is waiting until the file exists,
-  and stops the build if the file breaks those rules.
+  and stops the build if the file breaks those rules. When the first video
+  set is not the compare report's suggested reference, `status` adds a
+  warning to the `select` line, and the `video` stage prints it; it is not a
+  failure, since the person may have a reason.
+
+  `video.noise_reduction` is the selection owner's choice, and off unless
+  given. It is applied in decode-orc's `still_only` mode: averaged only
+  across the frames the stacker marks as one held picture, with no spatial
+  fallback, so every single-frame still stays exactly as stacked. 6 dB is
+  the setting measured on the Community South test card. It is a
+  presentation choice, to check on vp415e before a pack ships with it.
 - **Phase 5 is in place:** the `video` stage. It copies the disc's committed
   `stack.orcprj` to `orc-<rev>/video/`. That project's sources must be the
   selection's video sets, in its order. The stage then points each source at
@@ -1000,12 +1028,25 @@ inputs, so a re-run with nothing changed does nothing.
   `discs/<disc>/framemaps/`, which must still match the `map` stage's. Then it
   processes the project: Source Align, the `Weighted` Stacker, Dropout
   Correction and the video sink (`mkv-ffv1-bt601`, 4:3, the disc's
-  `VIDEO_DECODER`, audio, chapters and disc metadata). It writes:
+  `VIDEO_DECODER` and `VIDEO_DECODER_SCHEDULE`, the selection's noise
+  reduction, audio, chapters and disc metadata).
+
+  The Stacker stacks repeats (`still_frame_stacking`): a picture held over
+  several frames is stacked across them as well as across the sets, which is
+  most of what stacking gains on held pictures. It leaves `still_frame_search`
+  (24), `luma_level_match` and `chroma_gain_match` (on) at decode-orc's
+  defaults. The video sink decodes with `decoder_type` `multiple` and the
+  schedule `transform2d, held:transform3d`: a frame whose picture the
+  stacker marks as held for at least 4 frames either side is decoded in 3D,
+  and every other frame in 2D. 3D is about 1 dB better on held pictures and
+  2.7 dB worse on the single-frame stills that make up most of a disc, so it
+  is taken only where the picture is held. It writes:
   - `<stem>.mkv`;
   - `metadata.yaml`, the disc metadata document taken from the mkv;
   - `video.json`: the container's figures, the metadata summary, each set's
-    noise and share of the stacker's weight, and the hand-built baseline's
-    figures (`VIDEO_BASELINE`);
+    noise and share of the stacker's weight, read from the stacker's
+    `StackerStage report:` records, whether its noise model was trusted in
+    each block, and the hand-built baseline's figures (`VIDEO_BASELINE`);
   - `check.txt`.
 
   The mkv is checked as vp415e loads it:
@@ -1083,7 +1124,11 @@ inputs, so a re-run with nothing changed does nothing.
   The next build restamps the same pack as complete. A recorded `fail` fails
   the stage.
 - **The pack report.** Every pack build writes `<stem>.report.pdf` beside the
-  pack. It is a record of what the automation did, from the RF captures to
+  pack, and the same report as Markdown in `<stem>.report.md`, for giving to
+  an AI or anything else that reads text more easily than a PDF. The
+  Markdown has the same sections, tables and appendices, from the same data,
+  and links the PDF's own graphs, the SVGs in `report/`, whose text is kept
+  as text. It is a record of what the automation did, from the RF captures to
   the pack, not instructions. It holds:
   - the pipeline: every step from RF to pack, its tool and revision, what it
     made for this pack, and how its checks came out;
@@ -1097,7 +1142,7 @@ inputs, so a re-run with nothing changed does nothing.
     and the per-frame SNR distribution;
   - the selection, quoted with its reasons;
   - the stacker's weight for each set in each block it measured, and the
-    blocks it split into pressings;
+    blocks where its noise model was not trusted;
   - the mkv's container and disc metadata;
   - the EFM decode of each set, where each set's unrecovered sectors fall
     against the stack's, and the VFS stack and its verification;
@@ -1107,8 +1152,10 @@ inputs, so a re-run with nothing changed does nothing.
   stacker's output with the same SNR and dropout analyses the set stage runs
   on each set. It also measures the SNR of the same stack in Mean, every set
   weighted equally, as a check on the stacker's weights. It stacks the disc
-  again for each analysis, so it takes about as long as the video stage, but
-  only once for each stack. The report is
+  again for each analysis, so it is the slowest stage, though it runs only
+  once for each stack: on Community South's eleven sets (decode-orc 2611e5b)
+  each analysis took about 95 minutes, 4 h 48 m in all, against 2 h 58 m
+  for the video stage. The report is
   drawn by `lib/pack-report.py` (Matplotlib) and set by `typst` from
   `lib/pack-report.typ`, in IBM Plex from the dev shell rather than the host's
   fonts. Its working files (the graphs as SVG, and `report.json`) stay in

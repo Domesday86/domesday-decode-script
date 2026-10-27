@@ -1,0 +1,77 @@
+# Community South: which sets go into the video and the VFS stacks, decided
+# from the compare stage's report (orc-<rev>/compare/report.txt) as described
+# in docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
+#
+# The evidence (orc-2611e5b, 2026-10-26; DS7 is not mapped, as ld-decode
+# cannot finish its decode): one version of the disc. Every set's Disc
+# Mapper reads the same disc identity over the whole side (CAV side 1, user
+# code 1066, CX off, Amendment 2 present, sound future_use), and every pair
+# of EFM images holds the same bytes wherever both recovered a sector.
+# Source Alignment finds three stamper groups, which are shared noise, not
+# content: A = DS1 DS2 DS4 DS6 DS8 DS9 DS10 DS12, B = DS3, C = DS5 DS11. None
+# is soft (5-6 MHz response 0.97-1.23). Its noise model is trusted, and
+# predicts σ 7.73 for the Weighted stack of all eleven, against 12.99 for
+# the best single set.
+#
+# Until 2026-10-26 (orc-f7f3094) the video stacked DS4 DS12 DS2 DS1 DS8 only.
+# That decode-orc measured noise over the whole picture, read DS3, DS5 and
+# DS11 as soft and noisy, and split the sharp sets into pressings; mixing
+# them marked about 160 samples a frame low-confidence. At 2611e5b the noise
+# is measured on flat blocks, and DS3, DS5 and DS11 are the three sets that
+# add the most, being the only sets carrying their stampers' noise.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # Every set, DS2 first: the compare report's suggested reference (it sets
+  # the stacker's sample grid), covering every output frame with the fewest
+  # padding frames (4). The rest by what each adds, the predicted stack σ
+  # without it (Source Alignment, 2611e5b), and its share of the weight:
+  # DS3 9.35 (32%), DS5 7.93 (19%), DS11 7.81 (11%), DS12 7.74 (7%), then
+  # DS4, DS6, DS1, DS8, DS9 and DS10 at 7.73 (6% down to 2%); DS2 itself 7.73
+  # (6%). DS3 covers output frames 1-53041 of 54002.
+  sets: [DS2, DS3, DS5, DS11, DS12, DS4, DS6, DS1, DS8, DS9, DS10]
+  dropped: []
+
+vfs:
+  # Every sector the filesystem depends on from two captures, so that no
+  # single decode vouches for it alone. vfs-stacker --dry-run over every
+  # selection: DS10 (the least data loss, 0.060%) with DS5 recovers every
+  # such sector (GOOD), but 558 of them rest on one set, and no three sets
+  # bring that to none. Only DS3, DS5 and DS11 read the sectors the sharp
+  # pressings damage (below), so two of them are needed there, and the third
+  # backs up DS10 everywhere else. No pair of sets disagrees anywhere.
+  sets: [DS10, DS5, DS3, DS11]
+  # The hand-built image (VFS_BASELINE) holds different bytes in these 21
+  # sectors, and it is the one in error. The sharp sets all hold the same
+  # damaged bytes there, at a regular stride, and decode-orc flags every one
+  # of those sectors bad; DS3, DS5 and DS11 read them good and agree with
+  # each other byte for byte. Sector 55008 is text, and reads "leisure
+  # sailing, including sea angling, now uses some of the facilities" in DS5
+  # against "W.iling, inclu..ng sea ... nov[ uses s..e of the faci.." in the
+  # sharp sets and the baseline. The damage is the same in eight captures, so
+  # it is on the sharp pressings themselves; the tools that built the
+  # baseline took it as good. 16 sectors are in DATA1, 2 in DATA2 and 3 in
+  # free space (135117 is past the end of every set but DS3).
+  baseline_differs:
+    sectors: [54891, 54892, 54918, 54919, 54936, 54937, 54939, 54940, 54948, 54949,
+              54954, 54955, 54999, 55008, 55014, 55015, 90835, 90836, 128144, 128145, 135117]
+    reason: the hand-built image holds damage the sharp pressings share; DS3, DS5 and DS11 read these sectors clean
+  dropped:
+    - set: DS1
+      reason: not needed; DS10, DS5, DS3 and DS11 recover every sector the filesystem depends on, from two sets each
+    - set: DS2
+      reason: not needed; DS10, DS5, DS3 and DS11 recover every sector the filesystem depends on, from two sets each
+    - set: DS4
+      reason: not needed; DS10, DS5, DS3 and DS11 recover every sector the filesystem depends on, from two sets each
+    - set: DS6
+      reason: not needed; DS10, DS5, DS3 and DS11 recover every sector the filesystem depends on, from two sets each
+    - set: DS8
+      reason: not needed; DS10, DS5, DS3 and DS11 recover every sector the filesystem depends on, from two sets each
+    - set: DS9
+      reason: not needed; DS10, DS5, DS3 and DS11 recover every sector the filesystem depends on, from two sets each
+    - set: DS12
+      reason: not needed; DS10, DS5, DS3 and DS11 recover every sector the filesystem depends on, from two sets each

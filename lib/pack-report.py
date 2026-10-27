@@ -41,9 +41,13 @@ from matplotlib import font_manager  # noqa: E402
 BIN = 500
 
 # The sets' colours, in set order, and the stack's: the reference categorical
-# palette (validated for adjacent pairs, light surface), and primary ink.
+# palette (validated for adjacent pairs, light surface), and primary ink. A
+# disc with more sets than colours goes round the palette again, and the
+# sets of the second round are told apart by their marks: dashed lines and
+# hatched bars (SECOND_DASH, SECOND_HATCH).
 SET_COLOURS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
-OTHER_COLOUR = "#898781"
+SECOND_DASH = (0, (4, 1.6))
+SECOND_HATCH = "////"
 STACK_COLOUR = "#0b0b0b"
 INK, INK2, MUTED, GRID, AXIS = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
 GAIN, LOSS, NEUTRAL = "#2a78d6", "#e34948", "#c3c2b7"
@@ -160,19 +164,66 @@ def project_parameters(path):
     return out
 
 
-def stacker_blocks(log, sets):
-    """The stacker's measurement of each block it logged: the noise and share
-    of each input, and the pressings it split them into, if it did."""
+RECORD = "StackerStage report: "
+
+
+def stacker_blocks(log, sets, n):
+    """The stacker's weights over the stack of n frames, from its report
+    records of kind weights: the noise and share of each input (None for one
+    not measured), the stamper group of each, whether its noise model was
+    trusted or the frames fell back to equal weights, and the noise σ the
+    model predicts for the stack as weighted, for the stack in equal weights
+    and for the best single set. The stacker measures every block of frames
+    but writes a record only when the weights or its trust in the model
+    change, so each record holds from its block to the next record's: "to"
+    is where it stops holding, "frames" how many it holds for. Frames count
+    from 1, as the records do."""
     out = []
-    pat = re.compile(r"StackerStage: frames (\d+)-(\d+): input noise σ in codes \(share of the weight\) ([^;\n]*)(?:; pressings ([^\n]*))?")
-    for m in pat.finditer(log):
-        vals = re.findall(r"([0-9.]+) \(([0-9.]+)%\)", m.group(3))
-        if len(vals) != len(sets):
+    for line in log.splitlines():
+        at = line.find(RECORD)
+        if at < 0:
             continue
-        out.append({"from": int(m.group(1)), "to": int(m.group(2)),
-                    "sigma": [float(a) for a, _ in vals], "share": [float(b) for _, b in vals],
-                    "pressings": (m.group(4) or "").strip()})
+        try:
+            r = json.loads(line[at + len(RECORD):])
+        except ValueError:
+            continue
+        if r.get("v") != 1 or r.get("kind") != "weights" or len(r.get("inputs") or []) != len(sets):
+            continue
+        inputs = r["inputs"]
+        out.append({"from": r["frames"][0], "to": r["frames"][1],
+                    "sigma": [i.get("sigma") for i in inputs],
+                    "share": [i.get("share") if i.get("sigma") is not None else None for i in inputs],
+                    "groups": [i.get("stamperGroup") for i in inputs],
+                    "fit_trusted": r.get("fitTrusted"), "fell_back_to_mean": r.get("fellBackToMean"),
+                    "weighted_sigma": r.get("weightedSigma"), "equal_sigma": r.get("equalSigma"),
+                    "best_single_sigma": r.get("bestSingleSigma")})
+    out.sort(key=lambda b: b["from"])
+    for k, b in enumerate(out):
+        b["to"] = out[k + 1]["from"] - 1 if k + 1 < len(out) else max(n, b["to"])
+        b["frames"] = b["to"] - b["from"] + 1
     return out
+
+
+# The stacker, and the keys of its tables, as the Markdown and the PDF give
+# them.
+STACKER_TEXT = ("The stacker measures each input's noise on the flat areas of the picture, in blocks of frames, and fits "
+                "a model in which sets cut from one stamper share its noise (a stamper group) and stamper groups cut from "
+                "one mother share theirs (a family). It weights each set by what it adds under that model, so a set "
+                "alone in its stamper group, whose noise no other set carries, adds the most. Where the model does not "
+                "explain the sets' differences, the block is stacked with equal weights. It stacks repeats too: a "
+                "picture held over several frames is stacked across them as well as across the sets, and the video "
+                "sink decodes held pictures in 3D and every other frame in 2D.")
+UNTRUSTED_TEXT = ("A selection holds the sets of one content version of the disc, which may be cut from several stampers. "
+                  "Over these frames the stacker's noise model did not explain how the sets differ, so its weights are not "
+                  "the model's; frames that fell back were stacked with equal weights.")
+GAIN_TEXT = ("Both predictions are of the noise σ left in the stack, in 10-bit codes, from the sets' noise measured on the "
+             "flat areas of the picture: Source Alignment's over the whole disc, when the sets were compared (the map "
+             "stage), and the stacker's in each block it stacked. Equal weights is the same sets in Mean; the best single "
+             "set is the least noisy set alone. These predict the picture; section 8 measures the test lines.")
+QUALITY_KEY = ("group: the set's stamper group, as Source Alignment found it. "
+               "noise σ, adds, weight and 5–6 MHz response: Source Alignment's capture comparison (10-bit codes). noise σ is "
+               "the set's own noise; adds is the predicted noise σ of the stack without the set, the higher the more it "
+               "adds; weight is its share of the Weighted stack of every set compared; a response of 1 is typical.")
 
 
 # --- figures ------------------------------------------------------------------
@@ -252,7 +303,7 @@ def line_graph(work, name, title, ylabel, n, series, stack, log=False, mean=None
     the disc; with mean, the same stack in Mean as a dashed ink line."""
     fig, ax = plt.subplots(figsize=(7.0, 2.5))
     for s in series:
-        ax.plot(s["x"], s["y"], color=s["colour"], lw=0.9, label=s["set"])
+        ax.plot(s["x"], s["y"], color=s["colour"], lw=0.9, ls=s.get("ls", "-"), label=s["set"])
     if mean is not None:
         ax.plot(mean["x"], mean["y"], color=STACK_COLOUR, lw=1.0, ls=(0, (3, 2)), label="Stack in Mean")
     if stack is not None:
@@ -303,7 +354,7 @@ def distribution_graph(work, key, label, sets, stack):
         v = s["v"][np.isfinite(s["v"])]
         h, _ = np.histogram(v, bins=edges)
         ax.step(edges[:-1], 100 * h / max(1, len(v)), where="post", color=s["colour"],
-                lw=1.8 if s is stack else 0.9, label=s["set"])
+                lw=1.8 if s is stack else 0.9, ls=s.get("ls", "-"), label=s["set"])
     ax.set_xlim(edges[0], edges[-1])
     ax.set_xlabel(f"{label} of a frame (dB)")
     ax.set_ylabel("% of frames")
@@ -339,26 +390,54 @@ def summary_bars(work, name, title, unit, rows, digits=2, dots=False):
     return save(fig, work, name)
 
 
-def weights_graph(work, blocks, sets, colours, n):
+def weights_graph(work, blocks, sets, colours, dashes, n):
     fig, ax = plt.subplots(figsize=(7.0, 2.6))
-    x = np.array([(b["from"] + b["to"] + 1) / 2 for b in blocks])
+    # The records count frames from 1; the axis, as every graph's, from 0.
+    x = np.array([b["from"] - 1 for b in blocks])
+    width = np.array([b["frames"] for b in blocks])
     bottom = np.zeros(len(blocks))
     for i, s in enumerate(sets):
-        share = np.array([b["share"][i] for b in blocks])
-        ax.bar(x, share, bottom=bottom, width=BIN * 0.9, color=colours[s], edgecolor="white", linewidth=0.3, label=s)
+        share = np.array([b["share"][i] or 0 for b in blocks])
+        ax.bar(x, share, bottom=bottom, width=width, align="edge", color=colours[s], edgecolor="white", linewidth=0.3,
+               hatch=SECOND_HATCH if dashes[s] != "-" else None, label=s)
         bottom += share
-    split = [b for b in blocks if b["pressings"]]
+    split = [b for b in blocks if b["fit_trusted"] is False]
     if split:
-        ax.plot([(b["from"] + b["to"] + 1) / 2 for b in split], [106] * len(split), "v", ms=4, color=INK2,
-                label="pressings split", clip_on=False)
+        ax.plot([(b["from"] - 1 + b["to"]) / 2 for b in split], [106] * len(split), "v", ms=4, color=INK2,
+                label="model not trusted", clip_on=False)
     ax.set_ylim(0, 110)
     ax.set_yticks([0, 20, 40, 60, 80, 100])
     ax.set_ylabel("share of the weight (%)")
     frame_axis(ax, n)
     ax.grid(axis="x", visible=False)
-    ax.set_title("The stacker's weight for each set, in each block it measured")
+    ax.set_title("The stacker's weight for each set along the disc, each record held until the next")
     legend_row(ax, len(sets) + (1 if split else 0))
     return save(fig, work, "weights")
+
+
+def sigma_graph(work, blocks, n):
+    """The noise σ the stacker predicts in each block: the best single set
+    alone, the sets in equal weights, and the stack as weighted."""
+    fig, ax = plt.subplots(figsize=(7.0, 2.4))
+    edges = [b["from"] - 1 for b in blocks] + [blocks[-1]["to"]]
+
+    def y(k):
+        return np.array([b[k] if b[k] is not None else np.nan for b in blocks], dtype=float)
+
+    ax.stairs(y("best_single_sigma"), edges, color=MUTED, lw=1.0, baseline=None, label="best single set")
+    ax.stairs(y("equal_sigma"), edges, color=STACK_COLOUR, lw=1.0, ls=(0, (3, 2)), baseline=None, label="equal weights")
+    ax.stairs(y("weighted_sigma"), edges, color=STACK_COLOUR, lw=1.8, baseline=None, label="Weighted, as stacked")
+    split = [b for b in blocks if b["fit_trusted"] is False]
+    if split:
+        top = np.nanmax(y("best_single_sigma"))
+        ax.plot([(b["from"] - 1 + b["to"]) / 2 for b in split], [top * 1.06] * len(split), "v", ms=4, color=INK2,
+                label="model not trusted", clip_on=False)
+    ax.set_ylim(bottom=0)
+    ax.set_ylabel("predicted noise σ (10-bit)")
+    frame_axis(ax, n)
+    ax.set_title("The noise the stacker predicts for the stack along the disc, each record held until the next")
+    legend_row(ax, 3 + (1 if split else 0))
+    return save(fig, work, "sigma")
 
 
 def sector_graph(work, union, rows):
@@ -389,11 +468,360 @@ def table(header, rows, align=None, widths=None):
             "align": align or ["left"] + ["right"] * (len(header) - 1), "widths": widths}
 
 
+# --- the Markdown report ------------------------------------------------------
+#
+# The PDF's content, section for section, from the same data, for reading
+# where a PDF is awkward (by an AI, say). The graphs are the PDF's own SVGs,
+# linked from the report's working directory; their text is kept as text.
+
+def vfs_baseline(b):
+    """The vfs stage's comparison with the hand-built image, as one line, or None without one."""
+    if not b or b.get("compared") is None:
+        return None
+    diff, known = b.get("differing") or [], b.get("known") or []
+    if not diff:
+        same = f"the same bytes in all {fmt(b['compared'])} sectors both recovered"
+    elif sorted(diff) == sorted(known):
+        same = (f"the same bytes in all {fmt(b['compared'])} sectors both recovered but {len(diff)}, the ones selection.yaml "
+                "records as known and explains (vfs.baseline_differs)")
+    else:
+        same = f"{len(diff)} of the {fmt(b['compared'])} sectors both recovered differ"
+    ours, theirs = b.get("ours") or {}, b.get("theirs") or {}
+    return f"{same}; {fmt(ours.get('bad'))} bad sectors here, {fmt(theirs.get('bad'))} there"
+
+
+def markdown(data, graphs):
+    out = []
+    w = out.append
+
+    def cell(c):
+        return str(c if c is not None else "–").replace("|", "\\|").replace("\n", " ")
+
+    def tbl(t):
+        if not t or not t.get("rows"):
+            return
+        al = {"left": ":---", "right": "---:", "center": ":---:"}
+        w("| " + " | ".join(cell(h) for h in t["header"]) + " |")
+        w("|" + "|".join(al.get(a, "---") for a in t["align"]) + "|")
+        for r in t["rows"]:
+            w("| " + " | ".join(cell(c) for c in r) + " |")
+        w("")
+
+    def kv(pairs):
+        for k, v in pairs:
+            w(f"- **{k}:** {v}")
+        w("")
+
+    def graph(key):
+        name = (data.get("graphs") or {}).get(key)
+        if name:
+            w(f"![{key.replace('_', ' ')}]({graphs}/{name})")
+            w("")
+
+    def code(text, lang=""):
+        w(f"```{lang}")
+        w((text or "").rstrip("\n"))
+        w("```")
+        w("")
+
+    k, md, v = data.get("key") or {}, data.get("metadata") or {}, data.get("vfs") or {}
+    best = {m: (k.get(f"best_{m}") or {}) for m in ("white", "black")}
+    stack = lambda key: f"{k.get(key)} dB" if data.get("have_stack") and k.get(key) else "–"
+    tools = {t["name"]: t for t in data.get("tools") or []}
+
+    w(f"# {data['title']}: VP415e pack report")
+    w("")
+    w(f"{data['side']} · `{data['stem']}` · pack `{data['id']}`  ")
+    w(f"Directory `{data['place']}/{data['version']}/` on the decodes share")
+    w("")
+    w(f"Made by build-pack.sh from {len((data.get('captures') or {}).get('rows') or [])} RF captures of the side: decoded by "
+      "ld-decode, mapped, stacked and measured by decode-orc, and the data area stacked and verified by vfs-verifier, each "
+      "at the exact revision in section 2. Every step is automatic except the selection of the sets, which is a person's "
+      "(section 5); section 1 lists the steps. This is the PDF report's content as Markdown; the graphs are its SVGs.")
+    w("")
+    w("| Stacked white SNR | Stacked black PSNR | Dropouts after stacking | VFS image | Frames |")
+    w("|---|---|---|---|---|")
+    w(f"| {stack('stack_white')} | {stack('stack_black')} | {k.get('stack_dropouts', '–') if data.get('have_stack') else '–'} "
+      f"| {v.get('verdict', '–')} | {md.get('frames', '–')} |")
+    w(f"| best single set {best['white'].get('set', '–')}: {best['white'].get('value', '–')} dB "
+      f"| best single set {best['black'].get('set', '–')}: {best['black'].get('value', '–')} dB "
+      f"| best single set {k.get('best_dropouts_set', '–')}: {k.get('best_dropouts', '–')} "
+      f"| {v.get('result', '–')}; {v.get('objects', '–')} objects, {v.get('objects_damaged', '–')} damaged "
+      f"| pictures {md.get('addresses', '–')}; {md.get('undecoded_n', '–')} undecoded |")
+    w("")
+    for g in ("bars_white", "bars_black", "bars_dropouts"):
+        graph(g)
+    w("## The pack")
+    w("")
+    sc = data.get("script") or {}
+    kv([("Disc", f"{data['title']} ({data['disc']}), {data['side']}"),
+        ("Pack id", f"`{data['id']}`: the first 16 hex digits of the sha256 of the three files' lines of SHA256SUMS. "
+                    "It names the files the player loads, not the directory"),
+        ("Directory", f"`{data['place']}/{data['version']}/` on the decodes share; `{data['place']}/pack` points at the current pack"),
+        ("Built", f"{data.get('built', '–')}, by build-pack.sh at `{sc.get('commit', '–')}`" + (" (with uncommitted changes)" if sc.get("dirty") else "")),
+        ("Video stack", ", ".join(data.get("video_sets") or []) + ", in stack order (the first sets the sample grid)"),
+        ("VFS stack", ", ".join(data.get("vfs_sets") or []) + ", best first")])
+
+    w("## 1 From RF to pack")
+    w("")
+    w("build-pack.sh runs these steps in order. Each is a stage with its own directory on the decodes share, its outputs "
+      "checked before it is stamped, and a key over everything it was made from, so a stage is built again only when one "
+      "of its inputs changes. The checks column counts the checks over every stage of the step (one per set for decode "
+      "and set); appendix A lists them all.")
+    w("")
+    tbl(data.get("pipeline"))
+
+    w("## 2 Tools and their exact versions")
+    w("")
+    w("Every tool is pinned by this repository's flake.lock and built by Nix, so a revision below names the exact source "
+      "of the build that ran. The store paths are the builds themselves. A stage's stamp records the revision it ran "
+      "with, and a pack is only built when every stage before it is up to date, so these are the tools behind every "
+      "stage of this pack.")
+    w("")
+    for i, t in enumerate(data.get("tools") or [], 1):
+        w(f"### 2.{i} {t['name']}")
+        w("")
+        pairs = [("Revision", f"`{t['rev']}`"), ("Source", f"`{t['source']}`"), ("Nix hash", f"`{t['nar']}`")]
+        if t.get("patches"):
+            pairs.append(("Patches", "; ".join(f"`{pn}`: `{ph}`" for pn, ph in t["patches"])))
+        kv(pairs)
+    w(f"### 2.{len(tools) + 1} The commands that ran")
+    w("")
+    tbl(data.get("binaries"))
+    w("decode-orc's orc-cli and vfs-verifier's tools do not report a version of their own: their revision above, and the "
+      "store path, identify them. The report itself is drawn by pack-python and set by typst, neither of which affects "
+      "the pack's files.")
+    w("")
+
+    w("## 3 The RF captures")
+    w("")
+    w(f"Each set is one RF capture of the disc, read from the capture library, which is only ever read. Its fingerprint "
+      f"is the sha256 of its first {data.get('head_bytes', '–')} bytes and its size, as sources.sha256 records them. The "
+      "video and VFS columns give its place in each stack.")
+    w("")
+    tbl(data.get("captures"))
+    tbl(data.get("fingerprints"))
+
+    w("## 4 Decoding and mapping")
+    w("")
+    w("### 4.1 Decoding")
+    w("")
+    w(f"Every set is decoded by ld-decode with the same flags: {' '.join(f'`{f}`' for f in data.get('flags') or [])}. "
+      f"Decoding starts at the start field shown (from the lead-in), and covers {data.get('frames', '–')} frames. fps is "
+      "ld-decode's own rate, after its setup.")
+    w("")
+    tbl(data.get("decodes"))
+    w("### 4.2 Mapping")
+    w("")
+    w("The Disc Mapper puts each capture's frames in disc order: it pads pictures a capture skipped, drops duplicates and "
+      "mixed frames, and removes frames it cannot place.")
+    w("")
+    tbl(data.get("mapping"))
+
+    w("## 5 The selection")
+    w("")
+    w(f"Which sets go into each stack is a person's decision, made from the compare stage's report (in the appendix) and "
+      f"committed as discs/{data['disc']}/selection.yaml, quoted here in full with its reasons. Pressing {data.get('pressing')} (the content version).")
+    w("")
+    code(data.get("selection_text"), "yaml")
+
+    w("## 6 The video stack")
+    w("")
+    w(f"The sets {', '.join(data.get('video_sets') or [])} are stacked by decode-orc's stacker, then dropout-corrected and "
+      f"written by the video sink with the `{data.get('decoder')}` chroma decoder as FFV1 in Matroska. {STACKER_TEXT}"
+      + (f" {data['noise_reduction']}" if data.get("noise_reduction") else ""))
+    w("")
+    graph("weights")
+    tbl(data.get("weights"))
+    grid = data.get("sample_grid") or []
+    w(f"{data.get('records')} {data.get('trust')}"
+      + (" Sample grid shifts: " + ", ".join(f"{g['set']} by {g['samples']} sample(s) from frame {g['from_frame']}" for g in grid) + "." if grid else ""))
+    w("")
+    n = 1
+    if data.get("gain"):
+        w(f"### 6.{n} What the stacking is predicted to gain")
+        w("")
+        w(data["gain_text"])
+        w("")
+        graph("sigma")
+        kv(data["gain"])
+        n += 1
+    if (data.get("split_blocks") or {}).get("rows"):
+        w(f"### 6.{n} Frames where the noise model was not trusted")
+        w("")
+        w(UNTRUSTED_TEXT)
+        w("")
+        tbl(data["split_blocks"])
+        n += 1
+    w(f"### 6.{n} The stack's settings")
+    w("")
+    w(f"As the video stage processed it (`{data.get('video_dir')}/stack.orcprj`), its sources aside.")
+    w("")
+    tbl(data.get("stack_params"))
+
+    w("## 7 The video file")
+    w("")
+    w("### 7.1 Container")
+    w("")
+    w(f"{data.get('packets')} packets, {data.get('keyframes')} keyframes (vp415e seeks to any frame, so every packet must be one).")
+    w("")
+    tbl(data.get("streams"))
+    tbl(data.get("tags"))
+    w("### 7.2 Disc metadata")
+    w("")
+    w("The orc-disc-metadata document attached to the mkv, as vp415e reads it.")
+    w("")
+    pairs = [("Frames", md.get("frames")), ("Disc", md.get("disc")), ("Status agreement", md.get("agreement")),
+             ("Address map", f"{md.get('kind')}, pictures {md.get('addresses')}, {md.get('runs')} run(s), {md.get('missing')} missing"),
+             ("Undecoded", f"{md.get('undecoded_n')} frame(s), pictures {md.get('undecoded')}: numbered on the disc, not "
+                           "recovered; the address map implies their pictures"),
+             ("Unmapped", f"frames {md.get('unmapped')} (lead-in and lead-out)")]
+    if md.get("baseline"):
+        pairs.append(("Hand-built stack", f"{md['baseline']}: {md.get('baseline_undecoded_n')} undecoded, pictures {md.get('baseline_undecoded')}"))
+    kv(pairs)
+
+    w("## 8 The stack against its sources")
+    w("")
+    w("Every set is measured over every frame by decode-orc's SNR, dropout and burst level analyses (the set stage); the "
+      "stack is measured by the same analyses, with the same settings, on the stacker's output before dropout correction "
+      "(the quality stage). The frame maps put both on the frames of the pack's mkv, so each graph compares like with "
+      f"like. The graphs along the disc show one point per {data.get('bin')} frames.")
+    w("")
+    tbl(data.get("quality"))
+    w(f"{QUALITY_KEY} White SNR, its lowest frame, and black PSNR in dB; dropouts and their samples over the whole disc; burst level as a "
+      "10-bit median, mean over frames.")
+    w("")
+    w("Both picture measures come from the test signals in the vertical interval (VITS), so they measure the same thing on "
+      "every frame whatever the picture: white SNR on the white flag, against its mean, and black PSNR on the black level "
+      "reference, against peak white. Together they cover the luminance range.")
+    w("")
+    w("They measure the test lines, not the picture. The stacker weights each set by a different measure: how much it "
+      "differs from the others across the active picture. So the two can disagree. When they do, a set that reads best "
+      "here may carry something in its picture that the test lines do not show, or the stacker may be counting as noise "
+      "a difference that is not noise. Where the stack falls below a single set here, the loss in the picture can be much "
+      "smaller than these graphs show. Noise that every set of one stamper group shares, recorded into the stamper, shows here "
+      "and cannot be stacked away."
+      + (" The same stack in Mean, with every set weighted equally, is measured too (the dashed line). Where Mean reads "
+         "better than the stack as built, the stacker's weights do not favour the sets these figures do." if data.get("have_mean") else ""))
+    w("")
+    for i, (m, name) in enumerate((("white", "White SNR"), ("black", "Black PSNR")), 1):
+        w(f"### 8.{i} {name}")
+        w("")
+        graph(m)
+        g = k.get(f"gain_{m}")
+        if g and f"gain_{m}" in (data.get("graphs") or {}):
+            graph(f"gain_{m}")
+            w(f"The stack is better than the best single set in {g['better']} of {g['bins']} blocks, worse in {g['worse']} "
+              f"(by more than 0.05 dB). Worst: {g['worst']}."
+              + (f" Against the same stack in Mean, it is better in {g['weighted_better']} blocks and worse in "
+                 f"{g['mean_better']}, and {g['vs_mean']} dB over the disc." if "vs_mean" in g else ""))
+            w("")
+        graph(f"distribution_{m}")
+    w("### 8.3 Dropouts and burst level")
+    w("")
+    graph("dropouts")
+    graph("burst")
+    w("### 8.4 The analyses' settings")
+    w("")
+    w(f"The quality stage's project (`{data.get('quality_dir')}/quality.orcprj`), its sources aside: the stack as the video "
+      "stage builds it, measured by the analyses the set stage runs on each set."
+      + (" The stack in Mean (`quality-mean.orcprj`) differs from it only in the rows of the second table." if (data.get("quality_mean_diff") or {}).get("rows") else ""))
+    w("")
+    tbl(data.get("quality_params"))
+    tbl(data.get("quality_mean_diff"))
+
+    w("## 9 The data area: EFM and the VFS image")
+    w("")
+    w(f"Each set's EFM is decoded to an image of 2048-byte sectors and a map of the sectors it could not recover (the set "
+      f"stage). vfs-stacker stacks the images of {', '.join(data.get('vfs_sets') or [])} by majority, and vfs-verifier "
+      "reads the ADFS filesystem of the result.")
+    w("")
+    w("### 9.1 Each set's EFM decode")
+    w("")
+    tbl(data.get("efm"))
+    w("good, corrected, uncorrectable: sectors, from the EFM decode report. C1 and C2: uncorrectable codewords. used: "
+      "sectors the stack took from the set.")
+    w("")
+    graph("sectors")
+    w("### 9.2 The stack")
+    w("")
+    kv([("Result", f"{v.get('result')}: {v.get('result_text')}"),
+        ("Verdict", f"{v.get('verdict')} (accepts {v.get('accept')})"),
+        ("Sectors", f"{v.get('output_sectors')} in the image; {v.get('unanimous')} recovered by agreement, {v.get('majority')} "
+                    f"by majority, {v.get('consensus')} by consensus; {v.get('contested')} contested, {v.get('disagreements')} disagreements"),
+        ("Not recovered", f"{v.get('bad')}: {v.get('unrecovered')} bad in every set, {v.get('padded')} padding; "
+                          f"{v.get('union')} sectors were recovered by some set"),
+        ("Over the best set", f"{v.get('recovered_over_best')} sector(s) recovered that the best single set ({v.get('best')}) lacks"),
+        ("Filesystem", ("vfs-verifier passes the image" if v.get("verify_passed") else "vfs-verifier does not pass the image")
+                       + f": free space map {v.get('fsm')}; directory {v.get('directory')}; {v.get('objects')} objects, "
+                         f"{v.get('objects_damaged')} damaged"),
+        *([("Hand-built image", v["baseline"])] if v.get("baseline") else []),
+        ("Image", f"`{v.get('image_sha256')}`"), ("Bad sector map", f"`{v.get('bsm_sha256')}`")])
+    w("### 9.3 Where the bad sectors fall")
+    w("")
+    tbl(v.get("roles"))
+    w("### 9.4 The sets agree")
+    w("")
+    w("Wherever two sets both recovered a sector, they must hold the same bytes.")
+    w("")
+    tbl(data.get("pairs"))
+    if data.get("efm_params"):
+        w("### 9.5 The EFM decoder's settings")
+        w("")
+        tbl(data["efm_params"])
+
+    w("## 10 The pack")
+    w("")
+    w(f"The pack stage makes a new pack version, `{data['version']}`, from the video and vfs stages' outputs: it links the "
+      "three files the player loads rather than copying them, checks them again as vp415e reads them (the container, every "
+      "stream, the disc metadata against the container, the image and its bad sector map against the vfs stage's), hashes "
+      "them into SHA256SUMS, and writes the provenance and this report. A pack is only built when every stage before it is "
+      "up to date, and only stamped when every check passes; `pack` then points at it, and the previous version is kept.")
+    w("")
+    tbl(data.get("files"))
+
+    w("## A Every stage's checks")
+    w("")
+    w("Each stage checks its own outputs before it is stamped; a stage with a failed check is not stamped, and nothing "
+      "after it is built.")
+    w("")
+    for i, st in enumerate(data.get("stages") or [], 1):
+        w(f"### A.{i} {st['name']}")
+        w("")
+        w(f"`{st['dir']}`")
+        w("")
+        code("\n".join(f"{('FAIL' if lv == 'fail' else lv):6} {t}" for lv, t in st.get("checks") or []))
+    w("## B Every stage's stamp")
+    w("")
+    w("A stage's key is the sha256 of its inputs: the captures' fingerprints, the tool revisions, its parameters and "
+      "project files, and the keys of the stages before it. A stage whose key still matches its inputs is not built again.")
+    w("")
+    for i, st in enumerate(data.get("stages") or [], 1):
+        w(f"### B.{i} {st['name']}")
+        w("")
+        kv([("Key", f"`{st.get('key')}`"), ("Stamped", st.get("stamped"))])
+        code("\n".join(st.get("inputs") or []))
+    w("## C The compare report")
+    w("")
+    w("The evidence the selection was decided from, as the compare stage wrote it.")
+    w("")
+    code(data.get("compare_report"))
+    w("## D vfs-stacker and vfs-verifier")
+    w("")
+    code(data.get("vfs_stacker"))
+    code(data.get("vfs_verifier"))
+    w("## E SHA256SUMS")
+    w("")
+    code(data.get("sums"))
+    return "\n".join(out).rstrip("\n") + "\n"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("manifest")
     ap.add_argument("pdf")
     ap.add_argument("--work", required=True)
+    ap.add_argument("--markdown", help="also write the report as Markdown here, linking the graphs in --work")
     args = ap.parse_args()
     man = read_json(args.manifest)
     if not man:
@@ -405,7 +833,8 @@ def main():
     style()
 
     sets = [s["set"] for s in man["sets"]]
-    colours = {s: (SET_COLOURS[i] if i < len(SET_COLOURS) else OTHER_COLOUR) for i, s in enumerate(sets)}
+    colours = {s: SET_COLOURS[i % len(SET_COLOURS)] for i, s in enumerate(sets)}
+    dashes = {s: SECOND_DASH if i >= len(SET_COLOURS) else "-" for i, s in enumerate(sets)}
     video = prov.get("video") or {}
     vfs = prov.get("vfs") or {}
     sel = prov.get("selection") or {}
@@ -470,7 +899,7 @@ def main():
                 if not len(v):
                     continue
                 x, mean, total = bins(v, n)
-                series.append({"set": sid, "colour": colours[sid], "x": x, "y": total if key == "dropouts" else mean})
+                series.append({"set": sid, "colour": colours[sid], "ls": dashes[sid], "x": x, "y": total if key == "dropouts" else mean})
             st = sm = None
             if key in stack and len(stack[key]):
                 x, mean, total = bins(stack[key], n)
@@ -508,7 +937,7 @@ def main():
                 g["vs_mean"] = f"{np.nanmean(stack[key]) - np.nanmean(stack_mean[key]):+.2f}"
             key_figures[f"gain_{key}"] = g
             graphs[f"distribution_{key}"] = distribution_graph(
-                work, key, label, [{"set": sid, "colour": colours[sid], "v": per[sid]["figs"][key]} for sid in vs],
+                work, key, label, [{"set": sid, "colour": colours[sid], "ls": dashes[sid], "v": per[sid]["figs"][key]} for sid in vs],
                 {"set": "Stack", "colour": STACK_COLOUR, "v": stack[key]})
 
     def stat(sid, group, field):
@@ -545,9 +974,11 @@ def main():
 
     # --- the stacker -------------------------------------------------------------
     vdir = Path(man["video_dir"])
-    blocks = stacker_blocks(read_text(vdir / "stack.log"), video_sets)
+    blocks = stacker_blocks(read_text(vdir / "stack.log"), video_sets, n)
     if blocks and n:
-        graphs["weights"] = weights_graph(work, blocks, video_sets, colours, n)
+        graphs["weights"] = weights_graph(work, blocks, video_sets, colours, dashes, n)
+        if any(b["weighted_sigma"] is not None for b in blocks):
+            graphs["sigma"] = sigma_graph(work, blocks, n)
 
     # --- the EFM images -----------------------------------------------------------
     vfsdir = Path(man["vfs_dir"])
@@ -612,17 +1043,19 @@ def main():
     for sid in sets:
         e = evidence.get(sid) or {}
         cap, snr, dro, bur, mp = (e.get(k) or {} for k in ("capture", "snr", "dropouts", "burst", "map"))
-        quality_rows.append([sid, fmt(cap.get("noise_sigma") and float(cap["noise_sigma"]), 1),
+        quality_rows.append([sid, cap.get("stamper_group"), fmt(cap.get("noise_sigma") and float(cap["noise_sigma"]), 1),
+                             fmt(cap.get("stack_sigma_without") and float(cap["stack_sigma_without"]), 2),
+                             f"{float(cap['weight_share']):.0f}%" if cap.get("weight_share") is not None else None,
                              fmt(cap.get("response_5_6mhz") and float(cap["response_5_6mhz"]), 2), snr.get("mean_white_snr"),
                              snr.get("min_white_snr"), snr.get("mean_black_psnr"), dro.get("total_dropouts"),
                              dro.get("total_dropout_samples"), bur.get("mean_median_burst_10bit")])
     if have_stack:
         snr, dro = stackq.get("snr") or {}, stackq.get("dropouts") or {}
-        quality_rows.append(["Stack", None, None, snr.get("mean_white_snr"), snr.get("min_white_snr"),
+        quality_rows.append(["Stack", None, None, None, None, None, snr.get("mean_white_snr"), snr.get("min_white_snr"),
                              snr.get("mean_black_psnr"), dro.get("total_dropouts"), dro.get("total_dropout_samples"), None])
     if have_mean:
         snr = stackq.get("mean_snr") or {}
-        quality_rows.append(["Stack in Mean", None, None, snr.get("mean_white_snr"), snr.get("min_white_snr"),
+        quality_rows.append(["Stack in Mean", None, None, None, None, None, snr.get("mean_white_snr"), snr.get("min_white_snr"),
                              snr.get("mean_black_psnr"), None, None, None])
 
     mapping = []
@@ -631,10 +1064,66 @@ def main():
         mapping.append([sid, mp.get("outputFrames"), mp.get("paddingFrames"), mp.get("gapsPadded"), mp.get("splitFieldFrames"),
                         mp.get("removedDuplicates"), mp.get("removedUnmappable"), mp.get("signal_state", "–")])
 
-    weights = [[w["set"], w.get("measurements"), fmt(w.get("mean_sigma"), 1), fmt(w.get("mean_share"), 1), w.get("least_share")]
-               for w in (video.get("stacker") or {}).get("sets") or []]
-    split_blocks = [[f"{b['from']}–{b['to']}", " · ".join(f"{s} {v:.0f}%" for s, v in zip(video_sets, b["share"])), b["pressings"]]
-                    for b in blocks if b["pressings"]]
+    weights = []
+    for i, sid in enumerate(video_sets if blocks else []):
+        m = [(b["frames"], b["sigma"][i], b["share"][i]) for b in blocks if b["sigma"][i] is not None]
+        f = sum(x[0] for x in m)
+        weights.append([sid, f, fmt(sum(x[0] * x[1] for x in m) / f if f else None, 2),
+                        fmt(sum(x[0] * x[2] for x in m) / f if f else None, 1), fmt(min((x[2] for x in m), default=None), 1)])
+    split_blocks = [[f"{b['from']}–{b['to']}",
+                     " · ".join(f"{s} {v:.0f}%" for s, v in zip(video_sets, b["share"]) if v is not None),
+                     "equal weights: model not trusted" if b["fell_back_to_mean"] else "model not trusted"]
+                    for b in blocks if b["fit_trusted"] is False]
+    untrusted = len(split_blocks)
+    untrusted_frames = sum(b["frames"] for b in blocks if b["fit_trusted"] is False)
+    trust = ("The noise model was trusted over the whole disc." if blocks and not untrusted else
+             f"The noise model was not trusted over {fmt(untrusted_frames)} frames, in {untrusted} span(s) (below)." if untrusted else "")
+    records = (f"The stacker measures its weights in every block of {BIN} frames, but writes a record only when they change "
+               f"or its trust in the noise model does: each of its {len(blocks)} records holds until the next, and the "
+               "table weights each by the frames it holds for." if blocks else "The stacker logged no weights.")
+    schedule = video.get("decoder_schedule")
+    nr = video.get("noise_reduction") or {}
+
+    # What the stacking is predicted to gain: Source Alignment's comparison
+    # of the sets (the map stage's digest of it) and the stacker's own
+    # blocks, with the reference the comparison suggested and any block
+    # whose reference another set stood in for.
+    alignment = (read_json(Path(man["map_dir"]) / "analysis.json") or {}).get("alignment") or {}
+    ast = alignment.get("statistics") or {}
+    suggested = (prov.get("evidence") or {}).get("suggested_reference")
+    gain = []
+    if ast.get("stackSigma") is not None:
+        gain.append(("Source Alignment", f"σ {fmt(ast['stackSigma'])} as weighted, {fmt(ast.get('equalSigma'))} in equal weights, "
+                     f"{fmt(ast.get('bestSingleSigma'))} for the best single set, over {fmt(ast.get('sourceCount'))} sets"))
+        gain.append(("Its noise model", f"{fmt(ast.get('pressingGroups'))} stamper group(s), {fmt(ast.get('families'))} "
+                     f"famil{'y' if ast.get('families') == 1 else 'ies'}; "
+                     + ("trusted" if ast.get("fitTrusted") else "not trusted")
+                     + (f" (worst misfit {fmt(ast['worstMisfit'], 1)}%)" if ast.get("worstMisfit") is not None else "")))
+    measured = [b for b in blocks if b["weighted_sigma"] is not None]
+    if measured:
+        mean = lambda k: fmt(sum(b["frames"] * b[k] for b in measured if b[k] is not None)
+                             / sum(b["frames"] for b in measured if b[k] is not None))
+        gain.append(("The stacker", f"σ {mean('weighted_sigma')} as weighted, {mean('equal_sigma')} in equal weights, "
+                     f"{mean('best_single_sigma')} for the best single set, the mean over the disc's frames"))
+    if video_sets:
+        gain.append(("Reference", f"{video_sets[0]}, video input 1, sets the sample grid; "
+                     + ("Source Alignment suggested no reference" if not suggested else
+                        "the reference Source Alignment suggested" if suggested == video_sets[0] else
+                        f"Source Alignment suggested {suggested}, and the selection overrides it")))
+    subs = (video.get("stacker") or {}).get("reference_substitutions") or []
+    if blocks:
+        gain.append(("Stand-in references", "none: the reference covered every block" if not subs else "; ".join(
+            f"frames {s.get('from_frame')}–{s.get('to_frame')}: "
+            + (f"{s['stand_in']}, offset {s.get('offset')}" if s.get("stand_in") else "no set could stand in")
+            for s in subs)))
+
+    # The quality stage's projects: the stack as built, and in Mean, which
+    # differs from it only where its rows below say.
+    quality_rows_p = project_parameters(qdir / "quality.orcprj")
+    mean_p = {(m["label"], k): v for m in project_parameters(qdir / "quality-mean.orcprj") for k, v in m["parameters"].items()}
+    mean_diff = [[label, k, json.dumps(v) if not isinstance(v, str) else v]
+                 for (label, k), v in mean_p.items()
+                 if not any(p["label"] == label and p["parameters"].get(k) == v for p in quality_rows_p)]
 
     efm_rows = []
     for sid in sets:
@@ -699,13 +1188,13 @@ def main():
     pipeline = [
         ["captures", "–", f"{len(sets)} RF captures of the side, read from the capture library (read only) and fingerprinted",
          f"{', '.join(sets)}", "–"],
-        ["decode", ldd, "demodulates each RF capture into composite video fields (.tbc), analogue audio and the EFM channel data",
+        ["decode", ldd, "demodulates each RF capture into composite video (.cvbs), analogue audio and the EFM channel data",
          f"{len(sets)} decodes, from the lead-in on", outcome("decode")],
         ["set", orc, "decodes each set's EFM into a sector image and a map of the sectors it could not recover, and measures "
          "every frame's SNR, dropouts and burst level", f"{len(sets)} sector images and per-frame measurements", outcome("set")],
         ["map", orc, "puts each set's frames in disc order by their picture numbers: pads skips, drops duplicates, mixed and "
          "unplaceable frames", "a frame map per set (committed after review)", outcome("map")],
-        ["compare", f"{orc}, {vfst}", "compares the sets: noise, pressing, video quality, EFM agreement",
+        ["compare", f"{orc}, {vfst}", "compares the sets: noise and what each adds, disc identity, video quality, EFM agreement",
          "the compare report", outcome("compare")],
         ["select", "–", "the one step that is a person's: which sets go into each stack, and in which order, decided from the "
          "compare report", f"video {', '.join(video_sets)}; VFS {', '.join(vfs_sets)}", "decided"],
@@ -766,7 +1255,7 @@ def main():
         "decodes": table(["set", "ld-decode", "start", "frames", "signal", "time", "fps"], decodes,
                          ["left", "left", "right", "right", "left", "right", "right"]),
         "flags": flags, "lead_in": man.get("lead_in"), "frames": man.get("decode_frames"),
-        "quality": table(["set", "noise σ", "5–6 MHz", "white SNR", "lowest", "black PSNR", "dropouts", "samples", "burst"], quality_rows),
+        "quality": table(["set", "group", "noise σ", "adds", "weight", "5–6 MHz", "white SNR", "lowest", "black PSNR", "dropouts", "samples", "burst"], quality_rows),
         "mapping": table(["set", "frames", "padded", "gaps", "split", "dups", "unmappable", "signal"], mapping,
                          ["left"] + ["right"] * 6 + ["left"]),
         "graphs": graphs, "key": key_figures, "bin": BIN, "have_stack": have_stack, "have_mean": have_mean,
@@ -774,14 +1263,21 @@ def main():
         "video_sets": video_sets, "vfs_sets": vfs_sets, "pressing": sel.get("pressing"),
         "selection_text": read_text(man["selection"]),
         "dropped": {k: (sel.get(k) or {}).get("dropped") or [] for k in ("video", "vfs")},
-        "weights": table(["set", "blocks", "mean noise σ", "mean share %", "least share %"], weights),
-        "split_blocks": table(["frames", "share of the weight", "pressings"], split_blocks, ["left", "left", "left"]),
-        "blocks_logged": len(blocks),
+        "weights": table(["set", "frames measured", "mean noise σ", "mean share %", "least share %"], weights),
+        "split_blocks": table(["frames", "share of the weight", "stacked with"], split_blocks, ["left", "left", "left"]),
+        "records": records, "trust": trust,
+        "stacker_text": STACKER_TEXT, "untrusted_text": UNTRUSTED_TEXT, "quality_key": QUALITY_KEY,
+        "noise_reduction": (f"Noise reduction: {fmt(nr['db'], 1)} dB, {nr.get('mode')}: averaged only across the frames the "
+                            "stacker marks as one held picture, so every single-frame still is as stacked."
+                            if nr.get("db") else None),
         "sample_grid": (video.get("stacker") or {}).get("sample_grid") or [],
         "stack_params": params_table(vdir / "stack.orcprj"),
         "efm_params": params_table(Path(first["set_dir"]) / "efm.orcprj") if first else None,
         "quality_params": params_table(qdir / "quality.orcprj"),
-        "decoder": video.get("decoder", "–"), "video_dir": os.path.relpath(man["video_dir"], man["out"]),
+        "quality_mean_diff": table(["stage", "parameter", "in Mean"], mean_diff, ["left"] * 3),
+        "quality_dir": os.path.relpath(man["quality_dir"], man["out"]),
+        "gain": [list(p) for p in gain], "gain_text": GAIN_TEXT,
+        "decoder": f"{video.get('decoder', '–')}" + (f", {schedule}" if schedule else ""), "video_dir": os.path.relpath(man["video_dir"], man["out"]),
         "streams": table(["#", "type", "detail"], streams, ["left", "left", "left"]),
         "tags": table(["tag", "value"], tags, ["left", "left"]),
         "packets": fmt((video.get("container") or {}).get("packets")), "keyframes": fmt((video.get("container") or {}).get("keyframes")),
@@ -810,7 +1306,7 @@ def main():
                 "verify_passed": bool(vrf.get("passed")), "fsm": vrf.get("fsm", "–"), "directory": vrf.get("directory", "–"),
                 "objects": fmt(vrf.get("objects")), "objects_damaged": fmt(vrf.get("objects_damaged")),
                 "image_sha256": (vfs.get("image") or {}).get("sha256", "–"), "bsm_sha256": (vfs.get("image") or {}).get("bsm_sha256", "–"),
-                "baseline": vfs.get("baseline"), "bit_perfect": bool(vfs.get("bit_perfect"))},
+                "baseline": vfs_baseline(vfs.get("baseline")), "bit_perfect": bool(vfs.get("bit_perfect"))},
         "sector_counts": table(["set", "not recovered"], [[r["set"], fmt(len(r["bad"]))] for r in sector_rows]),
         "stages": stages,
         "compare_report": read_text(Path(man["compare_dir"]) / "report.txt"),
@@ -833,6 +1329,9 @@ def main():
     if r.returncode != 0:
         print(f"pack-report: typst failed:\n{r.stderr}", file=sys.stderr)
         return 1
+    if args.markdown:
+        md = Path(args.markdown)
+        md.write_text(markdown(data, os.path.relpath(work.resolve(), md.resolve().parent)))
     return 0
 
 

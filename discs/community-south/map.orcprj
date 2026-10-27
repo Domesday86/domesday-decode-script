@@ -10,7 +10,8 @@
 #
 # Each source is labelled with its set id, as in decode-community-south.sh's
 # SETS table, and its frame map "<set> map". A set that cannot be mapped is
-# dropped from the map stage by deleting its source and frame map here. The
+# dropped from the map stage by deleting its source and frame map here (DS7
+# is, while ld-decode cannot finish its decode: decode-community-south.sh). The
 # refresh tools are recorded under tool_refresh: field_mapping on every frame
 # map (lead-in and lead-out kept), source_alignment on Align
 # (pad_for_alignment).
@@ -130,26 +131,6 @@ dag:
       user_label: DS6
       x: 50
       y: 550
-      parameters:
-        c_path:
-          type: string
-          value: ""
-        input_path:
-          type: string
-          value: ""
-        sample_encoding:
-          type: string
-          value: From metadata
-        y_path:
-          type: string
-          value: ""
-    - id: 7
-      stage: PAL_CVBS_Source
-      node_type: SOURCE
-      display_name: CVBS Source
-      user_label: DS7
-      x: 50
-      y: 650
       parameters:
         c_path:
           type: string
@@ -341,19 +322,6 @@ dag:
         ranges:
           type: string
           value: ""
-    - id: 19
-      stage: frame_map
-      node_type: TRANSFORM
-      display_name: Frame Map
-      user_label: DS7 map
-      x: 275
-      y: 650
-      tool_refresh:
-        tool: field_mapping
-      parameters:
-        ranges:
-          type: string
-          value: ""
     - id: 20
       stage: frame_map
       node_type: TRANSFORM
@@ -448,8 +416,6 @@ dag:
       to: 17
     - from: 6
       to: 18
-    - from: 7
-      to: 19
     - from: 8
       to: 20
     - from: 9
@@ -471,8 +437,6 @@ dag:
     - from: 17
       to: 25
     - from: 18
-      to: 25
-    - from: 19
       to: 25
     - from: 20
       to: 25

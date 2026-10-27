@@ -1,0 +1,13 @@
+# Community South: the reference SHA-256 of the stacked VFS image and its bad
+# sector map, recorded once the image passed the bit-perfect test
+# (docs/emulator-pack-plan.md, phase 6). Every later vfs stage must match.
+#
+# Recorded 2026-10-25 from vfs-41ab10c: DS10 DS5 DS3 DS11 at decode-orc
+# f7f3094, ld-decode 6148260. 332089344 bytes, 162153 EFM sectors; 32754
+# listed bad, all before the filesystem (143) or in free space (32611). Every
+# sector the filesystem depends on comes from two sets. The image holds the
+# same bytes as the hand-built one wherever both recovered a sector, but for
+# the 21 in vfs.baseline_differs, where the hand-built image holds damage the
+# sharp pressings share.
+c0afc7fc25d81f3cb7c847a49123bf960fcff98cf5faab8f788eb765549921a0  dd_comS_stack.dat
+8c19868f23d2723aabe0dc84e7cef6a15db77dd41f2706f977b76d448c2e30b5  dd_comS_stack.dat.bsm

@@ -684,7 +684,12 @@ quality JSON. A re-run does nothing.
   - The dropout analysis reads only `.dropouts.meta` and takes about a second.
   - SNR and burst level each read the whole 76 GB CVBS, so the share's read
     rate sets their time. SNR over all 54,003 frames of DS4 took 841 s (about
-    91 MB/s) at 14% CPU, so a set takes about half an hour.
+    91 MB/s) at 14% CPU, so a set takes about half an hour. Re-measured at decode-orc 2611e5b (2026-10-26) on Community
+    South, three sets at a time over the 10G link: SNR over DS4's whole side
+    took 576 s, against 564 s for the same run at f7f3094, so the faster
+    passes change nothing here and the share's read rate still sets it
+    (about 130 MB/s for each of three readers). The whole stage, eleven sets,
+    took 72 minutes, against about 81 at f7f3094.
 - **Tested** on a throwaway disc: DS4 and DS5, 400 frames each from picture
   #47000, under `.work`.
   - Both sets passed and were stamped, and a re-run did nothing in 3 s.
@@ -742,8 +747,12 @@ met once `discs/volcanoes/framemaps/` is committed.
   says when they differ from the committed copies.
 - **The stamp:** the decode stamps, decode-orc's rev and patches, and
   `map.orcprj`.
-- **Parsing.** Source Alignment's capture comparison exists only as summary
-  text, so `analysis.json` parses it. At the pinned `31d22e6` the refresh
+- **Parsing.** (Since decode-orc 2611e5b, on branch 20261026-001, nothing is
+  parsed: each Align input has an `info` item whose `data` holds its figures,
+  picked by `.data.source`, and Align's `statistics` carry the comparison's
+  and the alignment's. What follows is how it was before.) Source
+  Alignment's capture comparison exists only as summary text, so
+  `analysis.json` parses it. At the pinned `31d22e6` the refresh
   report also leaves Align's `statistics` empty: the first picture, the frame
   coverage and the pressing count. Those are read from the summary as well,
   and the report's own figures are used whenever it carries them. With a
@@ -776,10 +785,11 @@ automatically an outlier.
 
 **Removing sets.** Removing a set is still sometimes the better result:
 
-- a set that is alone in its pressing, which the stacker cannot tell from a
-  noisy disc;
 - a soft capture chain, which blurs the stack;
 - a capture that is badly damaged.
+
+A set is never dropped for being alone in its stamper group, or for a high
+`noise_sigma`. A set alone in its stamper group usually adds the most.
 
 On the EFM side the problem is sharper. A sector that differs between
 pressings is a real difference in content, not damage, and mixing pressings
@@ -789,11 +799,12 @@ The evidence for each set, all produced by the earlier phases:
 
 | Evidence | Source | Points to |
 | --- | --- | --- |
-| Pressing group, noise σ | Source Alignment capture comparison (phase 3) | Pressing; noisy disc |
+| Stamper group, what the set adds (`stack_sigma_without`, `weight_share`) | Source Alignment capture comparison (phase 3) | Which sets to keep: the higher, the more the set adds |
+| Noise σ | Source Alignment capture comparison (phase 3) | Nothing on its own |
 | Soft at 5–6 MHz | Source Alignment warning | Exclude from the video stack |
 | Mean white SNR, black PSNR, dropout totals, burst | Analysis sinks (phase 2) | Ranking; damaged capture |
 | Padding, split-field frames, unmappable stretches | Disc Mapper (phase 3) | Player trouble; coverage |
-| User code, Amendment 2, CX, first/last picture, lead-in/out | Disc metadata (VBI) | Hard pressing difference |
+| User code, Amendment 2, CX, first/last picture, lead-in/out | Disc Mapper's disc identity (VBI, `map` stage) | Hard pressing difference |
 | Pairwise sector agreement, systematic dissent | `vfs-stacker --dry-run --show-conflicts` over all EFM images | Data version or pressing |
 | C1/C2 and sector loss | EFM reports (phase 2) | EFM ranking |
 
@@ -803,27 +814,35 @@ selection is decided once, **by a person reading the results**, rather than
 by rules in the scripts. The video and VFS selections are decided
 **separately**, because a set can be good for one and bad for the other:
 
-- **Video:** every set of the chosen pressing, minus any that is soft,
-  unmappable, or clearly the worst on SNR and dropouts. They are ordered best first, since
-  `sample_align` uses input 1 as its reference grid.
+- **Video:** every set of the chosen content version, minus any that is
+  soft, unmappable, badly damaged, or covers too little of the side. Read the
+  sets in `video_by_contribution` order when deciding what to drop. A set
+  whose `stack_sigma_without` is within 0.01 of the stack's σ adds almost
+  nothing, and may be dropped to save time.
+  **Order:** the suggested reference first (`suggestedReference`; it sets the
+  stacker's sample grid), then the rest by what each adds.
 - **VFS:** every set of the chosen pressing, minus any whose EFM is too
   damaged to vote usefully. They are ordered best first, since
   vfs-stacker breaks split votes towards its first input.
 
 Whatever is decided, the outcome is one set of inputs for the title's one
 output. An outlier is dropped, with its reason recorded. It is not kept as
-the start of a second output. If the sets split into more than one pressing,
-**the pressing with the most available sources is used**, and every set from
-the other pressings is dropped, from both the video and the VFS stack. That
-is the only basis for choosing between pressings. Picture quality and EFM
-loss decide which sets to drop *within* the chosen pressing, never which
-pressing to use. The report shows the pressing groups and their sizes, taken
-from:
-- Source Alignment's capture comparison (needs 4 or more sources);
-- the disc metadata;
+the start of a second output. If the sets hold more than one content
+version of the disc, **the version with the most available sources is
+used**, and every set of the other versions is dropped, from both the video
+and the VFS stack. The content version is the only basis for choosing
+between them, and two things tell it:
+- the disc identity (user code, Amendment 2, CX, side);
 - vfs-stacker's systematic dissent.
 
-If two pressings have the same number of sources, the report says so and
+Picture quality and EFM loss decide which sets to drop *within* the chosen
+version, never which version to use. Source Alignment's stamper groups are
+not versions: a stamper group is the discs whose noise one stamper recorded,
+and two stamper groups of one title hold the same content. Stamper groups
+matter to the EFM vote only through vfs-stacker's own evidence, not through
+Source Alignment.
+
+If two versions have the same number of sources, the report says so and
 the choice is made by hand.
 
 The decision goes into `discs/volcanoes/selection.yaml`, with a short reason
@@ -856,7 +875,15 @@ noise) and VFS DS1 DS2 DS4 DS5 DS3 (by data loss), with nothing dropped.
     set), `metadata/<set>.yaml`, `vfs-stacker.txt` and `check.txt`.
   - It fails only when a measurement could not be made. What the evidence
     says is for the person reading it.
-- **The disc metadata.** decode-orc decodes the user code and the programme
+- **The disc metadata.** (Since decode-orc 2611e5b, each set's Disc Mapper
+  reads the disc identity over the whole side, by the same vote that builds
+  the video sink's document, and the compare stage takes it from the `map`
+  stage: no clips, no `metadata/`, and the stage takes seconds. Three values
+  differ from the clips': the sound mode reads `future_use` not `mono`, the
+  Amendment 2 video standard false not true, and the status agreement
+  0.80–0.81 not 0.90–0.91, because the status word changes within the side
+  and the clips read only its ends. What follows is how it was before.)
+  decode-orc decodes the user code and the programme
   status only for the video sink's embedded document. So the stage runs a
   clip of each decode through a video sink: its first and last 250 source
   frames, with the `mono` decoder and `mkv-ffv1`. It keeps the clip's
@@ -871,14 +898,28 @@ noise) and VFS DS1 DS2 DS4 DS5 DS3 (by data loss), with nothing dropped.
 - **The `select` check.** `select` is still unstamped and decided by hand, but
   once `selection.yaml` exists it must hold to these rules, or `status` calls
   it invalid and the build stops there:
-  - each of `video` and `vfs` lists its `sets`, best first, each from
-    `map.orcprj`, each once;
+  - each of `video` and `vfs` lists its `sets`, each from `map.orcprj`, each
+    once: the video sets the suggested reference first (it sets the
+    stacker's sample grid), then by what each adds; the VFS sets best first;
   - every other mapped set is listed under `dropped`, with a `reason`.
 
-  It also records the `pressing` chosen.
+  It also records the `pressing` chosen, which names the content version.
+  When the first video set is not the compare report's suggested reference,
+  the `select` line of `status` carries a warning, and the `video` stage
+  prints it. It is not a failure.
+- **The rules changed at decode-orc 2611e5b (2026-10-26).** The stacker and
+  Source Alignment now measure noise on flat blocks only, fit stamper groups
+  and families, and report what each set adds (`stack_sigma_without`). Under
+  the old rules, "use the pressing with the most sources" and "drop a set
+  alone in its pressing", Community South's selection dropped DS3, DS5 and
+  DS11, which the new comparison finds are the three sets that add the most:
+  each is the only set, or one of two, carrying its stamper's noise. A
+  stamper group is now evidence of shared noise, not of content, the video
+  sets are ordered suggested reference first and then by what each adds,
+  and noise σ alone decides nothing.
 - **The evidence for Volcanoes.** All five sets are one pressing, on every
   count:
-  - **Source Alignment:** one group.
+  - **Source Alignment:** one stamper group.
   - **Disc metadata:** every set reads the same: CAV side 1, 12 inch, user
     code 1986, CX off, Amendment 2 present.
   - **EFM content:** all ten pairs of images hold the same bytes wherever both
@@ -899,11 +940,37 @@ The stack template is filled in with the selected video sets. Its stages are:
 - a Frame Map per set (Disc Mapper refresh);
 - Align (`pad_for_alignment`, Source Alignment refresh);
 - Stack: `Weighted`, `reject_sigma` 5, `sample_align` on, audio `Mean`, EFM
-  `Disabled`;
+  `Disabled`, `still_frame_stacking` on;
 - DOC: `match_chroma_phase` on;
 - Video Out: `mkv-ffv1-bt601`, `display_aspect_ratio` `4:3`, the disc's
   chroma decoder, audio, chapters, disc metadata at `map` detail,
   `noise_reduction` 0, output `volcanoes_stack.mkv`.
+
+**Since decode-orc 2611e5b (branch 20261026-001, 2026-10-26).**
+- **Repeats.** The Stacker stacks repeats (`still_frame_stacking`): a
+  picture held over several frames is stacked across them as well as across
+  the sets. On held pictures that is most of what stacking gains: on the
+  Community South test card the whole-picture temporal σ falls from 3.7 (the
+  f7f3094 pack) to 0.64, against 0.49 for the reference stack.
+  `still_frame_search` (24 by default; 50 measured the same),
+  `luma_level_match` and `chroma_gain_match` (on) are left at decode-orc's
+  defaults, so the projects do not store them.
+- **The decoder schedule.** Video Out takes `decoder_type` `multiple` with
+  `decoder_schedule` `transform2d, held:transform3d`, from the disc's
+  `VIDEO_DECODER` and `VIDEO_DECODER_SCHEDULE`. A frame whose picture the
+  stacker marks as held for at least 4 frames either side is decoded in 3D,
+  so the filter never spans two pictures; every other frame is decoded in
+  2D. 3D is about 1 dB better on held pictures and 2.7 dB worse on the
+  single-frame stills that make up most of a still-frame disc, so it is
+  taken only where the picture is held. The table below is the decoder for
+  frames that are not held.
+- **Noise reduction** stays off by default. The selection's owner may set
+  `video.noise_reduction` (dB) in `selection.yaml`; it is applied in
+  `still_only` mode, which averages only across held frames and has no
+  spatial fallback, so every single-frame still stays exactly as stacked.
+  6 dB is the setting measured on the card. It is a presentation choice, to
+  check on vp415e first. `full` mode is never used on a disc of stills: its
+  own continuity test can blend related map stills into each other.
 
 The decoder is set **per side** in `discs/<disc>/`, by content, because the
 sides of one disc can differ: EcoDisc side 1 is stills, but side 2 is a TV
@@ -1098,6 +1165,27 @@ nothing.
     The stack stays as built until it is fixed; repinning decode-orc then
     rebuilds the video stage. Until then, the stretch from frame 37000 to
     46499 of the Volcanoes stack is a little noisier than it should be.
+  - **Fixed in decode-orc `4d54969`.** The rebuild of 2026-10-25 finds one
+    pressing over the whole side, splits no block, and keeps every set's
+    weight between 9% and 29%.
+- **DS3 is alone in its pressing, and stays in `Weighted` (decided
+  2026-10-25).** After the fix, `Weighted` gives DS3 9–16% of the weight
+  from frame ~25000, while the SNR analysis and the active picture's
+  still-repeat noise both rate it at least as clean as DS1. Reported as
+  [decode-orc#347](https://github.com/decode-orc/decode-orc/issues/347), and
+  closed as won't fix, with the cause:
+  - Every disc shares about 55 units (low-passed luma variance) of noise
+    recorded before pressing. DS1, DS2, DS4 and DS5 share about 6 more, a
+    stamper's, that DS3 does not carry. So DS3 is a second pressing,
+    though Source Alignment reports one.
+  - Pair differences cannot tell a lone pressing from a noisy disc, so the
+    stacker weights DS3 down. Its instructions advise `Mean` for such a
+    set.
+  - On frames 38000–38499, white / black dB: as built (DS3 10%) 36.39 /
+    30.62; `Mean` (20%) 36.53 / 30.91; DS3 forced to 40% 36.64 / 31.39.
+  - The stack is kept as built: `Weighted`, all five sets, accepting that
+    small loss. The quality stage's `Mean` SNR and the report's gain graphs
+    show it.
 
 ### Phase 6: Stack and verify the VFS image
 
@@ -1128,7 +1216,12 @@ nothing.
 - There should be no more bad sectors than in the hand-built image.
 - Any sector recovered by both images should hold identical bytes. If not, the
   cause is either a pipeline bug or a pressing difference, and it must be
-  explained before the pack ships.
+  explained before the pack ships. Once explained, the sectors go in
+  `vfs.baseline_differs` in `selection.yaml`, with the reason; the check then
+  passes only if exactly those sectors differ. vfs-stacker names at most 20
+  conflicts, so the stage finds the differing sectors by comparing the two
+  images itself (`lib/vfs-differing.py`). Community South's baseline holds
+  damage the sharp pressings share in 21 sectors (phase 8).
 
 **Exit criteria:** a `.dat`/`.bsm` pair with a recorded verdict and hash.
 
@@ -1389,6 +1482,25 @@ discs. The differences from Volcanoes:
   present.
 - The dry run verified all 12 captures against `sources.sha256` and found
   every start within three frames of the one noted by hand in the library.
+- The video stacks all eleven mapped sets, DS2 DS3 DS5 DS11 DS12 DS4 DS6 DS1
+  DS8 DS9 DS10 (decode-orc 2611e5b, 2026-10-26): DS2 is the compare report's
+  suggested reference, and the rest follow by what each adds. Source
+  Alignment reads three stamper groups (shared noise, not content), and the
+  sets alone in theirs, DS3, DS5 and DS11, add the most. Against the f7f3094
+  pack's five sets, black PSNR rises from 32.45 to 36.61 dB and the dropouts
+  left fall from 775,353 to 420,088; white SNR falls from 31.58 to 30.62 dB,
+  not yet explained. Four 500-frame blocks fell back to equal weights where
+  the noise model was not trusted, one of them the test card (1501-2000).
+  Until then the video stacked DS4 DS12 DS2 DS1 DS8 only: that decode-orc
+  read DS3, DS5 and DS11 as soft and the sharp sets as two pressings.
+- The VFS stack is DS10, DS5, DS3 and DS11. 21 sectors that every sharp
+  set's image holds with the same stride damage (decode-orc flags them bad)
+  are read clean only by DS3, DS5 and DS11, the soft sets: the damage is on
+  the sharp pressings. Two of the soft sets are needed for every sector the
+  filesystem depends on to come from two captures, and DS10 backs up the
+  rest; no three sets manage that. The hand-built image, stacked from sharp
+  sets only, took the damaged bytes as good, so it differs from this one in
+  those 21 sectors (`vfs.baseline_differs`).
 
 ## Decisions
 
@@ -1399,7 +1511,7 @@ discs. The differences from Volcanoes:
 | Library access | Read-only, never written; all output and r/w goes to the decodes share |
 | Choosing sets and removing outliers | Decided by a person from the phase 4 results, then committed; the scripts are not dynamic |
 | Outputs per title | One emulation output per AIV title (one stem per side); outlier sets are dropped, never made into a second output |
-| Choosing a pressing | The pressing with the most available sources; sets from other pressings are dropped |
+| Choosing a pressing | The content version (disc identity, vfs-stacker's systematic dissent) with the most available sources; sets of other versions are dropped. Source Alignment's stamper groups are shared noise, not versions, and a set alone in one is kept (since 2026-10-26) |
 | Project files | Committed per disc side, built for its selected sets |
 | Decode scripts | One per pack (disc side), which lists that side's captures and stamps its decodes; `decode-domesday.sh` keeps the Domesday sides that have no pack yet |
 | Final pack check | By hand on the player (vp415e cannot run without its hardware) |

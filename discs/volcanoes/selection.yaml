@@ -1,10 +1,12 @@
 # Volcanoes: which sets go into the video and the VFS stacks, decided from
 # the compare stage's report (orc-<rev>/compare/report.txt) as described in
-# docs/emulator-pack-plan.md, phase 4. Each stack lists its sets best first;
-# every mapped set it leaves out goes under dropped, with a reason.
+# docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
 #
 # The evidence (orc-31d22e6, 2026-10-24): all five sets are one pressing on
-# every count -- Source Alignment finds one group, every set reads the same
+# every count -- Source Alignment finds one stamper group, every set reads the same
 # disc metadata (CAV side 1, user code 1986, CX off, Amendment 2 present),
 # and every pair of EFM images holds the same bytes wherever both recovered
 # a sector. None is soft at 5-6 MHz.
@@ -12,10 +14,13 @@
 pressing: A
 
 video:
-  # By noise sigma from Source Alignment's capture comparison: 8.6, 9.5,
-  # 9.7, 11.0, 11.7. The Weighted stacker gives the noisier sets less weight
-  # itself, so none is left out. DS1 is first: sample_align lines the others
-  # up on its sample grid.
+  # By what each adds, the predicted stack σ without it, from Source
+  # Alignment's capture comparison (orc-2611e5b, 2026-10-26), and its share of
+  # the weight: DS1 4.90 (26%), DS3 4.77 (22%), DS2 4.72 (21%), DS4 4.61 (17%),
+  # DS5 4.53 (14%); 4.21 with all five. Every set adds, so none is left out.
+  # DS1 is first: sample_align lines the others up on its sample grid. The
+  # compare report suggests DS5 as the reference instead (it has one padding
+  # frame fewer than DS1, 14 against 15); every set's grid offset is 0.
   sets: [DS1, DS3, DS2, DS4, DS5]
   dropped: []
 

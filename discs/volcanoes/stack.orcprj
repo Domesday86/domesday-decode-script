@@ -12,8 +12,19 @@
 #
 # Each source is labelled with its set id and its frame map "<set> map", as
 # in map.orcprj. The sources must be the video sets of selection.yaml, in
-# the same order: the first is the Stacker's reference sample grid. Adding
-# or dropping a set means editing this project.
+# the same order: the first sets the Stacker's sample grid (the compare
+# report's suggested reference). Adding or dropping a set means editing this
+# project.
+#
+# The Stacker stacks repeats (still_frame_stacking): a picture held over
+# several frames is stacked across them as well as across the sets, which is
+# most of what stacking gains on held pictures. still_frame_search,
+# luma_level_match and chroma_gain_match are left to decode-orc's defaults
+# (24 frames, on, on). The video sink decodes held pictures in 3D and every
+# other frame in 2D (decoder_type multiple, decoder_schedule
+# "transform2d, held:transform3d"): 3D is better only where the picture is
+# held, and worse on single-frame stills. build-pack.sh sets the decoder from
+# disc.conf, so the two are the same.
 
 project:
   name: Volcanoes stack
@@ -221,6 +232,9 @@ dag:
         efm_stacking:
           type: string
           value: Disabled
+        still_frame_stacking:
+          type: bool
+          value: true
     - id: 13
       stage: dropout_correct
       node_type: TRANSFORM
@@ -263,7 +277,10 @@ dag:
           value: auto
         decoder_type:
           type: string
-          value: transform2d
+          value: multiple
+        decoder_schedule:
+          type: string
+          value: transform2d, held:transform3d
         display_aspect_ratio:
           type: string
           value: 4:3
