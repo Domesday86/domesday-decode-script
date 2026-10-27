@@ -11,16 +11,15 @@
         "qtnodes": "qtnodes"
       },
       "locked": {
-        "lastModified": 1793108551,
-        "narHash": "sha256-r82YOXKxY/p4jG2GCwtMA19rYHuSs48uIR7VGikfM9k=",
+        "lastModified": 1793127420,
+        "narHash": "sha256-UG0RPP022mH79RH3b+fHwTUDyxMW3NP7Ca9+ZRv7JwA=",
         "owner": "decode-orc",
         "repo": "decode-orc",
-        "rev": "1a152d61daf17b6478efebb0d4ace9e031d4e5bf",
+        "rev": "a690be7233c112b1200943fbbbd2f3a62e975b5f",
         "type": "github"
       },
       "original": {
         "owner": "decode-orc",
-        "ref": "20261026-001",
         "repo": "decode-orc",
         "type": "github"
       }
