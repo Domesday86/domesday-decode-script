@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
 # Build a disc's VP415e pack -- <stem>.mkv, <stem>.dat and <stem>.dat.bsm --
-# from its captures, one stage at a time, redoing only what is out of date.
+# from its captures, one stage at a time, redoing only what is out of date. A
+# side with no EFM (DISC_EFM=no in its disc.conf) has no data area: its pack
+# is the mkv alone.
 #
 # The stages, in order (docs/emulator-pack-plan.md has the detail):
 #
@@ -15,9 +17,11 @@
 #            VFS stacks. Decided by a person; nothing here writes it
 #   video    the stacked, dropout-corrected .mkv     orc-<rev>/video/
 #   vfs      the stacked, verified .dat and .bsm     vfs-<rev>/
+#            (none on a side with no EFM)
 #   quality  the stacked video's SNR and dropouts,   orc-<rev>/quality/
 #            measured as each set's are
-#   pack     the three files, their provenance and   pack-<key>/
+#   pack     the three files (one with no EFM),      pack-<key>/
+#            their provenance and
 #            the pack's report (<stem>.report.pdf,
 #            and as Markdown, <stem>.report.md)
 #
@@ -105,6 +109,19 @@ DISC_DIR="$SELF_DIR/discs/$DISC"
 # shellcheck source=discs/volcanoes/disc.conf
 . "$DISC_DIR/disc.conf"
 
+# Whether the side carries EFM (DISC_EFM in disc.conf, yes unless it says
+# no). A side with none, such as EcoDisc's second, is decoded with --noEFM,
+# so there is no EFM image: the set stage measures its quality alone, the
+# compare stage has no VFS evidence, selection.yaml has no vfs, there is no
+# vfs stage, and the pack is the mkv alone.
+DISC_EFM="${DISC_EFM:-yes}"
+case "$DISC_EFM" in yes|no) ;; *) die "DISC_EFM is $DISC_EFM in ${DISC_DIR#"$SELF_DIR"/}/disc.conf: yes or no" ;; esac
+has_efm() { [ "$DISC_EFM" = yes ]; }
+
+# The frames in each block of the quality stage's sample (see the quality
+# stage); a disc.conf may set it.
+QUALITY_SAMPLE_BLOCK="${QUALITY_SAMPLE_BLOCK:-1500}"
+
 FROM_I=0
 UNTIL_I=$(( ${#STAGES[@]} - 1 ))
 [ -z "$FROM" ]  || FROM_I=$(stage_index "$FROM")   || die "no such stage: $FROM"
@@ -130,6 +147,10 @@ done < <(sed -n '/^SETS=(/,/^)/p' "$SELF_DIR/$DISC_SCRIPT" | sed -n 's/^  "\(.*\
 DECODE_FLAGS=$(sed -n 's/^DECODE_FLAGS=(\(.*\))$/\1/p' "$SELF_DIR/$DISC_SCRIPT")
 [ -n "$DECODE_FLAGS" ] || die "no DECODE_FLAGS line found in $DISC_SCRIPT"
 DECODE_FLAGS="$DECODE_FLAGS --cvbs --cvbs-spec-origin"
+case " $DECODE_FLAGS " in
+  *" --noEFM "*) ! has_efm || die "$DISC_SCRIPT decodes with --noEFM, but disc.conf does not say DISC_EFM=no" ;;
+  *)             has_efm || die "disc.conf says DISC_EFM=no, but $DISC_SCRIPT does not decode with --noEFM" ;;
+esac
 
 set_ids()   { local s; for s in "${SETS[@]}"; do printf '%s\n' "${s%%|*}"; done; }
 set_field() { # set_field <set> <1|2|3>
@@ -217,13 +238,18 @@ player_check_for() {
 # reference first, then by what each adds; the VFS's best first), from the
 # sets map.orcprj maps, each once, and lists every mapped set it leaves out
 # under dropped, with a reason. The VFS stack may also accept an incomplete
-# image, and the video may take a noise reduction.
+# image, and the video may take a noise reduction. A side with no EFM has no
+# VFS stack, and its selection names none.
 selection_problems() {
   local stack
-  local -a mapped=()
+  local -a mapped=() stacks=(video vfs)
   mapfile -t mapped < <(map_sets)
   yq . "$SELECTION" > /dev/null 2>&1 || { printf 'it is not valid YAML\n'; return 0; }
-  for stack in video vfs; do
+  if ! has_efm; then
+    stacks=(video)
+    [ "$(yq -r 'has("vfs")' "$SELECTION")" != true ] || printf 'it has a vfs stack, but the side has no EFM (DISC_EFM=no)\n'
+  fi
+  for stack in "${stacks[@]}"; do
     yq -o=json ".$stack" "$SELECTION" | jq -r --arg stack "$stack" --args '
       $ARGS.positional as $mapped
       | if type != "object" then "\($stack) is missing" else
@@ -319,9 +345,10 @@ stage_tool() {
   case "$1" in
     decode)         printf 'ld-decode|ld-decode|ld-decode\n' ;;
     set|map|video|quality) printf 'decode-orc|decode-orc|orc-cli\n' ;;
-    compare)        printf 'decode-orc|decode-orc|orc-cli\nvfs-verifier|vfs-tools|vfs-stacker\n' ;;
-    vfs)            printf 'vfs-verifier|vfs-tools|vfs-stacker\n' ;;
-    pack)           printf 'vfs-verifier|vfs-tools|vfs-verifier\n' ;;
+    compare)        printf 'decode-orc|decode-orc|orc-cli\n'
+                    ! has_efm || printf 'vfs-verifier|vfs-tools|vfs-stacker\n' ;;
+    vfs)            has_efm && printf 'vfs-verifier|vfs-tools|vfs-stacker\n' ;;
+    pack)           has_efm && printf 'vfs-verifier|vfs-tools|vfs-verifier\n' ;;
     *)              return 1 ;;
   esac
 }
@@ -350,7 +377,8 @@ describe_decode() {
 }
 
 # A set's EFM image and quality figures, from its decode and the disc's two
-# committed set projects. SET_DECODE is left naming the decode it reads.
+# committed set projects; on a side with no EFM, its quality figures alone,
+# from set-quality.orcprj. SET_DECODE is left naming the decode it reads.
 describe_set() {
   local id="$1" efm="${1,,}_efm.dat"
   describe_decode "$id"
@@ -358,11 +386,15 @@ describe_set() {
   stage_begin "set:$id" "$OUT/$ORC_DIR/sets/$id"
   stage_input_stamp "decode:$id" "${SET_DECODE%/*}"
   stage_input_tool decode-orc
-  stage_input_file "efm project" "$DISC_DIR/set-efm.orcprj"
+  if has_efm; then
+    stage_input_file "efm project" "$DISC_DIR/set-efm.orcprj"
+  fi
   stage_input_file "quality project" "$DISC_DIR/set-quality.orcprj"
-  stage_output "$efm"
-  stage_output "$efm.bsm"
-  stage_output "$efm.txt"
+  if has_efm; then
+    stage_output "$efm"
+    stage_output "$efm.bsm"
+    stage_output "$efm.txt"
+  fi
   stage_output quality.json
   stage_output snr.csv
   stage_output dropouts.csv
@@ -393,7 +425,8 @@ describe_map() {
 
 # Every mapped set's figures and EFM image (set), the map and alignment, with
 # each set's disc identity from its Disc Mapper (map), and the one
-# measurement the compare stage makes itself.
+# measurement the compare stage makes itself, which needs the EFM images: on
+# a side with no EFM it makes none.
 # COMPARE_SETS is left as "<set>|<decode>|<set stage dir>", and COMPARE_MAP
 # names the map stage's directory.
 describe_compare() {
@@ -409,10 +442,10 @@ describe_compare() {
   for id in "${ups[@]}"; do stage_input_stamp "set:${id%%|*}" "${id#*|}"; done
   stage_input_stamp map "$COMPARE_MAP"
   stage_input_tool decode-orc
-  stage_input_tool vfs-verifier
+  has_efm && stage_input_tool vfs-verifier
   stage_output report.txt
   stage_output compare.json
-  stage_output vfs-stacker.txt
+  has_efm && stage_output vfs-stacker.txt
   stage_output check.txt
 }
 
@@ -513,16 +546,20 @@ describe_quality() {
 # the stack, and the report's script and layout, by their bytes (the layout's
 # lines that start with # are code). PACK_VIDEO, PACK_VFS, PACK_COMPARE,
 # PACK_MAP and PACK_QUALITY are left naming those stages' directories, and
-# COMPARE_SETS each set's.
+# COMPARE_SETS each set's. A side with no EFM has no vfs stage, and PACK_VFS
+# is empty: its pack holds the mkv alone.
 describe_pack() {
   local key
   describe_compare; PACK_COMPARE="$STAGE_DIR"; PACK_MAP="$COMPARE_MAP"
   describe_video;   PACK_VIDEO="$STAGE_DIR"
-  describe_vfs;     PACK_VFS="$STAGE_DIR"
+  PACK_VFS=""
+  if has_efm; then
+    describe_vfs;   PACK_VFS="$STAGE_DIR"
+  fi
   describe_quality; PACK_QUALITY="$STAGE_DIR"
   stage_begin pack "$OUT/pack"
   stage_input_stamp video "$PACK_VIDEO"
-  stage_input_stamp vfs "$PACK_VFS"
+  has_efm && stage_input_stamp vfs "$PACK_VFS"
   stage_input "stem" "$STEM"
   key=$(stage_key)
   STAGE_DIR="$OUT/$(stage_version_name "$OUT" "pack-${key:0:12}")"
@@ -532,8 +569,10 @@ describe_pack() {
   stage_input_stamp quality "$PACK_QUALITY"
   stage_input "report" "$(for f in "$SELF_DIR"/lib/pack-report.*; do printf '%s %s ' "${f##*/}" "$(sha256_stdin < "$f" | cut -c1-12)"; done)"
   stage_output "$STEM.mkv"
-  stage_output "$STEM.dat"
-  stage_output "$STEM.dat.bsm"
+  if has_efm; then
+    stage_output "$STEM.dat"
+    stage_output "$STEM.dat.bsm"
+  fi
   stage_output "$STEM.provenance.yaml"
   stage_output "$STEM.report.pdf"
   stage_output "$STEM.report.md"
@@ -568,6 +607,10 @@ forced() {
 # unit_state <unit>: as stage_state, for any unit, including select.
 unit_state() {
   local unit="$1" problems
+  if [ "$unit" = vfs ] && ! has_efm; then
+    printf 'none: the side has no EFM (DISC_EFM=no), so there is no image to stack\n'
+    return 0
+  fi
   if [ "$unit" = select ]; then
     if [ -f "$SELECTION" ]; then
       problems=$(selection_problems)
@@ -576,8 +619,8 @@ unit_state() {
         return 1
       fi
       problems=$(selection_warnings)
-      printf 'decided: video %s; vfs %s%s\n' \
-        "$(selected_sets video | paste -sd' ' -)" "$(selected_sets vfs | paste -sd' ' -)" \
+      printf 'decided: video %s%s%s\n' \
+        "$(selected_sets video | paste -sd' ' -)" "$(! has_efm || printf '; vfs %s' "$(selected_sets vfs | paste -sd' ' -)")" \
         "$([ -z "$problems" ] || paste -sd';' - <<< "$problems" | sed 's/;/; warning: /g; s/^/; warning: /')"
       return 0
     fi
@@ -710,7 +753,8 @@ run_decode() {
 # read the whole decode: in one project, --process for the EFM would read it
 # twice more for nothing. So the EFM project is processed, and each analysis
 # sink of the other is run with tools run, which reports its statistics as
-# JSON and writes its per-frame figures as CSV.
+# JSON and writes its per-frame figures as CSV. A side with no EFM has only
+# the quality project.
 #
 # The sets run SET_JOBS at a time (disc.conf). Each one's console lines carry
 # its set id.
@@ -756,22 +800,30 @@ build_set() {
   # project file, which decode-orc resolves them against, so the projects open
   # the same on any host that mounts the decodes share.
   rel=$(realpath --relative-to="$dir" -- "$decode")
-  cp -- "$DISC_DIR/set-efm.orcprj" "$dir/efm.orcprj"
+  if has_efm; then
+    cp -- "$DISC_DIR/set-efm.orcprj" "$dir/efm.orcprj"
+    if ! { orc-cli nodes set "$dir/efm.orcprj" Disc "input_path=$rel" \
+           && orc-cli nodes set "$dir/efm.orcprj" EFM "output_path=$efm"; } >/dev/null; then
+      printf '%s: could not point the EFM project at %s\n' "$id" "$decode" >&2
+      return 1
+    fi
+  fi
   cp -- "$DISC_DIR/set-quality.orcprj" "$dir/quality.orcprj"
-  if ! { orc-cli nodes set "$dir/efm.orcprj" Disc "input_path=$rel" \
-         && orc-cli nodes set "$dir/efm.orcprj" EFM "output_path=$efm" \
-         && orc-cli nodes set "$dir/quality.orcprj" Disc "input_path=$rel"; } >/dev/null; then
-    printf '%s: could not point the set projects at %s\n' "$id" "$decode" >&2
+  if ! orc-cli nodes set "$dir/quality.orcprj" Disc "input_path=$rel" >/dev/null; then
+    printf '%s: could not point the quality project at %s\n' "$id" "$decode" >&2
     return 1
   fi
 
   # orc-cli writes a crash bundle to its working directory: here, if anywhere.
   cd -- "$dir" || return 1
 
-  printf 'EFM: decoding %s\n' "${decode##*/}"
-  t=$SECONDS rc=0
-  orc-cli "$dir/efm.orcprj" --process --log-file "$dir/efm.log" --log-out file || rc=$?
-  printf 'EFM: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+  rc=0
+  if has_efm; then
+    printf 'EFM: decoding %s\n' "${decode##*/}"
+    t=$SECONDS
+    orc-cli "$dir/efm.orcprj" --process --log-file "$dir/efm.log" --log-out file || rc=$?
+    printf 'EFM: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+  fi
 
   for a in "${SET_ANALYSES[@]}"; do
     IFS='|' read -r tool node csv <<< "$a"
@@ -816,24 +868,29 @@ check_set() {
 
     # The EFM image: whole 2048-byte sectors, a bad sector map and a report
     # that says the decode succeeded. How much was recovered is evidence for
-    # the selection (phase 4), not a pass or a fail.
-    if [ "$rc" = 0 ]; then ok "the EFM sink finished"
+    # the selection (phase 4), not a pass or a fail. A side with no EFM has
+    # none.
+    if ! has_efm; then note "no EFM image: the side has no EFM (DISC_EFM=no)"
+    elif [ "$rc" = 0 ]; then ok "the EFM sink finished"
     else fail "the EFM sink exited $rc (efm.log has its log)"; fi
-    if [ -s "$dir/$efm" ]; then
+    if ! has_efm; then :
+    elif [ -s "$dir/$efm" ]; then
       size=$(file_size "$dir/$efm"); sectors=$(( size / 2048 ))
       if [ $(( size % 2048 )) = 0 ]; then ok "$efm is $sectors sectors ($size bytes)"
       else fail "$efm is $size bytes, not a whole number of 2048-byte sectors"; fi
     else
       fail "$efm is missing or empty"
     fi
-    if [ -e "$dir/$efm.bsm" ]; then
+    if ! has_efm; then :
+    elif [ -e "$dir/$efm.bsm" ]; then
       bad=$(grep -c . "$dir/$efm.bsm" || true)
       ok "$efm.bsm lists $bad sector(s) not recovered"
     else
       fail "$efm.bsm is missing"
     fi
     f="$dir/$efm.txt"
-    if [ -s "$f" ]; then
+    if ! has_efm; then :
+    elif [ -s "$f" ]; then
       result=$(efm_report_value "$f" Result)
       assessment=$(efm_report_value "$f" 'Overall assessment')
       recovery=$(efm_report_value "$f" 'Good \/ corrected \/ uncorrectable')
@@ -873,8 +930,9 @@ check_set() {
       fail "the analyses saw different numbers of frames: ${counts[*]}"
     fi
 
-    # Everything the selection report (phase 4) reads from a set, in one file.
-    jq -n --arg set "$id" --arg decode "$SET_DECODE" --arg image "$efm" \
+    # Everything the selection report (phase 4) reads from a set, in one file;
+    # efm is null on a side with none.
+    jq -n --arg set "$id" --arg decode "$SET_DECODE" --arg image "$efm" --argjson has_efm "$(has_efm && echo true || echo false)" \
           --argjson bytes "$size" --argjson sectors "$sectors" --argjson bad "$bad" \
           --arg result "$result" --arg assessment "$assessment" \
           --arg good "$good" --arg corrected "$corrected" --arg uncorrectable "$uncorrectable" \
@@ -883,11 +941,12 @@ check_set() {
       def num: if . == "" then null else (tonumber? // null) end;
       def stats: (fromjson? // {}) | .nodes[0] // {} | if .status == "success" then .statistics else null end;
       { set: $set, decode: $decode,
-        efm: { image: $image, bytes: $bytes, sectors: $sectors, bad_sectors: $bad,
-               result: $result, assessment: $assessment,
-               good: ($good | num), corrected: ($corrected | num), uncorrectable: ($uncorrectable | num),
-               c1_uncorrectable_pct: ($c1 | num), c2_uncorrectable_pct: ($c2 | num),
-               data_loss_pct: ($loss | num), sections_missing: ($missing | num) },
+        efm: (if $has_efm | not then null else
+              { image: $image, bytes: $bytes, sectors: $sectors, bad_sectors: $bad,
+                result: $result, assessment: $assessment,
+                good: ($good | num), corrected: ($corrected | num), uncorrectable: ($uncorrectable | num),
+                c1_uncorrectable_pct: ($c1 | num), c2_uncorrectable_pct: ($c2 | num),
+                data_loss_pct: ($loss | num), sections_missing: ($missing | num) } end),
         snr: ($snr | stats), dropouts: ($dropouts | stats), burst: ($burst | stats) }' \
       > "$(stage_tmp quality.json)" || fail "could not write quality.json"
 
@@ -1127,7 +1186,8 @@ map_digest() {
 # One thing is measured here, in seconds: vfs-stacker --dry-run
 # --show-conflicts over every set's EFM image, whether the images agree
 # sector for sector, and where they do not, whether the same sets always
-# dissent (a different version of the disc) or not (damage).
+# dissent (a different version of the disc) or not (damage). A side with no
+# EFM has no images, so on it nothing is measured here.
 
 run_compare() {
   local state
@@ -1147,15 +1207,18 @@ build_compare() {
   rm -rf -- "$dir"/*.json* "$dir"/*.txt* "$dir"/metadata "$dir"/crash_bundle_*.zip
   cd -- "$dir" || return 1
 
-  for s in "${COMPARE_SETS[@]}"; do
-    IFS='|' read -r id decode sdir <<< "$s"
-    images+=("$(realpath --relative-to="$dir" -- "$sdir/${id,,}_efm.dat")")
-  done
+  rc=0
+  if has_efm; then
+    for s in "${COMPARE_SETS[@]}"; do
+      IFS='|' read -r id decode sdir <<< "$s"
+      images+=("$(realpath --relative-to="$dir" -- "$sdir/${id,,}_efm.dat")")
+    done
 
-  printf 'compare: vfs-stacker --dry-run over the EFM images of %s\n' "$(map_sets | paste -sd' ' -)"
-  t=$SECONDS rc=0
-  vfs-stacker --dry-run --show-conflicts "${images[@]}" > "$(stage_tmp vfs-stacker.txt)" 2>&1 || rc=$?
-  printf 'compare: vfs-stacker exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+    printf 'compare: vfs-stacker --dry-run over the EFM images of %s\n' "$(map_sets | paste -sd' ' -)"
+    t=$SECONDS
+    vfs-stacker --dry-run --show-conflicts "${images[@]}" > "$(stage_tmp vfs-stacker.txt)" 2>&1 || rc=$?
+    printf 'compare: vfs-stacker exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+  fi
 
   if ! check_compare "$dir" "$rc"; then
     cat -- "$dir/check.failed.txt" >&2
@@ -1176,6 +1239,7 @@ check_compare() {
   local -a args=() sets=()
   out=$(stage_tmp check.txt) || return 1
   log="$dir/vfs-stacker.txt.partial"
+  has_efm || log=/dev/null
   ok()   { printf 'ok    %s\n' "$*"; }
   fail() { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
   note() { printf 'note  %s\n' "$*"; }
@@ -1194,7 +1258,9 @@ check_compare() {
       fi
       args+=("$id|$sdir/quality.json")
     done
-    if grep -q 'Alignment cross-check:' "$log"; then
+    if ! has_efm; then
+      note "no EFM images to compare: the side has no EFM (DISC_EFM=no)"
+    elif grep -q 'Alignment cross-check:' "$log"; then
       ok "vfs-stacker compared the EFM images (exit $rc)"
     else
       fail "vfs-stacker exited $rc without comparing the EFM images ($(grep -v '^\[info\]' "$log" | tail -3 | tr '\n' ' '))"
@@ -1309,10 +1375,11 @@ compare_digest() {
 }
 
 # compare_report <compare.json> <vfs-stacker log>: report.txt, the evidence laid
-# out for a person to read.
+# out for a person to read. A side with no EFM has no VFS evidence.
 compare_report() {
   local digest="$1" log="$2"
-  jq -r --arg disc "$DISC" --arg when "$(date '+%F %T')" --arg selection "${SELECTION#"$SELF_DIR"/}" '
+  jq -r --arg disc "$DISC" --arg when "$(date '+%F %T')" --arg selection "${SELECTION#"$SELF_DIR"/}" \
+        --argjson efm "$(has_efm && echo true || echo false)" '
     def pad($n): tostring | . + " " * ([$n - length, 0] | max);
     def lpad($n): tostring | " " * ([$n - length, 0] | max) + .;
     def r($n): if . == null then "-" else . * $n | round / $n end;
@@ -1325,9 +1392,15 @@ compare_report() {
       "made \($when), from the sets map.orcprj maps: \([.sets[].set] | join(" "))",
       "",
       "This report selects nothing. A person reads it and writes \($selection):",
-      "the video sets, the suggested reference first and then by what each adds, the VFS",
-      "sets best first, and a reason for every set left out (docs/emulator-pack-plan.md,",
-      "phase 4).",
+      (if $efm then
+         "the video sets, the suggested reference first and then by what each adds, the VFS",
+         "sets best first, and a reason for every set left out (docs/emulator-pack-plan.md,",
+         "phase 4)."
+       else
+         "the video sets, the suggested reference first and then by what each adds, and a",
+         "reason for every set left out (docs/emulator-pack-plan.md, phase 4). The side has",
+         "no EFM, so there is no VFS stack to choose."
+       end),
       "",
       "PRESSINGS",
       "",
@@ -1340,7 +1413,8 @@ compare_report() {
        elif (.groups | length) == 1 then "  Disc metadata: every set reads the same: \(.groups[0].disc | disc_text)"
        else "  Disc metadata: the sets differ in \(.differing | join(", "))", (.groups[] | "    \(.sets | join(" ")): \(.disc | disc_text)") end),
       (.pressings.metadata.unread | select(length > 0) | "  Disc metadata not read from: \(join(" "))"),
-      (.pressings.efm | if (.pairs | length) == 0 then "  EFM content: vfs-stacker compared nothing (see vfs-stacker.txt)"
+      (.pressings.efm | if $efm | not then "  EFM content: none, the side has no EFM"
+       elif (.pairs | length) == 0 then "  EFM content: vfs-stacker compared nothing (see vfs-stacker.txt)"
        elif (.disagreeing_pairs | length) == 0 and .conflicts == 0 then
          "  EFM content (vfs-stacker): every pair of sets holds the same bytes wherever both recovered a sector"
        else
@@ -1392,6 +1466,7 @@ compare_report() {
        | "  \(.set) covers output frames \(.capture.first_frame)-\(.capture.last_frame) of 1-\($end)"),
       (.sets[] | .set as $id | .map.warnings[]? | "  \($id): \(.)"),
       (.sets[] | select(.map.signal_state != null) | "  \(.set) signal: \(.map.signal_state)") ,
+      (if $efm | not then empty else
       "",
       "VFS",
       "",
@@ -1408,17 +1483,15 @@ compare_report() {
       "  Lowest data loss first: \(.vfs_by_loss | join(" "))",
       (.pressings.efm.result | select(. != null) | "  Stacking all of them: \(.verdict) - \(.text)"),
       (.pressings.efm.recovered_over_best | select(. != null) | "  Stacking all of them recovers \(.) sector(s) the best single set lacks"),
-      (.pressings.efm.refused | select(.) | "  vfs-stacker refused to stack them, because they do not agree"),
+      (.pressings.efm.refused | select(.) | "  vfs-stacker refused to stack them, because they do not agree") end),
       "",
       "DISC METADATA, AS EACH SET READS IT",
       "",
       "  From each set'"'"'s Disc Mapper (map stage), over the whole side.",
       (.sets[] | if .metadata == null then "  \(.set): not read" else
          "  \(.set): \(.metadata | disc_text); pictures \(.metadata.first_picture // "?")-\(.metadata.last_picture // "?"); lead-in \(.metadata.lead_in | if . then "seen" else "not seen" end), lead-out \(.metadata.lead_out | if . then "seen" else "not seen" end); \(.metadata.confidence.agreement // "-") of status fields agree" end),
-      "",
-      "VFS-STACKER --DRY-RUN, ALL SETS",
-      ""' "$digest"
-  sed -e 's/^\[[a-z]*\] /  /' -e 's/^/  /' -- "$log"
+      (if $efm then "", "VFS-STACKER --DRY-RUN, ALL SETS", "" else empty end)' "$digest"
+  ! has_efm || sed -e 's/^\[[a-z]*\] /  /' -e 's/^/  /' -- "$log"
 }
 
 # --- video: the stacked, dropout-corrected mkv -----------------------------
@@ -1768,6 +1841,7 @@ video_weights() {
 
 run_vfs() {
   local state
+  has_efm || die "vfs: the side has no EFM (DISC_EFM=no), so there is no image to stack"
   ( build_vfs ) || die "vfs: failed (above)"
   state=$(unit_state vfs) || die "vfs: still $state after building"
   stage_prune "$OUT" vfs stage.stamp
@@ -2095,8 +2169,9 @@ vfs_coverage() {
 # The set analyses this stage runs on the stack.
 QUALITY_ANALYSES=(snr dropouts)
 
-# The frames in each block of the sample; a disc.conf may set it.
-QUALITY_SAMPLE_BLOCK="${QUALITY_SAMPLE_BLOCK:-1500}"
+# The frames in each block of the sample are QUALITY_SAMPLE_BLOCK, which a
+# disc.conf may set. Its default is given with the disc's settings, at the
+# top, so that status sees it too.
 
 # quality_sample <frames>: the sample of a stack of <frames> frames, as a
 # Frame Map's ranges (0-based, comma-separated), or nothing for the whole
@@ -2313,7 +2388,8 @@ check_quality() {
 # They are then checked again as they stand (docs/emulator-pack-plan.md,
 # phase 7): the mkv as the video stage checks it, and the image's hashes
 # against the vfs stage's and the reference, its bad sector map and
-# vfs-verifier on it.
+# vfs-verifier on it. A side with no EFM has no vfs stage, and its pack is
+# the mkv alone.
 #
 # Beside them go SHA256SUMS and <stem>.provenance.yaml, which vp415e ignores:
 # the captures' fingerprints, the tool revisions, the selection and the
@@ -2323,9 +2399,10 @@ check_quality() {
 # vp415e cannot open a side without the player's hardware, so the last check
 # is a person's, on the player, recorded in PLAYER_CHECK against the pack's
 # id: the first 16 hex digits of the sha256 of SHA256SUMS' lines for the three
-# files the player loads. A pack is complete only once a check that passed is
-# recorded for its id. Until then it is built and stamped, and awaits that
-# check; a check that failed fails the stage.
+# files the player loads (for the mkv alone, on a side with no EFM). A pack is
+# complete only once a check that passed is recorded for its id. Until then it
+# is built and stamped, and awaits that check; a check that failed fails the
+# stage.
 #
 # $OUT/pack links to the current version, for install-pack.sh.
 
@@ -2338,7 +2415,7 @@ run_pack() {
 
 build_pack() {
   local dir f how
-  local -a assembled=()
+  local -a assembled=() files=()
   describe_pack
   dir="$STAGE_DIR"
 
@@ -2351,7 +2428,9 @@ build_pack() {
 
   # Under their final names, so that each is checked as the player will find
   # it. The stamp, written last, is what makes the pack complete.
-  for f in "$PACK_VIDEO/$STEM.mkv" "$PACK_VFS/$STEM.dat" "$PACK_VFS/$STEM.dat.bsm"; do
+  files=("$PACK_VIDEO/$STEM.mkv")
+  has_efm && files+=("$PACK_VFS/$STEM.dat" "$PACK_VFS/$STEM.dat.bsm")
+  for f in "${files[@]}"; do
     if ln -- "$f" "${f##*/}" 2>/dev/null; then
       how=linked
     else
@@ -2361,7 +2440,11 @@ build_pack() {
     fi
     assembled+=("${f##*/}|$f|$how")
   done
-  printf 'pack: assembled %s from %s and %s; checking it again\n' "$STEM" "${PACK_VIDEO#"$OUT"/}" "${PACK_VFS#"$OUT"/}"
+  if has_efm; then
+    printf 'pack: assembled %s from %s and %s; checking it again\n' "$STEM" "${PACK_VIDEO#"$OUT"/}" "${PACK_VFS#"$OUT"/}"
+  else
+    printf 'pack: assembled %s from %s, with no data area; checking it again\n' "$STEM" "${PACK_VIDEO#"$OUT"/}"
+  fi
 
   if ! check_pack "$dir" "${assembled[@]}"; then
     # A failed check leaves check.failed.txt; a step after the checks (the
@@ -2401,7 +2484,8 @@ check_pack() {
   hashpid=$!
 
   {
-    printf 'stage:   pack\nvideo:   %s\nvfs:     %s\nchecked: %s\n\n' "${PACK_VIDEO#"$OUT"/}" "${PACK_VFS#"$OUT"/}" "$(date '+%F %T')"
+    printf 'stage:   pack\nvideo:   %s\nvfs:     %s\nchecked: %s\n\n' "${PACK_VIDEO#"$OUT"/}" \
+      "$(has_efm && printf '%s' "${PACK_VFS#"$OUT"/}" || printf 'none (no EFM)')" "$(date '+%F %T')"
 
     # The files are the stages' own: the same file, or a copy that is
     # identical to it.
@@ -2424,45 +2508,54 @@ check_pack() {
       fail "the disc metadata differs from the document the video stage checked"
     fi
 
-    # The vfs stage's checks, again, on the pack's image.
-    dathash=$(sha256_stdin < "$dir/$STEM.dat")
-    bsmhash=$(sha256_stdin < "$dir/$STEM.dat.bsm")
-    while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(
-      jq -r --argjson size "$(file_size "$dir/$STEM.dat")" --arg hash "$dathash" --arg bsmhash "$bsmhash" \
-            --argjson bsm "$(awk '/^[[:space:]]*$/ { next } /^[[:space:]]*[0-9]+[[:space:]]*$/ { n++; next } { m++ }
-                                  END { printf "{\"sectors\": %d, \"malformed\": %d}", n, m }' "$dir/$STEM.dat.bsm")" '
-        def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
-        .image as $i
-        | check($size == $i.size and $hash == $i.sha256; "the image is the one the vfs stage checked (\($size) bytes)";
-                "the image is not the one the vfs stage checked"),
-          check($bsmhash == $i.bsm_sha256; "the bad sector map is the one the vfs stage checked";
-                "the bad sector map is not the one the vfs stage checked"),
-          check($bsm.malformed == 0 and $bsm.sectors == $i.bsm_sectors; "the bad sector map parses: \($bsm.sectors) sectors";
-                "the bad sector map has \($bsm.malformed) malformed line(s) and \($bsm.sectors) sectors, against \($i.bsm_sectors)"),
-          "note\tthe vfs stage judged the image \(.verdict)\(if .verdict != "bit-perfect" then ", which the selection accepts" else "" end)"' \
-        "$PACK_VFS/vfs.json" 2>/dev/null || printf 'fail\tcould not read %s\n' "${PACK_VFS#"$OUT"/}/vfs.json")
-    if [ -f "$VFS_REFERENCE" ]; then
-      if diff -q <(grep -v '^#' "$VFS_REFERENCE") \
-                 <(printf '%s  %s\n%s  %s\n' "$dathash" "$STEM.dat" "$bsmhash" "$STEM.dat.bsm") > /dev/null; then
-        ok "the image and its map match the reference, ${VFS_REFERENCE#"$SELF_DIR"/}"
+    # The vfs stage's checks, again, on the pack's image. A side with no EFM
+    # has none.
+    if ! has_efm; then
+      note "no data area: the side has no EFM (DISC_EFM=no), so the pack is $STEM.mkv alone"
+    else
+      dathash=$(sha256_stdin < "$dir/$STEM.dat")
+      bsmhash=$(sha256_stdin < "$dir/$STEM.dat.bsm")
+      while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(
+        jq -r --argjson size "$(file_size "$dir/$STEM.dat")" --arg hash "$dathash" --arg bsmhash "$bsmhash" \
+              --argjson bsm "$(awk '/^[[:space:]]*$/ { next } /^[[:space:]]*[0-9]+[[:space:]]*$/ { n++; next } { m++ }
+                                    END { printf "{\"sectors\": %d, \"malformed\": %d}", n, m }' "$dir/$STEM.dat.bsm")" '
+          def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
+          .image as $i
+          | check($size == $i.size and $hash == $i.sha256; "the image is the one the vfs stage checked (\($size) bytes)";
+                  "the image is not the one the vfs stage checked"),
+            check($bsmhash == $i.bsm_sha256; "the bad sector map is the one the vfs stage checked";
+                  "the bad sector map is not the one the vfs stage checked"),
+            check($bsm.malformed == 0 and $bsm.sectors == $i.bsm_sectors; "the bad sector map parses: \($bsm.sectors) sectors";
+                  "the bad sector map has \($bsm.malformed) malformed line(s) and \($bsm.sectors) sectors, against \($i.bsm_sectors)"),
+            "note\tthe vfs stage judged the image \(.verdict)\(if .verdict != "bit-perfect" then ", which the selection accepts" else "" end)"' \
+          "$PACK_VFS/vfs.json" 2>/dev/null || printf 'fail\tcould not read %s\n' "${PACK_VFS#"$OUT"/}/vfs.json")
+      if [ -f "$VFS_REFERENCE" ]; then
+        if diff -q <(grep -v '^#' "$VFS_REFERENCE") \
+                   <(printf '%s  %s\n%s  %s\n' "$dathash" "$STEM.dat" "$bsmhash" "$STEM.dat.bsm") > /dev/null; then
+          ok "the image and its map match the reference, ${VFS_REFERENCE#"$SELF_DIR"/}"
+        else
+          fail "the image or its map differs from the reference, ${VFS_REFERENCE#"$SELF_DIR"/}"
+        fi
       else
-        fail "the image or its map differs from the reference, ${VFS_REFERENCE#"$SELF_DIR"/}"
+        fail "there is no reference for the image yet (${VFS_REFERENCE#"$SELF_DIR"/}); the vfs stage says how to record one"
       fi
-    else
-      fail "there is no reference for the image yet (${VFS_REFERENCE#"$SELF_DIR"/}); the vfs stage says how to record one"
-    fi
-    if vfs-verifier "$dir/$STEM.dat" > "$dir/vfs-verifier.txt" 2>&1 && grep -q 'Verification passed' "$dir/vfs-verifier.txt"; then
-      ok "vfs-verifier passes the image"
-    elif [ "$accept" = incomplete ] && grep -q 'Verification failed' "$dir/vfs-verifier.txt"; then
-      note "vfs-verifier fails the image, which the selection accepts (vfs.accept: incomplete)"
-    else
-      fail "vfs-verifier does not pass the image (vfs-verifier.txt)"
+      if vfs-verifier "$dir/$STEM.dat" > "$dir/vfs-verifier.txt" 2>&1 && grep -q 'Verification passed' "$dir/vfs-verifier.txt"; then
+        ok "vfs-verifier passes the image"
+      elif [ "$accept" = incomplete ] && grep -q 'Verification failed' "$dir/vfs-verifier.txt"; then
+        note "vfs-verifier fails the image, which the selection accepts (vfs.accept: incomplete)"
+      else
+        fail "vfs-verifier does not pass the image (vfs-verifier.txt)"
+      fi
     fi
 
     # The hashes, and the pack's id.
     if wait "$hashpid" && [ -s "$dir/mkv-sha256.txt" ]; then
-      printf '%s  %s\n%s  %s\n%s  %s\n' "$(cat -- "$dir/mkv-sha256.txt")" "$STEM.mkv" \
-        "$dathash" "$STEM.dat" "$bsmhash" "$STEM.dat.bsm" > "$sums"
+      if has_efm; then
+        printf '%s  %s\n%s  %s\n%s  %s\n' "$(cat -- "$dir/mkv-sha256.txt")" "$STEM.mkv" \
+          "$dathash" "$STEM.dat" "$bsmhash" "$STEM.dat.bsm" > "$sums"
+      else
+        printf '%s  %s\n' "$(cat -- "$dir/mkv-sha256.txt")" "$STEM.mkv" > "$sums"
+      fi
       id=$(sha256_stdin < "$sums" | cut -c1-16)
       ok "hashed: SHA256SUMS; the pack's id is $id"
     else
@@ -2524,7 +2617,7 @@ pack_report() {
     IFS='|' read -r id cvbs sdir <<< "$s"
     sets+=("$id|${cvbs%/*}|$sdir|$(basename -- "$cvbs" .cvbs)")
   done
-  for cmd in ld-decode orc-cli vfs-stacker vfs-verifier ffmpeg typst; do
+  for cmd in ld-decode orc-cli $(! has_efm || echo vfs-stacker vfs-verifier) ffmpeg typst; do
     path=$(command -v "$cmd") && path=$(realpath -- "$path") || path=""
     case "$cmd" in
       ld-decode) version=$(ld-decode --version 2>/dev/null | head -1) ;;
@@ -2536,6 +2629,7 @@ pack_report() {
   done
   mkdir -p -- "$dir/report" || return 1
   jq -n --arg disc "$DISC" --arg title "${DISC_TITLE:-$DISC}" --arg stem "$STEM" --arg out "$OUT" \
+        --argjson efm "$(has_efm && echo true || echo false)" \
         --arg format "$DISC_FORMAT" --arg side "$DISC_SIDE" --arg pictures "$DISC_PICTURES" \
         --arg lead_in "$DECODE_LEAD_IN" --arg frames "$DECODE_FRAMES" \
         --arg pack_dir "$dir" --arg version "${dir##*/}" --arg provenance "$dir/$STEM.provenance.yaml.partial" \
@@ -2548,10 +2642,10 @@ pack_report() {
         --arg inputs "$(stage_inputs)" --arg sets "$(printf '%s\n' "${sets[@]}")" --arg tools "$(printf '%s\n' "${tools[@]}")" \
         --argjson epoch "$(date +%s)" '
     def rows($t): [ $t | split("\n")[] | select(. != "") | split("|") ];
-    { disc: $disc, title: $title, stem: $stem, out: $out, format: $format, side: $side, pictures: $pictures,
+    { disc: $disc, title: $title, stem: $stem, out: $out, efm: $efm, format: $format, side: $side, pictures: $pictures,
       lead_in: $lead_in, decode_frames: $frames, pack_dir: $pack_dir, pack_version: $version,
       provenance: $provenance, pack_check: $check, sums: $sums, selection: $selection, framemaps: $framemaps,
-      map_dir: $map, compare_dir: $compare, video_dir: $video, vfs_dir: $vfs, quality_dir: $quality,
+      map_dir: $map, compare_dir: $compare, video_dir: $video, vfs_dir: (if $efm then $vfs else null end), quality_dir: $quality,
       script: { commit: $commit, describe: $describe, dirty: $dirty },
       pack_inputs: ($inputs | split("\n") | map(select(. != ""))),
       sets: [ rows($sets)[] | { set: .[0], decode_dir: .[1], set_dir: .[2], decode_base: .[3] } ],
@@ -2568,9 +2662,9 @@ pack_report() {
 
 # pack_provenance <dir>: <stem>.provenance.yaml, from pack.json and the check
 # results in <dir> (their stage_tmp names) and what the stages before it
-# recorded.
+# recorded. On a side with no EFM, its vfs, its stamp and checks are null.
 pack_provenance() {
-  local dir="$1" id weights
+  local dir="$1" id weights vfs=null stamp_vfs="" check_vfs=""
   local -a captures=() patches=() vsets=()
   for id in $(map_sets); do
     captures+=("$id|$(set_field "$id" 2)|$(set_field "$id" 3)|$(set_decode "$id")")
@@ -2584,17 +2678,22 @@ pack_provenance() {
   # averaged its records as if each were one block).
   mapfile -t vsets < <(jq -r '.sets[]' "$PACK_VIDEO/video.json")
   weights=$(video_weights "$PACK_VIDEO/stack.log" "$(jq '.metadata.frame_count // 0' "$PACK_VIDEO/video.json")" "${vsets[@]}") || return 1
+  if has_efm; then
+    vfs=$(jq -c . "$PACK_VFS/vfs.json") || return 1
+    stamp_vfs=$(cat -- "$PACK_VFS/stage.stamp") || return 1
+    check_vfs=$(cat -- "$PACK_VFS/check.txt") || return 1
+  fi
   printf '# The provenance of the %s pack for %s: what it was made from, how,\n' "$STEM" "$DISC"
   printf '# and every check it passed. Written by build-pack.sh; vp415e ignores it.\n'
   jq -n --arg disc "$DISC" --arg stem "$STEM" --arg version "${dir##*/}" --arg built "$(date '+%FT%T%z')" \
         --arg script "$(git -C "$SELF_DIR" describe --always --dirty 2>/dev/null || echo unknown)" \
         --slurpfile pack "$dir/pack.json.partial" --slurpfile lock "$SELF_DIR/flake.lock" \
         --argjson selection "$(yq -o=json . "$SELECTION")" --slurpfile evidence "$PACK_COMPARE/compare.json" \
-        --slurpfile video "$PACK_VIDEO/video.json" --argjson weights "$weights" --slurpfile vfs "$PACK_VFS/vfs.json" \
+        --slurpfile video "$PACK_VIDEO/video.json" --argjson weights "$weights" --argjson vfs "$vfs" \
         --rawfile sources "$SELF_DIR/sources.sha256" \
         --rawfile stamp_compare "$PACK_COMPARE/stage.stamp" --rawfile stamp_video "$PACK_VIDEO/stage.stamp" \
-        --rawfile stamp_vfs "$PACK_VFS/stage.stamp" \
-        --rawfile check_video "$PACK_VIDEO/check.txt" --rawfile check_vfs "$PACK_VFS/check.txt" \
+        --arg stamp_vfs "$stamp_vfs" \
+        --rawfile check_video "$PACK_VIDEO/check.txt" --arg check_vfs "$check_vfs" \
         --rawfile check_pack "$dir/check.txt.partial" \
         --arg patches "$( [ "${#patches[@]}" = 0 ] || printf '%s\n' "${patches[@]}")" --args '
     def stamp($t): ($t | split("\n")) as $l
@@ -2610,8 +2709,9 @@ pack_provenance() {
     ($sources | split("\n")) as $src
     | ([ $src[] | capture("^# head-bytes: (?<n>[0-9]+)")?.n | tonumber ] | first) as $head
     | [ $src[] | select(test("^[0-9a-f]{64}  ")) | capture("^(?<sha>[0-9a-f]+)  (?<bytes>[0-9]+)  (?<path>.*)$") ] as $fingerprints
-    | def role($stack; $set): ($selection[$stack].sets | index($set)) as $i
-        | if $i != null then { position: ($i + 1) }
+    | def role($stack; $set): ($selection[$stack].sets // [] | index($set)) as $i
+        | if $selection[$stack] == null then null
+          elif $i != null then { position: ($i + 1) }
           else { dropped: ([ $selection[$stack].dropped[]? | select(.set == $set) | .reason ] | first) } end;
       $pack[0] as $p
       | { disc: $disc, stem: $stem,
@@ -2628,9 +2728,11 @@ pack_provenance() {
           selection: $selection,
           evidence: $evidence[0],
           video: ($video[0] + { stacker: $weights }),
-          vfs: $vfs[0],
-          stamps: { compare: stamp($stamp_compare), video: stamp($stamp_video), vfs: stamp($stamp_vfs) },
-          checks: { video: checks($check_video), vfs: checks($check_vfs), pack: checks($check_pack) } }' \
+          vfs: $vfs,
+          stamps: { compare: stamp($stamp_compare), video: stamp($stamp_video),
+                    vfs: (if $vfs == null then null else stamp($stamp_vfs) end) },
+          checks: { video: checks($check_video), vfs: (if $vfs == null then null else checks($check_vfs) end),
+                    pack: checks($check_pack) } }' \
     "${captures[@]}" | yq -P -p=json -o=yaml
 }
 

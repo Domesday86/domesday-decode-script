@@ -1,0 +1,46 @@
+# EcoDisc Side 1: which sets go into the video and the VFS stacks, decided
+# from the compare stage's report (orc-<rev>/compare/report.txt) as described
+# in docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
+#
+# The evidence (orc-a690be7, 2026-10-28): one version of the disc. Every
+# set's Disc Mapper reads the same disc identity over the whole side (CAV
+# side 1, user code 1988, CX off, Amendment 2 present, sound mono), and every
+# pair of EFM images holds the same bytes wherever both recovered a sector.
+# Source Alignment finds two stamper groups, which are shared noise, not
+# content: A = DS1 DS3, B = DS2 DS4 DS5. DS2 is soft (5-6 MHz response
+# 0.58); the others are 1.00-1.13. Its noise model is trusted, and predicts
+# σ 3.07 for the Weighted stack of all five, against 5.3 for the best single
+# set.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # Every set, DS5 first: the compare report's suggested reference (it sets
+  # the stacker's sample grid), with the fewest padding frames (2). The rest
+  # by what each adds, the predicted stack σ without it (Source Alignment,
+  # a690be7), and its share of the weight: DS5 3.44 (27%), DS3 3.43 (25%),
+  # DS4 3.37 (23%), DS1 3.37 (22%), DS2 3.09 (2%). The next choice of
+  # reference is DS3 (3 padding frames). DS2 covers output frames 1-54001 of
+  # 54002.
+  sets: [DS5, DS3, DS4, DS1, DS2]
+  dropped: []
+
+vfs:
+  # By data loss after C2: DS3 0.086%, DS5 0.455%, DS4 1.63%, DS1 2.38%.
+  # The four agree wherever two of them recovered a sector, and each holds
+  # the data at sectors 143-893, 14419-23891 and 161569-162149, the rest of
+  # the 162150-sector image being unread gaps in the EFM timeline.
+  sets: [DS3, DS5, DS4, DS1]
+  dropped:
+    # DS2 reads the data cleanly (0.0003% loss), but its EFM sink closed up
+    # the two timeline gaps instead of padding them: its image is 10881
+    # sectors, the three runs back to back at 143-10879, and the sink's
+    # report says so ("Address discontinuities: 2 - image offsets do not
+    # track sector addresses past these points"). vfs-stacker compares it
+    # with the others only over 143-893, where they agree, and would copy
+    # its later sectors to addresses 894-10879 that are gaps on the disc.
+    - set: DS2
+      reason: its EFM image is misaligned; the sink compacted two timeline gaps, so past sector 893 its offsets are not sector addresses

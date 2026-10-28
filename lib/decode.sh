@@ -44,10 +44,11 @@ decode_report_field() {
 # threads and concurrency are left out: they change how fast a decode runs,
 # not what it writes.
 #
-# Outputs: the CVBS and its metadata, the EFM and its metadata, the dropout
-# map, and check.txt, the result of the checks the decode passed before it
-# was stamped. The CVBS comes first: build-pack.sh's later stages find the
-# decode by it.
+# Outputs: the CVBS and its metadata, the EFM and its metadata (unless the
+# flags hold --noEFM, for a side with no EFM), the dropout map, and
+# check.txt, the result of the checks the decode passed before it was
+# stamped. The CVBS comes first: build-pack.sh's later stages find the decode
+# by it.
 decode_describe() {
   local id="$1" dir="$2" base="$3" rel="$4" start="$5" frames="$6" flags="$7"
   stage_begin "decode:$id" "$dir"
@@ -58,8 +59,11 @@ decode_describe() {
   stage_input "flags" "$flags"
   stage_output "$base.cvbs"
   stage_output "$base.meta"
-  stage_output "$base.efm"
-  stage_output "$base.efm.meta"
+  case " $flags " in
+    *" --noEFM "*) ;;
+    *) stage_output "$base.efm"
+       stage_output "$base.efm.meta" ;;
+  esac
   stage_output "$base.dropouts.meta"
   stage_output check.txt
 }

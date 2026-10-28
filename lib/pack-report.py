@@ -548,20 +548,24 @@ def markdown(data, graphs):
     w(f"{data['side']} · `{data['stem']}` · pack `{data['id']}`  ")
     w(f"Directory `{data['place']}/{data['version']}/` on the decodes share")
     w("")
+    efm = data.get("has_efm", True)
     w(f"Made by build-pack.sh from {len((data.get('captures') or {}).get('rows') or [])} RF captures of the side: decoded by "
-      "ld-decode, mapped, stacked and measured by decode-orc, and the data area stacked and verified by vfs-verifier, each "
-      "at the exact revision in section 2. Every step is automatic except the selection of the sets, which is a person's "
-      "(section 5); section 1 lists the steps. This is the PDF report's content as Markdown; the graphs are its SVGs.")
+      "ld-decode, mapped, stacked and measured by decode-orc"
+      + (", and the data area stacked and verified by vfs-verifier, each" if efm else ", each")
+      + " at the exact revision in section 2. Every step is automatic except the selection of the sets, which is a person's "
+      "(section 5); section 1 lists the steps."
+      + ("" if efm else " The side has no EFM, so it has no data area, and the pack is the mkv alone.")
+      + " This is the PDF report's content as Markdown; the graphs are its SVGs.")
     w("")
-    w("| Stacked white SNR | Stacked black PSNR | Dropouts after stacking | VFS image | Frames |")
-    w("|---|---|---|---|---|")
+    w("| Stacked white SNR | Stacked black PSNR | Dropouts after stacking |" + (" VFS image |" if efm else "") + " Frames |")
+    w("|---|---|---|" + ("---|" if efm else "") + "---|")
     w(f"| {stack('stack_white')} | {stack('stack_black')} | {k.get('stack_dropouts', '–') if data.get('have_stack') else '–'} "
-      f"| {v.get('verdict', '–')} | {md.get('frames', '–')} |")
+      + (f"| {v.get('verdict', '–')} " if efm else "") + f"| {md.get('frames', '–')} |")
     w(f"| best single set {best['white'].get('set', '–')}: {best['white'].get('value', '–')} dB "
       f"| best single set {best['black'].get('set', '–')}: {best['black'].get('value', '–')} dB "
       f"| best single set {k.get('best_dropouts_set', '–')}: {k.get('best_dropouts', '–')} "
-      f"| {v.get('result', '–')}; {v.get('objects', '–')} objects, {v.get('objects_damaged', '–')} damaged "
-      f"| pictures {md.get('addresses', '–')}; {md.get('undecoded_n', '–')} undecoded |")
+      + (f"| {v.get('result', '–')}; {v.get('objects', '–')} objects, {v.get('objects_damaged', '–')} damaged " if efm else "")
+      + f"| pictures {md.get('addresses', '–')}; {md.get('undecoded_n', '–')} undecoded |")
     w("")
     if data.get("sample_text"):
         w(data["sample_text"])
@@ -572,12 +576,13 @@ def markdown(data, graphs):
     w("")
     sc = data.get("script") or {}
     kv([("Disc", f"{data['title']} ({data['disc']}), {data['side']}"),
-        ("Pack id", f"`{data['id']}`: the first 16 hex digits of the sha256 of the three files' lines of SHA256SUMS. "
+        ("Pack id", f"`{data['id']}`: the first 16 hex digits of the sha256 of "
+                    + ("the three files' lines" if efm else "the mkv's line") + " of SHA256SUMS. "
                     "It names the files the player loads, not the directory"),
         ("Directory", f"`{data['place']}/{data['version']}/` on the decodes share; `{data['place']}/pack` points at the current pack"),
         ("Built", f"{data.get('built', '–')}, by build-pack.sh at `{sc.get('commit', '–')}`" + (" (with uncommitted changes)" if sc.get("dirty") else "")),
         ("Video stack", ", ".join(data.get("video_sets") or []) + ", in stack order (the first sets the sample grid)"),
-        ("VFS stack", ", ".join(data.get("vfs_sets") or []) + ", best first")])
+        ("VFS stack", ", ".join(data.get("vfs_sets") or []) + ", best first" if efm else "none: the side has no EFM")])
 
     w("## 1 From RF to pack")
     w("")
@@ -605,7 +610,8 @@ def markdown(data, graphs):
     w(f"### 2.{len(tools) + 1} The commands that ran")
     w("")
     tbl(data.get("binaries"))
-    w("decode-orc's orc-cli and vfs-verifier's tools do not report a version of their own: their revision above, and the "
+    w(("decode-orc's orc-cli and vfs-verifier's tools do not" if efm else "decode-orc's orc-cli does not")
+      + " report a version of their own: their revision above, and the "
       "store path, identify them. The report itself is drawn by pack-python and set by typst, neither of which affects "
       "the pack's files.")
     w("")
@@ -614,7 +620,7 @@ def markdown(data, graphs):
     w("")
     w(f"Each set is one RF capture of the disc, read from the capture library, which is only ever read. Its fingerprint "
       f"is the sha256 of its first {data.get('head_bytes', '–')} bytes and its size, as sources.sha256 records them. The "
-      "video and VFS columns give its place in each stack.")
+      + ("video and VFS columns give its place in each stack." if efm else "video column gives its place in the stack."))
     w("")
     tbl(data.get("captures"))
     tbl(data.get("fingerprints"))
@@ -753,53 +759,62 @@ def markdown(data, graphs):
     tbl(data.get("quality_params"))
     tbl(data.get("quality_mean_diff"))
 
-    w("## 9 The data area: EFM and the VFS image")
-    w("")
-    w(f"Each set's EFM is decoded to an image of 2048-byte sectors and a map of the sectors it could not recover (the set "
-      f"stage). vfs-stacker stacks the images of {', '.join(data.get('vfs_sets') or [])} by majority, and vfs-verifier "
-      "reads the ADFS filesystem of the result.")
-    w("")
-    w("### 9.1 Each set's EFM decode")
-    w("")
-    tbl(data.get("efm"))
-    w("good, corrected, uncorrectable: sectors, from the EFM decode report. C1 and C2: uncorrectable codewords. used: "
-      "sectors the stack took from the set.")
-    w("")
-    graph("sectors")
-    w("### 9.2 The stack")
-    w("")
-    kv([("Result", f"{v.get('result')}: {v.get('result_text')}"),
-        ("Verdict", f"{v.get('verdict')} (accepts {v.get('accept')})"),
-        ("Sectors", f"{v.get('output_sectors')} in the image; {v.get('unanimous')} recovered by agreement, {v.get('majority')} "
-                    f"by majority, {v.get('consensus')} by consensus; {v.get('contested')} contested, {v.get('disagreements')} disagreements"),
-        ("Not recovered", f"{v.get('bad')}: {v.get('unrecovered')} bad in every set, {v.get('padded')} padding; "
-                          f"{v.get('union')} sectors were recovered by some set"),
-        ("Over the best set", f"{v.get('recovered_over_best')} sector(s) recovered that the best single set ({v.get('best')}) lacks"),
-        ("Filesystem", ("vfs-verifier passes the image" if v.get("verify_passed") else "vfs-verifier does not pass the image")
-                       + f": free space map {v.get('fsm')}; directory {v.get('directory')}; {v.get('objects')} objects, "
-                         f"{v.get('objects_damaged')} damaged"),
-        *([("Hand-built image", v["baseline"])] if v.get("baseline") else []),
-        ("Image", f"`{v.get('image_sha256')}`"), ("Bad sector map", f"`{v.get('bsm_sha256')}`")])
-    w("### 9.3 Where the bad sectors fall")
-    w("")
-    tbl(v.get("roles"))
-    w("### 9.4 The sets agree")
-    w("")
-    w("Wherever two sets both recovered a sector, they must hold the same bytes.")
-    w("")
-    tbl(data.get("pairs"))
-    if data.get("efm_params"):
-        w("### 9.5 The EFM decoder's settings")
+    # Section 9, the data area, only on a side with EFM; the pack follows it.
+    pack_n = 10 if efm else 9
+    if efm:
+        w("## 9 The data area: EFM and the VFS image")
         w("")
-        tbl(data["efm_params"])
-
-    w("## 10 The pack")
+        w(f"Each set's EFM is decoded to an image of 2048-byte sectors and a map of the sectors it could not recover (the set "
+          f"stage). vfs-stacker stacks the images of {', '.join(data.get('vfs_sets') or [])} by majority, and vfs-verifier "
+          "reads the ADFS filesystem of the result.")
+        w("")
+        w("### 9.1 Each set's EFM decode")
+        w("")
+        tbl(data.get("efm"))
+        w("good, corrected, uncorrectable: sectors, from the EFM decode report. C1 and C2: uncorrectable codewords. used: "
+          "sectors the stack took from the set.")
+        w("")
+        graph("sectors")
+        w("### 9.2 The stack")
+        w("")
+        kv([("Result", f"{v.get('result')}: {v.get('result_text')}"),
+            ("Verdict", f"{v.get('verdict')} (accepts {v.get('accept')})"),
+            ("Sectors", f"{v.get('output_sectors')} in the image; {v.get('unanimous')} recovered by agreement, {v.get('majority')} "
+                        f"by majority, {v.get('consensus')} by consensus; {v.get('contested')} contested, {v.get('disagreements')} disagreements"),
+            ("Not recovered", f"{v.get('bad')}: {v.get('unrecovered')} bad in every set, {v.get('padded')} padding; "
+                              f"{v.get('union')} sectors were recovered by some set"),
+            ("Over the best set", f"{v.get('recovered_over_best')} sector(s) recovered that the best single set ({v.get('best')}) lacks"),
+            ("Filesystem", ("vfs-verifier passes the image" if v.get("verify_passed") else "vfs-verifier does not pass the image")
+                           + f": free space map {v.get('fsm')}; directory {v.get('directory')}; {v.get('objects')} objects, "
+                             f"{v.get('objects_damaged')} damaged"),
+            *([("Hand-built image", v["baseline"])] if v.get("baseline") else []),
+            ("Image", f"`{v.get('image_sha256')}`"), ("Bad sector map", f"`{v.get('bsm_sha256')}`")])
+        w("### 9.3 Where the bad sectors fall")
+        w("")
+        tbl(v.get("roles"))
+        w("### 9.4 The sets agree")
+        w("")
+        w("Wherever two sets both recovered a sector, they must hold the same bytes.")
+        w("")
+        tbl(data.get("pairs"))
+        if data.get("efm_params"):
+            w("### 9.5 The EFM decoder's settings")
+            w("")
+            tbl(data["efm_params"])
+    w(f"## {pack_n} The pack")
     w("")
-    w(f"The pack stage makes a new pack version, `{data['version']}`, from the video and vfs stages' outputs: it links the "
-      "three files the player loads rather than copying them, checks them again as vp415e reads them (the container, every "
-      "stream, the disc metadata against the container, the image and its bad sector map against the vfs stage's), hashes "
-      "them into SHA256SUMS, and writes the provenance and this report. A pack is only built when every stage before it is "
-      "up to date, and only stamped when every check passes; `pack` then points at it, and the previous version is kept.")
+    if efm:
+        w(f"The pack stage makes a new pack version, `{data['version']}`, from the video and vfs stages' outputs: it links the "
+          "three files the player loads rather than copying them, checks them again as vp415e reads them (the container, every "
+          "stream, the disc metadata against the container, the image and its bad sector map against the vfs stage's), hashes "
+          "them into SHA256SUMS, and writes the provenance and this report. A pack is only built when every stage before it is "
+          "up to date, and only stamped when every check passes; `pack` then points at it, and the previous version is kept.")
+    else:
+        w(f"The pack stage makes a new pack version, `{data['version']}`, from the video stage's output: it links the mkv, "
+          "the one file the player loads, since the side has no EFM, rather than copying it, checks it again as vp415e reads "
+          "it (the container, every stream, the disc metadata against the container), hashes it into SHA256SUMS, and writes "
+          "the provenance and this report. A pack is only built when every stage before it is up to date, and only stamped "
+          "when every check passes; `pack` then points at it, and the previous version is kept.")
     w("")
     tbl(data.get("files"))
 
@@ -829,11 +844,12 @@ def markdown(data, graphs):
     w("The evidence the selection was decided from, as the compare stage wrote it.")
     w("")
     code(data.get("compare_report"))
-    w("## D vfs-stacker and vfs-verifier")
-    w("")
-    code(data.get("vfs_stacker"))
-    code(data.get("vfs_verifier"))
-    w("## E SHA256SUMS")
+    if efm:
+        w("## D vfs-stacker and vfs-verifier")
+        w("")
+        code(data.get("vfs_stacker"))
+        code(data.get("vfs_verifier"))
+    w(f"## {'E' if efm else 'D'} SHA256SUMS")
     w("")
     code(data.get("sums"))
     return "\n".join(out).rstrip("\n") + "\n"
@@ -855,6 +871,10 @@ def main():
     prov = read_yaml(man["provenance"]) or {}
     style()
 
+    # A side with no EFM (DISC_EFM=no) has no data area: no EFM images, no
+    # vfs stage, and a pack of the mkv alone. Manifests from before the
+    # switch are of sides with EFM.
+    has_efm = man.get("efm", True)
     sets = [s["set"] for s in man["sets"]]
     colours = {s: SET_COLOURS[i % len(SET_COLOURS)] for i, s in enumerate(sets)}
     dashes = {s: SECOND_DASH if i >= len(SET_COLOURS) else "-" for i, s in enumerate(sets)}
@@ -892,7 +912,7 @@ def main():
         log = read_text(ddir / f"{s['decode_base']}.log", tail=65536)
         took = re.search(r"Took ([0-9.]+) seconds to decode (\d+) frames(?: \(([0-9.]+) FPS)?", log)
         wrote = re.search(r"CVBS: wrote (\d+) frames (\S+), (\S+), sequence (\S+)", log)
-        efm_bsm = read_bsm(sdir / f"{sid.lower()}_efm.dat.bsm")
+        efm_bsm = read_bsm(sdir / f"{sid.lower()}_efm.dat.bsm") if has_efm else np.array([], dtype=np.int64)
         per[sid] = {"figs": figs, "inputs": inputs, "decoder": {k.strip(): v.strip() for k, v in decoder.items()},
                     "took": took, "wrote": wrote, "bsm": efm_bsm, "q": read_json(sdir / "quality.json") or {},
                     "map": fmap}
@@ -1034,10 +1054,10 @@ def main():
             graphs["sigma"] = sigma_graph(work, blocks, n)
 
     # --- the EFM images -----------------------------------------------------------
-    vfsdir = Path(man["vfs_dir"])
-    stack_bsm = read_bsm(Path(man["pack_dir"]) / f"{man['stem']}.dat.bsm")
+    vfsdir = Path(man["vfs_dir"]) if has_efm else None
+    stack_bsm = read_bsm(Path(man["pack_dir"]) / f"{man['stem']}.dat.bsm") if has_efm else np.array([], dtype=np.int64)
     sizes = {sid: ((evidence.get(sid) or {}).get("efm") or {}).get("sectors") or 0 for sid in sets}
-    total = int((vfs.get("stack") or {}).get("output_sectors") or max(sizes.values() or [0]))
+    total = int((vfs.get("stack") or {}).get("output_sectors") or max(sizes.values() or [0])) if has_efm else 0
     good_any = np.zeros(total, dtype=bool)
     for sid in sets:
         g = np.zeros(total, dtype=bool)
@@ -1075,7 +1095,8 @@ def main():
         date = re.search(r"_(\d{4})(\d{2})(\d{2})_", c.get("library_path", ""))
         fp = c.get("fingerprint") or {}
         captures.append([sid, f"{date.group(1)}-{date.group(2)}-{date.group(3)}" if date else "–",
-                         fmt(fp.get("bytes")), role("video", sid), role("vfs", sid), c.get("library_path", "")])
+                         fmt(fp.get("bytes")), role("video", sid)] + ([role("vfs", sid)] if has_efm else [])
+                        + [c.get("library_path", "")])
 
     fingerprints = [[c["set"], (c.get("fingerprint") or {}).get("sha256_of_head", "–")] for c in prov.get("captures") or []]
     head_bytes = next(((c.get("fingerprint") or {}).get("head_bytes") for c in prov.get("captures") or [] if c.get("fingerprint")), None)
@@ -1183,7 +1204,7 @@ def main():
                  if not any(p["label"] == label and p["parameters"].get(k) == v for p in quality_rows_p)]
 
     efm_rows = []
-    for sid in sets:
+    for sid in sets if has_efm else ():
         e = (evidence.get(sid) or {}).get("efm") or {}
         u = (evidence.get(sid) or {}).get("vfs_stacker") or {}
         efm_rows.append([sid, e.get("assessment", "–"), e.get("sectors"), e.get("good"), e.get("corrected"), e.get("uncorrectable"),
@@ -1202,8 +1223,9 @@ def main():
         stage_dirs.append((f"decode:{s['set']}", s["decode_dir"]))
     for s in man["sets"]:
         stage_dirs.append((f"set:{s['set']}", s["set_dir"]))
-    stage_dirs += [("map", man["map_dir"]), ("compare", man["compare_dir"]), ("video", man["video_dir"]),
-                   ("vfs", man["vfs_dir"]), ("quality", man["quality_dir"])]
+    stage_dirs += [("map", man["map_dir"]), ("compare", man["compare_dir"]), ("video", man["video_dir"])]
+    stage_dirs += [("vfs", man["vfs_dir"])] if has_efm else []
+    stage_dirs += [("quality", man["quality_dir"])]
     stages = []
     for name, d in stage_dirs:
         stamp = read_stamp(Path(d) / "stage.stamp") or {}
@@ -1219,6 +1241,8 @@ def main():
     tools = prov.get("tools") or {}
     tool_rows = []
     for name in ("ld-decode", "decode-orc", "vfs-verifier", "nixpkgs"):
+        if name == "vfs-verifier" and not has_efm:
+            continue
         t = tools.get(name) or {}
         tool_rows.append({"name": name, "rev": t.get("rev", "–"), "source": t.get("source", "–"), "nar": t.get("narHash", "–"),
                           "patches": [[p.get("name"), p.get("sha256")] for p in t.get("patches") or []]})
@@ -1242,29 +1266,54 @@ def main():
     rev = {t["name"]: t["rev"][:7] for t in tool_rows if t["rev"] != "–"}
     ldd, orc, vfst = (f"{n} {rev.get(n, '–')}" for n in ("ld-decode", "decode-orc", "vfs-verifier"))
     sq = (stackq.get("snr") or {}) if have_stack else {}
-    pipeline = [
-        ["captures", "–", f"{len(sets)} RF captures of the side, read from the capture library (read only) and fingerprinted",
-         f"{', '.join(sets)}", "–"],
-        ["decode", ldd, "demodulates each RF capture into composite video (.cvbs), analogue audio and the EFM channel data",
-         f"{len(sets)} decodes, from the lead-in on", outcome("decode")],
-        ["set", orc, "decodes each set's EFM into a sector image and a map of the sectors it could not recover, and measures "
-         "every frame's SNR, dropouts and burst level", f"{len(sets)} sector images and per-frame measurements", outcome("set")],
-        ["map", orc, "puts each set's frames in disc order by their picture numbers: pads skips, drops duplicates, mixed and "
-         "unplaceable frames", "a frame map per set (committed after review)", outcome("map")],
-        ["compare", f"{orc}, {vfst}", "compares the sets: noise and what each adds, disc identity, video quality, EFM agreement",
-         "the compare report", outcome("compare")],
-        ["select", "–", "the one step that is a person's: which sets go into each stack, and in which order, decided from the "
-         "compare report", f"video {', '.join(video_sets)}; VFS {', '.join(vfs_sets)}", "decided"],
-        ["video", orc, f"stacks the video sets, corrects dropouts, decodes chroma ({video.get('decoder', '–')}) and writes FFV1 "
-         "video, FLAC audio and the disc metadata into Matroska", f"{man["stem"]}.mkv, {fmt((video.get('metadata') or {}).get('frame_count'))} frames",
-         outcome("video")],
-        ["vfs", vfst, "stacks the VFS sets' sector images by majority and verifies the ADFS filesystem of the result",
-         f"{man["stem"]}.dat and .dat.bsm, {vfs.get('verdict', '–')}", outcome("vfs")],
-        ["quality", orc, "measures the stack with the set stage's analyses, on the stacker's output before dropout correction",
-         f"white SNR {fmt(sq.get('mean_white_snr'))} dB" if sq else "–", outcome("quality")],
-        ["pack", "build-pack.sh", "links the three files into a new pack version, checks them again as vp415e reads them, hashes "
-         "them, and writes the provenance and this report", f"pack {pack.get('id', '–')}", outcome("pack")],
-    ]
+    if has_efm:
+        pipeline = [
+            ["captures", "–", f"{len(sets)} RF captures of the side, read from the capture library (read only) and fingerprinted",
+             f"{', '.join(sets)}", "–"],
+            ["decode", ldd, "demodulates each RF capture into composite video (.cvbs), analogue audio and the EFM channel data",
+             f"{len(sets)} decodes, from the lead-in on", outcome("decode")],
+            ["set", orc, "decodes each set's EFM into a sector image and a map of the sectors it could not recover, and measures "
+             "every frame's SNR, dropouts and burst level", f"{len(sets)} sector images and per-frame measurements", outcome("set")],
+            ["map", orc, "puts each set's frames in disc order by their picture numbers: pads skips, drops duplicates, mixed and "
+             "unplaceable frames", "a frame map per set (committed after review)", outcome("map")],
+            ["compare", f"{orc}, {vfst}", "compares the sets: noise and what each adds, disc identity, video quality, EFM agreement",
+             "the compare report", outcome("compare")],
+            ["select", "–", "the one step that is a person's: which sets go into each stack, and in which order, decided from the "
+             "compare report", f"video {', '.join(video_sets)}; VFS {', '.join(vfs_sets)}", "decided"],
+            ["video", orc, f"stacks the video sets, corrects dropouts, decodes chroma ({video.get('decoder', '–')}) and writes FFV1 "
+             "video, FLAC audio and the disc metadata into Matroska", f"{man["stem"]}.mkv, {fmt((video.get('metadata') or {}).get('frame_count'))} frames",
+             outcome("video")],
+            ["vfs", vfst, "stacks the VFS sets' sector images by majority and verifies the ADFS filesystem of the result",
+             f"{man["stem"]}.dat and .dat.bsm, {vfs.get('verdict', '–')}", outcome("vfs")],
+            ["quality", orc, "measures the stack with the set stage's analyses, on the stacker's output before dropout correction",
+             f"white SNR {fmt(sq.get('mean_white_snr'))} dB" if sq else "–", outcome("quality")],
+            ["pack", "build-pack.sh", "links the three files into a new pack version, checks them again as vp415e reads them, hashes "
+             "them, and writes the provenance and this report", f"pack {pack.get('id', '–')}", outcome("pack")],
+        ]
+    else:
+        # The same steps on a side with no EFM: no EFM channel, no sector
+        # images, and no vfs step.
+        pipeline = [
+            ["captures", "–", f"{len(sets)} RF captures of the side, read from the capture library (read only) and fingerprinted",
+             f"{', '.join(sets)}", "–"],
+            ["decode", ldd, "demodulates each RF capture into composite video (.cvbs) and analogue audio; the side has no EFM",
+             f"{len(sets)} decodes, from the lead-in on", outcome("decode")],
+            ["set", orc, "measures every frame's SNR, dropouts and burst level", f"{len(sets)} sets of per-frame measurements",
+             outcome("set")],
+            ["map", orc, "puts each set's frames in disc order by their picture numbers: pads skips, drops duplicates, mixed and "
+             "unplaceable frames", "a frame map per set (committed after review)", outcome("map")],
+            ["compare", orc, "compares the sets: noise and what each adds, disc identity, video quality",
+             "the compare report", outcome("compare")],
+            ["select", "–", "the one step that is a person's: which sets go into the video stack, and in which order, decided "
+             "from the compare report", f"video {', '.join(video_sets)}", "decided"],
+            ["video", orc, f"stacks the video sets, corrects dropouts, decodes chroma ({video.get('decoder', '–')}) and writes FFV1 "
+             "video, FLAC audio and the disc metadata into Matroska", f"{man["stem"]}.mkv, {fmt((video.get('metadata') or {}).get('frame_count'))} frames",
+             outcome("video")],
+            ["quality", orc, "measures the stack with the set stage's analyses, on the stacker's output before dropout correction",
+             f"white SNR {fmt(sq.get('mean_white_snr'))} dB" if sq else "–", outcome("quality")],
+            ["pack", "build-pack.sh", "links the mkv, the one file, into a new pack version, checks it again as vp415e reads it, "
+             "hashes it, and writes the provenance and this report", f"pack {pack.get('id', '–')}", outcome("pack")],
+        ]
 
     md = video.get("metadata") or {}
     disc = md.get("disc") or {}
@@ -1298,6 +1347,7 @@ def main():
     first = man["sets"][0] if man["sets"] else None
     data = {
         "title": man["title"], "disc": man["disc"], "stem": man["stem"], "side": f"{man['format']} side {man['side']}, pictures {man['pictures']}",
+        "has_efm": has_efm,
         "built": pack.get("built", "–"), "version": man["pack_version"],
         # Where the pack directory sits on the decodes share, whatever its mount point.
         "place": "/".join(Path(man["out"]).parts[-2:]), "id": pack.get("id", "–"),
@@ -1306,8 +1356,10 @@ def main():
         "files": table(["file", "bytes", "sha256", "in the pack"], files, ["left", "right", "left", "left"]),
         "sums": read_text(man["sums"]),
         "tools": tool_rows, "binaries": table(["command", "version", "path"], binaries, ["left", "left", "left"]),
-        "captures": table(["set", "captured", "bytes", "video", "VFS", "library path"], captures,
-                          ["left", "left", "right", "center", "center", "left"]),
+        "captures": (table(["set", "captured", "bytes", "video", "VFS", "library path"], captures,
+                           ["left", "left", "right", "center", "center", "left"]) if has_efm else
+                     table(["set", "captured", "bytes", "video", "library path"], captures,
+                           ["left", "left", "right", "center", "left"])),
         "fingerprints": table(["set", "sha256 of the first bytes"], fingerprints, ["left", "left"]), "head_bytes": fmt(head_bytes),
         "decodes": table(["set", "ld-decode", "start", "frames", "signal", "time", "fps"], decodes,
                          ["left", "left", "right", "right", "left", "right", "right"]),
@@ -1319,7 +1371,7 @@ def main():
         "stack_quality": stackq,
         "video_sets": video_sets, "vfs_sets": vfs_sets, "pressing": sel.get("pressing"),
         "selection_text": read_text(man["selection"]),
-        "dropped": {k: (sel.get(k) or {}).get("dropped") or [] for k in ("video", "vfs")},
+        "dropped": {k: (sel.get(k) or {}).get("dropped") or [] for k in (("video", "vfs") if has_efm else ("video",))},
         "weights": table(["set", "frames measured", "mean noise σ", "mean share %", "least share %"], weights),
         "split_blocks": table(["frames", "share of the weight", "stacked with"], split_blocks, ["left", "left", "left"]),
         "records": records, "trust": trust,
@@ -1330,7 +1382,7 @@ def main():
                             if nr.get("db") else None),
         "sample_grid": (video.get("stacker") or {}).get("sample_grid") or [],
         "stack_params": params_table(vdir / "stack.orcprj"),
-        "efm_params": params_table(Path(first["set_dir"]) / "efm.orcprj") if first else None,
+        "efm_params": params_table(Path(first["set_dir"]) / "efm.orcprj") if first and has_efm else None,
         "quality_params": params_table(qdir / "quality.orcprj"),
         "quality_mean_diff": table(["stage", "parameter", "in Mean"], mean_diff, ["left"] * 3),
         "quality_dir": os.path.relpath(man["quality_dir"], man["out"]),
@@ -1368,8 +1420,8 @@ def main():
         "sector_counts": table(["set", "not recovered"], [[r["set"], fmt(len(r["bad"]))] for r in sector_rows]),
         "stages": stages,
         "compare_report": read_text(Path(man["compare_dir"]) / "report.txt"),
-        "vfs_stacker": read_text(vfsdir / "vfs-stacker.txt"),
-        "vfs_verifier": read_text(Path(man["pack_dir"]) / "vfs-verifier.txt"),
+        "vfs_stacker": read_text(vfsdir / "vfs-stacker.txt") if has_efm else "",
+        "vfs_verifier": read_text(Path(man["pack_dir"]) / "vfs-verifier.txt") if has_efm else "",
         "colours": {**colours, "Stack": STACK_COLOUR},
     }
     (work / "report.json").write_text(json.dumps(data, indent=1, default=str))

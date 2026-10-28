@@ -1,0 +1,10 @@
+# EcoDisc Side 1: the reference SHA-256 of the stacked VFS image and its bad
+# sector map, recorded once the image passed the bit-perfect test
+# (docs/emulator-pack-plan.md, phase 6). Every later vfs stage must match.
+#
+# Recorded 2026-10-28 from vfs-41ab10c: DS3 DS5 DS4 DS1 at decode-orc
+# a690be7, ld-decode 6148260. 332089344 bytes, 162153 EFM sectors; 151352
+# listed bad, all before the filesystem (146) or in free space (151206).
+# DS2 is left out (selection.yaml): its sink compacted the timeline gaps.
+d1afb9eb986013859fa0d48f9cf28eac687b517f6dab89fdf990f6c727da1df8  ecodisc_s1.dat
+843608fafec62179de6779a2596abf211a4f800deea1308c332ca994c8c07681  ecodisc_s1.dat.bsm

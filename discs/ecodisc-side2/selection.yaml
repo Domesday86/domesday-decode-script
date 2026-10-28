@@ -1,0 +1,28 @@
+# EcoDisc Side 2: which sets go into the video stack, decided from the
+# compare stage's report (orc-<rev>/compare/report.txt) as described in
+# docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds. Every mapped set the stack leaves out goes under dropped,
+# with a reason. The side has no EFM (disc.conf, DISC_EFM=no), so there is
+# no VFS stack and no vfs section.
+#
+# The evidence (orc-a690be7, 2026-10-28): one version of the disc. Every
+# set's Disc Mapper reads the same disc identity over the whole side (CAV
+# side 2, user code none, CX off, Amendment 2 present, pictures 1-35501).
+# Source Alignment finds two stamper groups, which are shared noise, not
+# content: A = DS1 DS3, B = DS4 DS5. None is soft (5-6 MHz response
+# 0.87-1.14). Its noise model predicts σ 4.73 for the Weighted stack of all
+# four, against 7.48 for the best single set. DS2 has no capture of this
+# side.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # Every set, DS3 first: the compare report's suggested reference (it sets
+  # the stacker's sample grid), with no padding frames. The rest by what each
+  # adds, the predicted stack σ without it (Source Alignment, a690be7), and
+  # its share of the weight: DS3 5.11 (25%), DS5 5.08 (27%), DS4 5.06 (26%),
+  # DS1 5.05 (23%). Every set adds, so none is left out. The next choice of
+  # reference is DS5 (8 padding frames).
+  sets: [DS3, DS5, DS4, DS1]
+  dropped: []

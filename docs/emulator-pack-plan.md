@@ -2,7 +2,8 @@
 
 Status: **phases 0–7 are built, and `selection.yaml` is decided.** The
 Volcanoes pack awaits its hand check on the player, the last of phase 7's
-exit criteria. Phase 8 has started, with Domesday Community South.
+exit criteria. Phase 8 has started, with Domesday Community South and the
+two EcoDisc sides.
 Volcanoes is the pilot disc; the other discs follow once the process is
 proven on it.
 
@@ -1533,6 +1534,34 @@ discs. The differences from Volcanoes:
   rest; no three sets manage that. The hand-built image, stacked from sharp
   sets only, took the damaged bytes as good, so it differs from this one in
   those 21 sectors (`vfs.baseline_differs`).
+
+**Under way: EcoDisc**, one pack per side, each with its own decode script.
+
+- **Side 1** (`discs/ecodisc-side1`, stem `ecodisc_s1`), from its five
+  captures, one per set. `decode-ecodisc-side1.sh` is
+  `decode-community-south.sh` with this side's set table. Its EFM data is
+  localised, to about pictures 6000–8000, so the EFM check runs from picture
+  6000. Its projects are Volcanoes', which also has five sets, DS1–DS5, with
+  the names changed. There is no hand-built stack to compare with.
+- **Side 2** (`discs/ecodisc-side2`, stem `ecodisc_s2`), from four captures:
+  DS2 is the original single-sided pressing and has no second side. It is
+  the first pack side with no EFM, so `decode-ecodisc-side2.sh` decodes with
+  `--noEFM`, and its `disc.conf` says `DISC_EFM=no`. As planned above, that
+  drops the EFM part of phase 2 and all of phase 6:
+  - the set stage runs `set-quality.orcprj` only, and its `quality.json` has
+    `efm: null`;
+  - the compare stage runs no `vfs-stacker` and reports no VFS;
+  - `selection.yaml` has no `vfs`;
+  - the `vfs` stage reads "none";
+  - the pack is `ecodisc_s2.mkv` alone, and its id is the hash of the mkv's
+    line of SHA256SUMS;
+  - the provenance has `vfs: null`, and the report leaves out the data-area
+    section.
+
+  build-pack.sh checks that `DISC_EFM` and the decode script's `--noEFM`
+  agree. The side's frame count is checked against 35,501 pictures, since
+  three of its four captures are misnamed `..._00001-54000`. It decodes with
+  `transform3d` throughout, as the phase 5 table says.
 
 ## Decisions
 

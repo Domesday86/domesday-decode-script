@@ -3,6 +3,8 @@
 // (sys.inputs.graphs). Compiled with --root /, so both are absolute paths.
 
 #let data = json(sys.inputs.data)
+// A side with no EFM has no data area, and its pack is the mkv alone.
+#let has-efm = data.at("has_efm", default: true)
 #let graph(name) = image(sys.inputs.graphs + "/" + name, width: 100%)
 
 #let ink = rgb("#0b0b0b")
@@ -101,12 +103,12 @@
 #block(below: 3pt, text(size: 9.5pt, fill: ink2)[#data.side · #mono(data.stem, size: 9pt) · pack #mono(data.id, size: 9pt)])
 #block(below: 12pt, text(size: 9.5pt, fill: ink2)[Directory #mono(data.place + "/" + data.version + "/", size: 9pt) on the decodes share])
 
-#block(below: 10pt, text(size: 8.5pt)[Made by build-pack.sh from #data.captures.rows.len() RF captures of the side: decoded by ld-decode, mapped, stacked and measured by decode-orc, and the data area stacked and verified by vfs-verifier, each at the exact revision in @tools. Every step is automatic except the selection of the sets, which is a person's (@selection); @pipeline lists the steps.])
+#block(below: 10pt, text(size: 8.5pt)[Made by build-pack.sh from #data.captures.rows.len() RF captures of the side: decoded by ld-decode, mapped, stacked and measured by decode-orc#if has-efm [, and the data area stacked and verified by vfs-verifier], each at the exact revision in @tools. Every step is automatic except the selection of the sets, which is a person's (@selection); @pipeline lists the steps.#if not has-efm [ The side has no EFM, so it has no data area, and the pack is the mkv alone.]])
 
 // The best single video set for a measure, for a tile's detail line.
 #let best(k) = { let b = data.key.at("best_" + k, default: none); if b == none [–] else [best single set #b.set: #b.value dB] }
 
-#grid(columns: (1fr,) * 5, column-gutter: 6pt,
+#grid(columns: (1fr,) * (if has-efm { 5 } else { 4 }), column-gutter: 6pt,
   tile("Stacked white SNR",
     if data.have_stack [#data.key.stack_white dB] else [–], best("white")),
   tile("Stacked black PSNR",
@@ -114,8 +116,8 @@
   tile("Dropouts after stacking",
     if data.have_stack [#data.key.stack_dropouts] else [–],
     [best single set #data.key.best_dropouts_set: #data.key.best_dropouts]),
-  tile("VFS image", data.vfs.verdict,
-    [#(data.vfs.result); #data.vfs.objects objects, #data.vfs.objects_damaged damaged]),
+  ..if has-efm { (tile("VFS image", data.vfs.verdict,
+    [#(data.vfs.result); #data.vfs.objects objects, #data.vfs.objects_damaged damaged]),) },
   tile("Frames", data.metadata.frames,
     [pictures #(data.metadata.addresses); #data.metadata.undecoded_n undecoded]),
 )
@@ -130,11 +132,11 @@
   [#heading(level: 2, numbering: none)[The pack]
 #kv(
   ("Disc", [#data.title (#data.disc), #data.side]),
-  ("Pack id", [#mono(data.id) — the first 16 hex digits of the sha256 of the three files' lines of SHA256SUMS. It names the files the player loads, not the directory]),
+  ("Pack id", [#mono(data.id) — the first 16 hex digits of the sha256 of #if has-efm [the three files' lines] else [the mkv's line] of SHA256SUMS. It names the files the player loads, not the directory]),
   ("Directory", [#mono(data.place + "/" + data.version + "/") on the decodes share; #mono(data.place + "/pack") points at the current pack]),
   ("Built", [#data.built, by build-pack.sh at #mono(data.script.commit)#if data.script.dirty [ (with uncommitted changes)]]),
   ("Video stack", data.video_sets.join(", ") + [, in stack order (the first sets the sample grid)]),
-  ("VFS stack", data.vfs_sets.join(", ") + [, best first]),
+  ("VFS stack", if has-efm { data.vfs_sets.join(", ") + [, best first] } else [none: the side has no EFM]),
 )],
 )
 
@@ -286,6 +288,7 @@ The quality stage's project (#mono(data.quality_dir + "/quality.orcprj")), its s
 
 // --- EFM and VFS -------------------------------------------------------------------
 
+#if has-efm [
 = The data area: EFM and the VFS image
 
 Each set's EFM is decoded to an image of 2048-byte sectors and a map of the sectors it could not recover (the set stage). vfs-stacker stacks the images of #data.vfs_sets.join(", ") by majority, and vfs-verifier reads the ADFS filesystem of the result.
@@ -321,12 +324,13 @@ Each set's EFM is decoded to an image of 2048-byte sectors and a map of the sect
   == The EFM decoder's settings
   #tbl(data.efm_params, mono-cols: (3,), wide: true, size: 7pt)
 ]
+]
 
 // --- the pack --------------------------------------------------------------------------
 
 = The pack
 
-The pack stage makes a new pack version, #mono(data.version), from the video and vfs stages' outputs: it links the three files the player loads rather than copying them, checks them again as vp415e reads them (the container, every stream, the disc metadata against the container, the image and its bad sector map against the vfs stage's), hashes them into SHA256SUMS, and writes the provenance and this report. A pack is only built when every stage before it is up to date, and only stamped when every check passes; `pack` then points at it, and the previous version is kept.
+#if has-efm [The pack stage makes a new pack version, #mono(data.version), from the video and vfs stages' outputs: it links the three files the player loads rather than copying them, checks them again as vp415e reads them (the container, every stream, the disc metadata against the container, the image and its bad sector map against the vfs stage's), hashes them into SHA256SUMS, and writes the provenance and this report.] else [The pack stage makes a new pack version, #mono(data.version), from the video stage's output: it links the mkv, the one file the player loads, since the side has no EFM, rather than copying it, checks it again as vp415e reads it (the container, every stream, the disc metadata against the container), hashes it into SHA256SUMS, and writes the provenance and this report.] A pack is only built when every stage before it is up to date, and only stamped when every check passes; `pack` then points at it, and the previous version is kept.
 
 #tbl(data.files, mono-cols: (2,))
 
@@ -361,9 +365,11 @@ A stage's key is the sha256 of its inputs: the captures' fingerprints, the tool 
 The evidence the selection was decided from, as the compare stage wrote it.
 #text(size: 6pt, raw(data.compare_report, block: true))
 
+#if has-efm [
 = vfs-stacker and vfs-verifier
 #text(size: 6pt, raw(data.vfs_stacker, block: true))
 #text(size: 6pt, raw(data.vfs_verifier, block: true))
+]
 
 = SHA256SUMS
 #text(size: 7pt, raw(data.sums, block: true))

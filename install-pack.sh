@@ -3,7 +3,8 @@
 # Install a disc's pack on the VP415e player: copy the three files the player
 # loads -- <stem>.mkv, <stem>.dat and <stem>.dat.bsm -- into its media
 # directory over ssh, and check that they arrived whole and that the player's
-# service account can work with them (docs/emulator-pack-plan.md, phase 7).
+# service account can work with them (docs/emulator-pack-plan.md, phase 7). A
+# side with no EFM (DISC_EFM=no) has no data area: its pack is the mkv alone.
 #
 # Never part of the build: build-pack.sh makes the pack, and this is run by
 # hand to put it on the player for the hand check, or once it has passed.
@@ -91,13 +92,17 @@ OUT="$DD_DECODES/decode-script/$DISC_OUT"
 [ -d "$PACK" ] || die "no pack at $PACK (build it with: ./build-pack.sh $DISC)"
 PACK=$(phys_dir "$PACK")
 stage_stamp_field "$PACK" stamped > /dev/null || die "$PACK is not a stamped pack: it was never checked, or its build was interrupted"
-FILES=("$STEM.dat" "$STEM.dat.bsm" "$STEM.mkv")
+if [ "${DISC_EFM:-yes}" = no ]; then
+  FILES=("$STEM.mkv")
+else
+  FILES=("$STEM.dat" "$STEM.dat.bsm" "$STEM.mkv")
+fi
 for f in "${FILES[@]}" SHA256SUMS pack.json; do
   [ -f "$PACK/$f" ] || die "$PACK has no $f"
 done
 ID=$(jq -r .id "$PACK/pack.json")
 SUMS=$(for f in "${FILES[@]}"; do awk -v n="$f" '$2 == n' "$PACK/SHA256SUMS"; done)
-[ "$(wc -l <<< "$SUMS")" = 3 ] || die "$PACK/SHA256SUMS does not list the three files"
+[ "$(wc -l <<< "$SUMS")" = "${#FILES[@]}" ] || die "$PACK/SHA256SUMS does not list the pack's ${#FILES[@]} file(s)"
 BYTES=0
 for f in "${FILES[@]}"; do BYTES=$(( BYTES + $(file_size "$PACK/$f") )); done
 
@@ -153,8 +158,12 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-printf '\ncopying the data area, then the side\n'
-"${RSYNC[@]}" --info=progress2 -- "$PACK/$STEM.dat" "$PACK/$STEM.dat.bsm" "$HOST:$MEDIA_DIR/"
+if [ "${#FILES[@]}" -gt 1 ]; then
+  printf '\ncopying the data area, then the side\n'
+  "${RSYNC[@]}" --info=progress2 -- "$PACK/$STEM.dat" "$PACK/$STEM.dat.bsm" "$HOST:$MEDIA_DIR/"
+else
+  printf '\ncopying the side (it has no data area)\n'
+fi
 "${RSYNC[@]}" --info=progress2 -- "$PACK/$STEM.mkv" "$HOST:$MEDIA_DIR/"
 
 # --- the checks on the player ----------------------------------------------

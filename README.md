@@ -94,14 +94,13 @@ Every script takes the same core flags and environment variables:
 | `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
 | `--force` | | refuse | overwrite an existing decode |
-| `--adopt` | | | Volcanoes only: check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
+| `--adopt` | | | the pack scripts only (Volcanoes, Community South, EcoDisc): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
 | `-n, --dry-run` | | | resolve starts and print the commands, decode nothing |
 | `--list` | | | list what the selectors chose and exit |
 
 The scripts for multi-sided discs add `--side`. The ones that switch the EFM
-front end off anywhere add `--efm` (`DD_EFM=1`) to force it back on, and
-EcoDisc, whose table decides EFM side by side, adds `--no-efm` too; each disc's
-section below says which. `--help` on any script gives its full usage.
+front end off anywhere add `--efm` (`DD_EFM=1`) to force it back on; each
+disc's section below says which. `--help` on any script gives its full usage.
 
 Source paths in the tables are relative to the library root, so decoding from
 another copy of the library takes only pointing at it. Because the library is
@@ -111,8 +110,8 @@ than with `--library` alone.
 
 Every script's output root sits under one folder,
 `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/`, in a subfolder named after the
-script's disc: `domesday`, `volcanoes`, `ecodisc`, `city`, `countryside` and
-`north-polar`.
+script's disc or pack: `domesday`, `volcanoes`, `community-south`,
+`ecodisc-side1`, `ecodisc-side2`, `city`, `countryside` and `north-polar`.
 
 Output goes to `<output root>/<set>/<decoder>/<capture basename>.*`, where
 `<decoder>` names the ld-decode commit that produced the decode — see [Which
@@ -522,32 +521,36 @@ stamp it if it passes.
 
 ## Decoding the EcoDisc disc
 
-`decode-ecodisc.sh` decodes the PAL BBC AIV **EcoDisc** (BBC, 1987), an
-interactive videodisc about Slapton Ley, a nature reserve in South Devon.
+The PAL BBC AIV **EcoDisc** (BBC, 1987) is an interactive videodisc about
+Slapton Ley, a nature reserve in South Devon. Each side is a VP415e pack of its
+own, so each has its own decode script, which checks and stamps its decodes
+for `build-pack.sh` as [Volcanoes'](#checked-and-stamped-decodes) does:
+
+| Side | Script | Pack | Captures |
+| --- | --- | --- | --- |
+| Side 1, the interactive side | `decode-ecodisc-side1.sh` | `ecodisc-side1`, stem `ecodisc_s1` | DS1–DS5 |
+| Side 2, the documentary | `decode-ecodisc-side2.sh` | `ecodisc-side2`, stem `ecodisc_s2` | DS1, DS3, DS4, DS5 |
 
 EcoDisc was first pressed **single-sided** and later reissued **double-sided**,
 the new second side carrying a linear documentary about the reserve. The library
 holds five sets: four are the double-sided pressing, and **DS2 is a copy of the
 original single-sided one**, so it has a first side and nothing else. That makes
-**nine captures across the five sets, not ten** — `Side2` selects four sides
-rather than five, and `DS2:Side2` is an error rather than an omission.
+**nine captures across the five sets, not ten**: the second side's script lists
+four sets, and has no DS2.
 
 ```sh
 nix develop
-./decode-ecodisc.sh                       # all nine captures, first 1000 frames each
-./decode-ecodisc.sh --frames 2            # quick smoke test
-./decode-ecodisc.sh --frames all DS1:Side2  # one side in full
-./decode-ecodisc.sh --frames all S1 -j 2  # every first side, two at a time
-./decode-ecodisc.sh --frames all -j 2     # the whole disc, two at a time
-./decode-ecodisc.sh --list
+./decode-ecodisc-side1.sh --list                # the first side's five captures
+./decode-ecodisc-side1.sh --frames 2            # quick smoke test
+./decode-ecodisc-side1.sh --frames all DS3      # one set in full
+./decode-ecodisc-side2.sh --frames all -j 2     # the second side, two at a time
 ```
 
-Selectors work as they do for Domesday: `DS4` is every side of a set,
-`DS4:Side2` one side of one set, `Side2` (or `S2`) that side of every set that
-has one, and they add together. `--side` narrows whatever the selectors chose.
-Set and side names are matched regardless of case. Output goes to
-`<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/ecodisc`.
+Sets are named `DS1` to `DS5`, matched regardless of case. With none named,
+every set the script lists is decoded. Output goes to
+`<output root>/<set>/<decoder>-<date>/<capture basename>.*`, with the output
+roots `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/ecodisc-side1`
+and `.../ecodisc-side2`.
 
 ### Both sides are CAV
 
@@ -557,8 +560,9 @@ This is worth stating because two things suggest otherwise and both are wrong:
 
 - Some second-side captures are **named** `...CAV_PAL_00001-54000.ldf`, after
   the *first* side's frame range. That is a copying slip in the library — the
-  captures end where the side does, around frame 35,500. Nothing in the script
-  reads a format or a length out of a filename.
+  captures end where the side does, around frame 35,500. Nothing in the scripts
+  reads a format out of a filename, and the second side's does not read its
+  length from one either.
 - A short documentary side is the kind of thing that is often CLV.
 
 What settles it is the VBI. `ld-decode` reads the format from the disc itself,
@@ -570,10 +574,10 @@ the `--start 327` recorded by hand in `EcoDisc_Notes.txt`.
 
 The first sides carry EFM digital audio and the second sides do not, so the EFM
 front end runs on the first sides only. On the Domesday sets the same question
-is answered by the format column — EFM is absent exactly on the CLV National B
-sides — but that shortcut does not work here: **both EcoDisc sides are CAV and
-they still differ.** So the side table carries an explicit `efm` column, and it
-is the only thing that decides whether the front end runs.
+is answered by the format — EFM is absent exactly on the CLV National B sides —
+but that shortcut does not work here: **both EcoDisc sides are CAV and they
+still differ.** Each side's script asserts its answer: `decode-ecodisc-side1.sh`
+decodes EFM, and `decode-ecodisc-side2.sh` decodes with `--noEFM`.
 
 Each cell was measured rather than assumed. `ld-decode`'s own
 `lddecode.efm_score` scores the T-value stream written to `.efm` for frame sync:
@@ -606,36 +610,43 @@ side that has it, because the demodulator emits plausible run lengths either
 way: the known-EFM-free National B control scores 3.79 bits/byte against
 Volcanoes' 3.50. Only frame sync separates them.
 
-`--efm` and `--no-efm` override the table for every selected side, which is how
-its answer can be re-checked later — the same job `DD_EFM` does, which takes
-`1`, `0`, or empty to leave the table alone.
+The first side's check of a finished decode asks for EFM t-values on every
+frame from picture #6000 to the end, as Volcanoes' does from #47000. The
+front end writes t-values from noise past the data too, so that is as far as
+the check goes; whether they decode is for the EFM sink in the `set` stage.
 
-### What the script asserts
+### What the scripts assert
 
-Every capture is PAL, is CAV, and was made on an LD-V4300D. Those are facts
-about the disc and the captures rather than choices, so they are asserted in the
-script instead of offered as flags:
+Every capture is PAL, is CAV, and was made on an LD-V4300D, and each side
+either carries EFM or does not. Those are facts about the disc and the captures
+rather than choices, so they are asserted in the scripts instead of offered as
+flags:
 
 ```sh
-ld-decode --pal --cvbs --cvbs-spec-origin --V4300D_coherent_subtract [--noEFM] ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...           # Side 1
+ld-decode --pal --noEFM --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...   # Side 2
 ```
 
-`--noEFM` appears for the second sides only, per the `efm` column above. Player
-spur removal is the same coherent subtraction the Domesday and Volcanoes sides
-get, for the same reason — all five sets came off an LD-V4300D; see [Player spur
-removal](#player-spur-removal). The disc format is deliberately *not* passed:
-`ld-decode` reads CAV or CLV from the VBI itself, and the table's format column
-records what it will find rather than telling it.
+Player spur removal is the same coherent subtraction the Domesday and Volcanoes
+sides get, for the same reason — all five sets came off an LD-V4300D; see
+[Player spur removal](#player-spur-removal). The disc format is deliberately
+*not* passed: `ld-decode` reads CAV or CLV from the VBI itself.
 
-The table also carries a "first picture" column that is `1` for all nine
-captures, each of which begins at the head of its side. It exists for a side the
-player lost and had to be captured in more than one pass, whose later part picks
-up mid-disc; the Domesday library has one such side, and this one has none.
+A second-side decode with `--noEFM` has no `.efm` or `.efm.meta`, so its check
+does not ask for them, and its stamp (`lib/decode.sh`) does not list them as
+outputs. Its frame count is checked against the side's 35,501 pictures, from
+DS5's file name, rather than against each capture's own name, since three of
+those say 54000.
+
+The tables carry a "first picture" column that is `1` for all nine captures,
+each of which begins at the head of its side. It exists for a side the player
+lost and had to be captured in more than one pass, whose later part picks up
+mid-disc; the Domesday library has one such side, and EcoDisc has none.
 
 Everything else — the two roots, the frame limit, lead-in, probe, jobs and
-threads — works exactly as it does for the other scripts, by the same flags and
-the same `DD_*` environment variables, with `DD_OUTPUT` defaulting to the
-EcoDisc output root. Starts are resolved by the shared `find-disc-start.sh`, in
+threads, `--adopt` — works exactly as it does for Volcanoes, by the same flags
+and the same `DD_*` environment variables, with `DD_OUTPUT` defaulting to each
+side's output root. Starts are resolved by the shared `find-disc-start.sh`, in
 parallel at the `--jobs` concurrency, and cached beside the decode as
 `<basename>.start`. Nothing is taken from the `--start` values recorded by hand
 in the library's `EcoDisc_Notes.txt`; those were made against a different
@@ -678,7 +689,7 @@ nix develop
 ./decode-city.sh --list
 ```
 
-Selectors work as they do for Domesday and EcoDisc: `DS1` is every side of a
+Selectors work as they do for Domesday: `DS1` is every side of a
 set, `DS2:Culture2-Side1` one side of one set, `Culture2-Side1` (or `C2S1`) that
 side of every set that has one, and they add together. `--side` narrows whatever
 the selectors chose. Set and side names are matched regardless of case. Output
@@ -697,10 +708,10 @@ ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
 
 EFM is therefore decoded on **every** side, and the side table carries no `efm`
 column and the script no `--efm` / `--no-efm` — there is nothing per-side to
-decide. EcoDisc needs that column because its two sides differ; the Domesday
-**National B** sides are the other place in this library where the front end is
-switched off, because they are CLV and carry none. See [EFM and the National B
-sides](#efm-and-the-national-b-sides). Player spur removal is the same coherent
+decide. EcoDisc's second side carries no EFM, and has a script of its own that
+says so; the Domesday **National B** sides are the other place in this library
+where the front end is switched off, because they are CLV and carry none. See
+[EFM and the National B sides](#efm-and-the-national-b-sides). Player spur removal is the same coherent
 subtraction the other sides get, for the same reason — see [Player spur
 removal](#player-spur-removal). The disc format is deliberately *not* passed:
 `ld-decode` reads CAV or CLV from the VBI itself, and the table's format column
@@ -1190,6 +1201,24 @@ inputs, so a re-run with nothing changed does nothing.
     hand-built stack in `vp415e_projects/CommunityS_output`, which stacked
     DS4, DS6, DS8 and DS10. Its `selection.yaml` and `stack.orcprj` are
     written once the compare report is in.
+  - **EcoDisc Side 1** (`ecodisc-side1`, stem `ecodisc_s1`): the five
+    first-side captures, decoded by `decode-ecodisc-side1.sh`. Its EFM data
+    is localised, to about pictures 6000–8000, so the decode check runs from
+    picture 6000. There is no hand-built stack to compare with.
+  - **EcoDisc Side 2** (`ecodisc-side2`, stem `ecodisc_s2`): the four
+    second-side captures (DS2 has no second side), decoded by
+    `decode-ecodisc-side2.sh` with `--noEFM`. It is the first side with no EFM,
+    so its `disc.conf` says `DISC_EFM=no`. On such a side:
+    - the set stage measures quality alone, with no EFM image;
+    - the compare report has no VFS evidence;
+    - `selection.yaml` has no `vfs` stack, and naming one is an error;
+    - the `vfs` stage is "none", not stale;
+    - the pack is `<stem>.mkv` alone, with SHA256SUMS, the provenance and the
+      report, and the pack id is the hash of the mkv's line;
+    - `install-pack.sh` copies the mkv alone.
+
+    The side is a TV programme, motion throughout, so its video sink decodes
+    every frame with `transform3d` rather than the held schedule.
 
 ```sh
 ./build-pack.sh volcanoes status                 # each stage: up to date, or stale and why
