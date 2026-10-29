@@ -1,0 +1,50 @@
+# Countryside Side 2: which sets go into the video and the VFS stacks,
+# decided from the compare stage's report (orc-<rev>/compare/report.txt) as
+# described in docs/emulator-pack-plan.md, phase 4. The video lists its sets
+# the suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
+#
+# The evidence (orc-a690be7, 2026-10-28): one version of the disc. Every
+# set's Disc Mapper reads the same disc identity over the whole side (CAV
+# side 2, user code 1992, CX off, Amendment 2 present, sound bilingual,
+# pictures 1-51000), and every pair of EFM images holds the same bytes
+# wherever both recovered a sector. Source Alignment finds two stamper
+# groups, which are shared noise, not content: A = DS1 DS2 DS4, B = DS3 DS5.
+# DS3 is soft (5-6 MHz response 0.09), as on the first side; the others are
+# 0.92-1.08. Its noise model is trusted, and predicts σ 2.49 for the
+# Weighted stack of all five, against 3.95 for the best single set.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS5 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid), with the fewest padding frames (2). The rest by
+  # what each adds, the predicted stack σ without it (Source Alignment,
+  # a690be7, over all five), and its share of the weight: DS5 3.04 (33%), DS2
+  # 2.78 (29%), DS1 2.72 (25%), DS4 2.57 (11%). The next choice of reference
+  # is DS1 (3 padding frames).
+  sets: [DS5, DS2, DS1, DS4]
+  dropped:
+    # DS3 adds least (2.5, 2% of the weight): leaving it out costs 0.01 of
+    # the predicted σ. As on the first side, its capture chain has lost the
+    # fine detail the other four carry, which stacking it with them would
+    # blur.
+    - set: DS3
+      reason: soft (5-6 MHz response 0.09), and adds least; stacking it would blur the detail the sharp sets carry
+
+vfs:
+  # By data loss after C2: DS4 0.0446%, DS2 0.0575%, DS3 0.0777%, DS1
+  # 0.1654%, DS5 0.1860%. The five agree wherever two of them recovered a
+  # sector, and stacked they recover every sector the filesystem depends on
+  # (GOOD). DS3 is in the VFS though not the video: softness costs the
+  # picture, not the data, and DS3 alone recovered 14 of the sectors the
+  # filesystem needs, which no other set has.
+  sets: [DS4, DS2, DS3, DS1, DS5]
+  dropped: []
+  # Those 14 sectors rest on one capture, so the image cannot pass the
+  # bit-perfect test, which wants every needed sector from two. Each passed
+  # the EFM decoder's own error correction in DS3, and no set disagrees with
+  # it; only a second capture is missing. single-source accepts that, and
+  # nothing else: a needed sector still bad, or a split vote, still fails.
+  accept: single-source

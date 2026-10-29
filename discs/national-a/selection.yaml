@@ -1,0 +1,45 @@
+# National A: which sets go into the video and the VFS stacks, decided from
+# the compare stage's report (orc-<rev>/compare/report.txt) as described in
+# docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
+#
+# The evidence (orc-a690be7, 2026-10-29; DS1B, DS1's second pass, is not
+# mapped: map.orcprj says why): one version of the disc. Every pair of EFM
+# images holds the same bytes wherever both recovered a sector, and every
+# set's Disc Mapper reads the same disc identity over the whole side (CAV
+# side 1, user code 1986, CX off, Amendment 2 present, sound future_use) but
+# DS3, which reads no user code at all, its lead-in unseen. Source Alignment
+# finds three stamper groups, which are shared noise, not content: A = DS1
+# DS2 DS7 DS10 DS12, B = DS3 DS9 DS11, C = DS4 DS5 DS6 DS8. None is soft
+# (5-6 MHz response 0.97-1.16). Its noise model is trusted, and predicts
+# σ 8.15 for the Weighted stack of all twelve, against 14.04 for the best
+# single set.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS8 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid), with 4 padding frames. The rest by what each
+  # adds, the predicted stack σ without it (Source Alignment, a690be7, over
+  # all twelve): DS3 8.19, DS11 8.18, DS9 8.18, DS4 8.17, DS5 8.16, DS1, DS2,
+  # DS7, DS12, DS6 and DS10 8.16. Most of each set's noise (σ 13.5-14.2) is
+  # its stamper group's, which the group's sets share, against 3.9-7.1 of
+  # its own; so the stack gains by having all three groups, and no one set
+  # moves it by more than 0.04. The next choice of reference is DS7 (2
+  # padding frames). DS9 has 4 gaps in its picture numbering too wide to pad,
+  # between pictures 52962 and 53865, and its timeline is not continuous
+  # across them; DS12's player skipped through pictures 52047-53969.
+  sets: [DS8, DS3, DS11, DS9, DS4, DS5, DS1, DS2, DS7, DS12, DS6, DS10]
+  dropped: []
+
+vfs:
+  # By data loss after C2: DS7 0.0609%, DS10 0.1074%, DS12 0.1089%, DS8
+  # 0.1131%, DS1 0.1246%, DS2 0.1368%, DS6 0.1790%, DS5 0.2143%, DS4
+  # 0.2474%, DS3 0.4269%, DS9 0.5322%, DS11 0.5648%. The twelve agree
+  # wherever two of them recovered a sector, and stacked they recover every
+  # sector the filesystem depends on (GOOD), each from two sets or more, and
+  # 94 that DS7, the best set alone, lacks.
+  sets: [DS7, DS10, DS12, DS8, DS1, DS2, DS6, DS5, DS4, DS3, DS9, DS11]
+  dropped: []

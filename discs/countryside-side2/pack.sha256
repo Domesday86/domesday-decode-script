@@ -1,0 +1,14 @@
+# Countryside Side 2: the reference SHA-256 of the stacked VFS image and its
+# bad sector map, recorded once the image passed the test its selection asks
+# for (docs/emulator-pack-plan.md, phase 6). Every later vfs stage must match.
+#
+# Recorded 2026-10-28 from vfs-41ab10c: DS4 DS2 DS3 DS1 DS5 at decode-orc
+# a690be7, ld-decode 6148260. 332089344 bytes, 162153 EFM sectors; 125221
+# listed bad, all before the filesystem (139) or in free space (125082).
+# Complete, not bit-perfect (vfs.accept: single-source): 14 sectors the
+# filesystem needs, EFM 42142-42143 42160-42161 42166-42167 42175-42176
+# 42184-42185 42193-42194 42250-42251, all within DATA1, were recovered by
+# DS3 alone; each passed the EFM decoder's error correction, and no set
+# disagrees with it.
+976dc4f9a01ccf7e10e36ac1947db8c20545182c9992f47d75ea63258edfbc85  countryside_s2.dat
+2dfe166c949146113c26b424898cac1f664b7bb789a355c4f09aef37eacf2faf  countryside_s2.dat.bsm

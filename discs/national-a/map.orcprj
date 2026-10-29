@@ -1,0 +1,492 @@
+# ORC Project File
+# Version: 2.0
+#
+# National A, every set: each decode through a Disc Mapper frame map, then
+# all of them into one Source Align, for the selection report (phase 4).
+# Nothing is stacked or written; the project has no sink. build-pack.sh's map
+# stage copies this beside its outputs, points each source at its set's
+# decode with orc-cli nodes set, and runs orc-cli tools refresh, which maps
+# every set and then aligns them.
+#
+# Each source is labelled with its set id, as in decode-national-a.sh's SETS
+# table, and its frame map "<set> map". A set that cannot be mapped is
+# dropped from the map stage by deleting its source and frame map here. DS1B,
+# DS1's second pass (pictures 39001-54000), is: Source Alignment compares the
+# captures only over frames every source holds, and DS1 ends where DS1B
+# begins, so with both in nothing is compared; and DS1B's EFM image puts data
+# at sectors from 146, which a capture from picture 39001 cannot hold, so
+# vfs-stacker refuses to stack it with the rest. Eleven other sets hold its
+# pictures to 50852, and six (DS2, DS4-DS8) all of them to 54000. The
+# refresh tools are recorded under tool_refresh:
+# field_mapping on every frame map (lead-in and lead-out kept),
+# source_alignment on Align (pad_for_alignment).
+
+project:
+  name: National A map
+  version: 2.0
+  video_format: PAL
+  source_format: Composite
+  amplitude_unit: 10bit
+dag:
+  nodes:
+    - id: 1
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS1
+      x: 50
+      y: 50
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 2
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS2
+      x: 50
+      y: 150
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 3
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS3
+      x: 50
+      y: 250
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 4
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS4
+      x: 50
+      y: 350
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 5
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS5
+      x: 50
+      y: 450
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 6
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS6
+      x: 50
+      y: 550
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 7
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS7
+      x: 50
+      y: 650
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 8
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS8
+      x: 50
+      y: 750
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 9
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS9
+      x: 50
+      y: 850
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 10
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS10
+      x: 50
+      y: 950
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 11
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS11
+      x: 50
+      y: 1050
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 12
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS12
+      x: 50
+      y: 1150
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 13
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS1 map
+      x: 275
+      y: 50
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 14
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS2 map
+      x: 275
+      y: 150
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 15
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS3 map
+      x: 275
+      y: 250
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 16
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS4 map
+      x: 275
+      y: 350
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 17
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS5 map
+      x: 275
+      y: 450
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 18
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS6 map
+      x: 275
+      y: 550
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 19
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS7 map
+      x: 275
+      y: 650
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 20
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS8 map
+      x: 275
+      y: 750
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 21
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS9 map
+      x: 275
+      y: 850
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 22
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS10 map
+      x: 275
+      y: 950
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 23
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS11 map
+      x: 275
+      y: 1050
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 24
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS12 map
+      x: 275
+      y: 1150
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 25
+      stage: source_align
+      node_type: COMPLEX
+      display_name: Source Align
+      user_label: Align
+      x: 500
+      y: 50
+      tool_refresh:
+        tool: source_alignment
+      parameters:
+        alignmentMap:
+          type: string
+          value: ""
+        alignmentMode:
+          type: string
+          value: pad_for_alignment
+  edges:
+    - from: 1
+      to: 13
+    - from: 2
+      to: 14
+    - from: 3
+      to: 15
+    - from: 4
+      to: 16
+    - from: 5
+      to: 17
+    - from: 6
+      to: 18
+    - from: 7
+      to: 19
+    - from: 8
+      to: 20
+    - from: 9
+      to: 21
+    - from: 10
+      to: 22
+    - from: 11
+      to: 23
+    - from: 12
+      to: 24
+    - from: 13
+      to: 25
+    - from: 14
+      to: 25
+    - from: 15
+      to: 25
+    - from: 16
+      to: 25
+    - from: 17
+      to: 25
+    - from: 18
+      to: 25
+    - from: 19
+      to: 25
+    - from: 20
+      to: 25
+    - from: 21
+      to: 25
+    - from: 22
+      to: 25
+    - from: 23
+      to: 25
+    - from: 24
+      to: 25

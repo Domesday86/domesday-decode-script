@@ -31,6 +31,16 @@
 # Once decodes passes, TMPDIR is pointed at decode-script/.work on it, so
 # scratch files go to the share and not to local disk.
 
+# Every script sources this first, so this is where an old bash is caught.
+# macOS's /bin/bash is 3.2, which "#!/usr/bin/env bash" finds outside the dev
+# shell; there the scripts fail later and obscurely (an empty array is unbound
+# under set -u, and ${1,,} is a syntax error).
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  printf '%s: needs bash 4 or later, and this is bash %s; run it inside the dev shell (nix develop), or as: nix develop -c %s\n' \
+    "${0##*/}" "${BASH_VERSION:-unknown}" "$0" >&2
+  exit 1
+fi
+
 SHARES_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/util.sh
 . "$SHARES_ROOT/lib/util.sh"

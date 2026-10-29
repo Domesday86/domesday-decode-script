@@ -1,9 +1,10 @@
 # Plan: from captures to a VP415e disc pack
 
 Status: **phases 0–7 are built, and `selection.yaml` is decided.** The
-Volcanoes pack awaits its hand check on the player, the last of phase 7's
-exit criteria. Phase 8 has started, with Domesday Community South and the
-two EcoDisc sides.
+Volcanoes pack passed its hand check on the player on 2026-10-29, the last of
+phase 7's exit criteria. Phase 8 is under way: Domesday Community South and
+National A and the two EcoDisc and two Countryside sides are complete, each
+checked on the player.
 Volcanoes is the pilot disc; the other discs follow once the process is
 proven on it.
 
@@ -1283,6 +1284,14 @@ its hash is recorded in `discs/volcanoes/pack.sha256`.
   `selection.yaml` turns the test's failures into notes. The verdict is then
   `incomplete`. No other key is needed: the other options change the
   captures, the decodes or the set projects, which are already stage inputs.
+- **A needed sector on one capture.** An image can be whole, with tests 1
+  and 2 passed and no vote split, and still fail test 3 because only one set
+  recovered some sector the filesystem needs: Countryside Side 2's DS3 alone
+  holds 14. `vfs.accept: single-source` accepts that and nothing else; a
+  needed sector still bad, or a split vote, still fails. The verdict is then
+  `complete`. vfs-stacker counts such sectors but does not say which they are,
+  so the stage lists every sector one set alone recovered, from the sets' bad
+  sector maps, in `check.txt` and `vfs.json`, and the pack report repeats it.
 - **The reference.** The stage writes `vfs.sha256`, the hashes of the `.dat`
   and the `.bsm`, in `sha256sum` form. Once an image has been reviewed, a
   person copies that file to `discs/<disc>/pack.sha256` and commits it; the
@@ -1562,6 +1571,82 @@ discs. The differences from Volcanoes:
   agree. The side's frame count is checked against 35,501 pictures, since
   three of its four captures are misnamed `..._00001-54000`. It decodes with
   `transform3d` throughout, as the phase 5 table says.
+
+**Under way: Countryside**, one pack per side, as for EcoDisc.
+
+- **Side 1** (`discs/countryside-side1`, stem `countryside_s1`) and **Side 2**
+  (`discs/countryside-side2`, stem `countryside_s2`), each from five
+  captures, one per set: every set has both sides. The two decode scripts,
+  `decode-countryside-side1.sh` and `decode-countryside-side2.sh`, are
+  `decode-ecodisc-side1.sh` with each side's set table, and replace the
+  two-sided `decode-countryside.sh`.
+- Both sides carry EFM, localised to about pictures 9000–11000 on the first
+  side and 9000–21000 on the second, so both packs have a VFS image and each
+  EFM check runs from picture 9000. Each frame count is checked against the
+  capture's file name: 54,085 pictures on the first side, 51,000 on the
+  second.
+- Their projects are EcoDisc Side 1's with the names changed. There is no
+  hand-built stack to compare with.
+- DS2's first side was captured with the player stalled on picture 52791 for
+  2,984 frames, so its decode is 3,209 frames longer than the side. The decode check counts
+  a long whole-side decode again without the frames that repeat the picture
+  before, which the Disc Mapper drops.
+- DS3 is soft on both sides (5-6 MHz response 0.09) and is left out of both
+  videos. It stays in both VFS stacks: on Side 2 it alone recovered 14
+  sectors the filesystem needs, which is why `vfs.accept: single-source`
+  exists. They are seven pairs, EFM 42142–42251, all within `DATA1`.
+- Both packs are built and pass their checks: Side 1 is bit-perfect (pack
+  `4dbbdd206654fe8e`), Side 2 complete (pack `b9fb322187cfd621`). Both
+  passed the hand check on the player on 2026-10-29.
+
+**Complete: National A** (`discs/national-a`, stem `dd_natA_stack`).
+
+- Thirteen captures: one per set, but DS1's, which is two passes. The player
+  lost the disc at picture 37480, and the second pass picks up at 39001. The
+  decode script `decode-national-a.sh` is `decode-community-south.sh` with
+  this side's set table, and it lists the two passes as two sets, `DS1` and
+  `DS1B`. National A has left `decode-domesday.sh`'s table, as Community
+  South did.
+- DS1B is decoded but left out of the map stage, so of both stacks. With it
+  in, Source Alignment compared nothing: it compares the captures only over
+  frames every source holds, and DS1 ends where DS1B begins. Its EFM image
+  also puts data at sectors from 146, which a capture from picture 39001
+  cannot hold, and vfs-stacker refused to stack it with the rest, which
+  agree with each other everywhere. Eleven other sets hold its pictures to
+  50852, and six all of them to 54000.
+- DS3 reads no user code over the whole side (the others read 1986), and its
+  lead-in is not seen; its EFM agrees with every other set's. The video
+  stage expects the user code its sets agree on, and a set that read none
+  no longer counts against it: a code not read is not a different one. Two
+  sets reading different codes still leave it unknown, and stop the stage.
+- The selection stacks all twelve mapped sets in both the video and the
+  VFS. Most of each set's noise is its stamper group's (σ 13.5-14.2,
+  against 3.9-7.1 of its own), so the stack gains by having all three
+  groups; it is predicted at σ 8.15, against 14.04 for the best set alone.
+- The EFM data runs from about picture 50 to 40900 (the hand-built image's
+  good sectors run from 147 to 122676), so the EFM check runs from picture
+  100.
+- DS7 is in the table. On Community South ld-decode could not finish DS7's
+  decode; on this side it finished and passed.
+- Four decodes failed the frame count at first, which takes each capture's
+  last picture from its file name. DS3's player held pictures for 557 frames
+  (the longest #50831, for 359), so the check counts a long decode again
+  without the held frames, as on Countryside. Three file names give the
+  wrong end, so `LAST_PICTURE` in the decode script gives the measured one:
+  DS9 ends at 51423 (named 53000), DS11 at 51587 (named 51000), and DS12 is
+  whole to 52046, after which its player skipped about 78 pictures at a
+  time to the end of the side.
+- The baselines are the hand-built stack in `vp415e_projects/NationalA_output`
+  (DS4, DS6, DS8 and DS10; CAV side 1, pictures 1–54000, user code 1986).
+- `map.orcprj` and the set projects are Community South's with this side's
+  sets; `selection.yaml` and `stack.orcprj` follow the compare report.
+- Built 2026-10-29: pack `006f2bccc9d47698`. The video stack reads one run
+  over pictures 1-54000 (the baseline has three), with no undecoded frames;
+  its sample measures white SNR 39.49 dB, black PSNR 36.35 dB. The VFS image
+  is bit-perfect (GOOD; no needed sector rests on one set) and holds the
+  hand-built image's bytes in all 120241 sectors both recovered; its
+  reference is in `pack.sha256`. It passed the hand check on the player on
+  2026-10-29.
 
 ## Decisions
 

@@ -183,9 +183,11 @@ video_noise_reduction() {
   printf '%s\n' "${a:-0}"
 }
 
-# vfs_accept: what the selection accepts of the VFS stack: "bit-perfect", or
-# "incomplete" when vfs.accept says a pack may ship with sectors the
-# filesystem needs still bad (served by vp415e as MEDIUM ERROR).
+# vfs_accept: what the selection accepts of the VFS stack: "bit-perfect";
+# "single-source" when vfs.accept says some of the sectors the filesystem
+# needs may rest on one capture, every one of them recovered; or
+# "incomplete" when it says a pack may ship with sectors the filesystem needs
+# still bad (served by vp415e as MEDIUM ERROR).
 vfs_accept() {
   local a=""
   [ ! -f "$SELECTION" ] || a=$(yq -r '.vfs.accept // ""' "$SELECTION" 2>/dev/null)
@@ -237,8 +239,9 @@ player_check_for() {
 # nothing. Each stack names its sets in its order (the video's suggested
 # reference first, then by what each adds; the VFS's best first), from the
 # sets map.orcprj maps, each once, and lists every mapped set it leaves out
-# under dropped, with a reason. The VFS stack may also accept an incomplete
-# image, and the video may take a noise reduction. A side with no EFM has no
+# under dropped, with a reason. The VFS stack may also accept an image with
+# sectors on one capture, or an incomplete one, and the video may take a
+# noise reduction. A side with no EFM has no
 # VFS stack, and its selection names none.
 selection_problems() {
   local stack
@@ -262,8 +265,8 @@ selection_problems() {
             ($mapped[] | select(. as $s | ($sets + $dropped) | index($s) | not)
              | "\($stack) neither uses nor drops \(.)"),
             (.dropped[]? | select((.reason // "") == "") | "\($stack) drops \(.set) without a reason"),
-            (if has("accept") and ($stack != "vfs" or .accept != "incomplete")
-             then "\($stack) accept is \(.accept); only vfs takes one, and only incomplete" else empty end),
+            (if has("accept") and ($stack != "vfs" or ([.accept] | inside(["single-source", "incomplete"]) | not))
+             then "\($stack) accept is \(.accept); only vfs takes one, single-source or incomplete" else empty end),
             (if has("noise_reduction") and ($stack != "video" or (.noise_reduction | type) != "number" or .noise_reduction < 0)
              then "\($stack) noise_reduction is \(.noise_reduction); only video takes one, a number of dB" else empty end)
         end' "${mapped[@]}"
@@ -456,7 +459,9 @@ describe_compare() {
 # is an input too, as the values, not the stage. VIDEO_SETS is left as
 # "<set>|<cvbs>", VIDEO_MAP names the map stage's directory and VIDEO_EXPECT
 # holds the user code and Amendment 2 expected ("unknown" when the sets
-# disagree or were not read).
+# disagree or were not read). A set that read no user code over the whole
+# side does not count against one the others agree on: it is a code not
+# read, not a different one (National A's DS3, whose lead-in is not seen).
 describe_video() {
   local id ups=() ids=()
   describe_map; VIDEO_MAP="$STAGE_DIR"
@@ -468,9 +473,11 @@ describe_video() {
   done
   mapfile -t ids < <(selected_sets video)
   VIDEO_EXPECT=unknown
-  [ -f "$OUT/$ORC_DIR/compare/compare.json" ] && VIDEO_EXPECT=$(jq -r --args '[ .sets[] | select(.set | IN($ARGS.positional[])) | .metadata
-      | if . == null then "unread" else "\(.user_code // "none") \(.amendment2.present // false | if . then "present" else "absent" end)" end ]
-      | unique | if length == 1 and .[0] != "unread" then .[0] else "unknown" end' \
+  [ -f "$OUT/$ORC_DIR/compare/compare.json" ] && VIDEO_EXPECT=$(jq -r --args '[ .sets[] | select(.set | IN($ARGS.positional[])) | .metadata ] as $m
+      | ([ $m[] | .user_code | select(. != null) ] | unique) as $codes
+      | ([ $m[] | .amendment2.present // false ] | unique) as $a2
+      | if ($m | length) == 0 or any($m[]; . == null) or ($codes | length) > 1 or ($a2 | length) != 1 then "unknown"
+        else "\($codes[0] // "none") \(if $a2[0] then "present" else "absent" end)" end' \
       "${ids[@]}" < "$OUT/$ORC_DIR/compare/compare.json" 2>/dev/null) || VIDEO_EXPECT="unknown"
   stage_begin video "$OUT/$ORC_DIR/video"
   for id in "${ups[@]}"; do
@@ -1833,7 +1840,10 @@ video_weights() {
 #
 # An image that fails stops the stage, with the bad sectors, the objects they
 # fall in and which mapped sets recover any of them, unless the selection
-# accepts an incomplete image (vfs.accept). Once an image has passed, its hash
+# accepts an incomplete image (vfs.accept: incomplete). An image whose only
+# failure is that some needed sectors rest on one capture is accepted by
+# vfs.accept: single-source, which lists those sectors; its verdict is
+# "complete" rather than bit-perfect. Once an image has passed, its hash
 # goes in VFS_REFERENCE, by hand after review; every later stack must match
 # it. A dry run of vfs-stacker over this image and the hand-built one
 # (VFS_BASELINE) shows whether the two hold the same bytes wherever both
@@ -1899,7 +1909,7 @@ build_vfs() {
 # run the checks, write check.txt, vfs.json and vfs.sha256 to their stage_tmp
 # names, and return non-zero if any failed.
 check_vfs() {
-  local dir="$1" rc="$2" vrc="$3" brc="$4" dat="$1/$5" out fails=0 level text accept hash bsmhash size
+  local dir="$1" rc="$2" vrc="$3" brc="$4" dat="$1/$5" out fails=0 level text accept hash bsmhash size single
   local -a sets=() mapped=()
   out=$(stage_tmp check.txt) || return 1
   ok()   { printf 'ok    %s\n' "$*"; }
@@ -1954,23 +1964,34 @@ check_vfs() {
     while IFS=$'\t' read -r level text; do
       [ "$level" != fail ] || [ "$accept" != incomplete ] || level=note
       "$level" "$text"
-    done < <(jq -r '
+    done < <(jq -r --arg accept "$accept" '
       def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
       .stack as $s | .verify as $v
+      | ($s.majority == 0 and $s.split == 0 and $s.contested == 0 and $s.disagreements == 0) as $votes
       | check($s.result.verdict == "GOOD"; "1. vfs-stacker: GOOD, every sector the filesystem depends on was recovered";
               "1. vfs-stacker: \($s.result.verdict // "no result"): \($s.result.text // "see vfs-stacker.txt")"),
         check($v.passed and $v.located and ($v.roles.allocated_unlisted // 1) == 0 and $v.truncated == false;
               "2. vfs-verifier: passed; the filesystem is located and whole, and all \($v.objects) object(s) are free of bad sectors";
               "2. vfs-verifier: \(if $v.passed then "passed" else "failed" end); located \($v.located), free space map \($v.fsm), root directory \($v.directory), \($v.objects_damaged) object(s) damaged, \($v.roles.allocated_unlisted) bad sector(s) in allocated space no object lists\(if $v.truncated then ", truncated" else "" end)"),
-        check(($s.vital_only == 0) and $s.majority == 0 and $s.split == 0 and $s.contested == 0 and $s.disagreements == 0;
+        (if $s.vital_only > 0 and $votes and $accept == "single-source"
+         then "note\t3. \($s.vital_only) sector(s) the filesystem depends on rest on one set, which the selection accepts (vfs.accept: single-source), and no vote was split"
+         else check(($s.vital_only == 0) and $votes;
               "3. no sector the filesystem depends on rests on one set, and no vote was split";
-              "3. \($s.vital_only) sector(s) the filesystem depends on rest on one set; \($s.majority) majority vote(s), \($s.split) split, \($s.contested) contested consensus, \($s.disagreements) sector(s) the sets disagree on"),
+              "3. \($s.vital_only) sector(s) the filesystem depends on rest on one set; \($s.majority) majority vote(s), \($s.split) split, \($s.contested) contested consensus, \($s.disagreements) sector(s) the sets disagree on") end),
         "note\tbad sectors by role: \($s.roles | to_entries | map("\(.key | gsub("_"; " ")) \(.value)") | join(", "))",
         "note\trecovered: \($s.unanimous) by agreement, \($s.consensus) by consensus (\($s.consensus_two) on two sets); stacking gained \($s.recovered_over_best // 0) over the best set alone (\($s.best_single.set // "?"), whose image is \($s.best_single.bad // "?") bad)",
         (.sets[] | select(.only_good > 0) | "note\t\(.set) alone recovered \(.only_good) sector(s), \(.vital_only) of them needed by the filesystem"),
         (if $v.fill_unflagged > 0 then "note\t\($v.fill_unflagged) recovered sector(s) within objects are blank fill: blank on the disc, or lost without the decoder noticing, which vfs-verifier cannot tell apart" else empty end),
         (if $v.unaccounted > 0 then "note\t\($v.unaccounted) used sector(s) belong to no object in the root directory (allocation slack, or subdirectories, which vfs-verifier does not descend)" else empty end),
         (if $v.displaced > 0 then "fail\t\($v.displaced) free extent(s) disagree with the content: a run of sectors may have been lost or duplicated" else empty end)' "$dir/digest.json")
+
+    # The sectors one set alone recovered, needed by the filesystem or not:
+    # vfs-stacker counts the needed ones but does not say which they are. The
+    # list goes in vfs.json for the pack report.
+    single=$(vfs_single_source "${sets[@]}") || fail "could not list the sectors one set alone recovered"
+    if [ "$accept" = single-source ] && [ -n "$single" ]; then
+      while IFS= read -r text; do note "$text"; done <<< "$single"
+    fi
 
     # What is still bad, for deciding what to do (phase 6, step 4).
     if [ "$(jq '.stack.vital | length' "$dir/digest.json" 2>/dev/null || echo 0)" != 0 ]; then
@@ -2020,11 +2041,13 @@ check_vfs() {
           end' "$dir/digest.json")
     fi
 
-    jq --arg accept "$accept" --argjson known "$(vfs_baseline_differs)" '
+    jq --arg accept "$accept" --argjson known "$(vfs_baseline_differs)" --arg single "$single" '
       { sets, accept: $accept, image, stack, verify, baseline: (.baseline + { known: $known }),
-        bit_perfect: (.stack.result.verdict == "GOOD" and .verify.passed and .stack.vital_only == 0
-                      and .stack.majority == 0 and .stack.split == 0 and .stack.contested == 0 and .stack.disagreements == 0) }
-      | .verdict = (if .bit_perfect then "bit-perfect" else "incomplete" end)' "$dir/digest.json" > "$(stage_tmp vfs.json)" \
+        single_source: ($single | split("\n") | map(select(. != ""))),
+        complete: (.stack.result.verdict == "GOOD" and .verify.passed
+                   and .stack.majority == 0 and .stack.split == 0 and .stack.contested == 0 and .stack.disagreements == 0) }
+      | .bit_perfect = (.complete and .stack.vital_only == 0)
+      | .verdict = (if .bit_perfect then "bit-perfect" elif .complete then "complete" else "incomplete" end)' "$dir/digest.json" > "$(stage_tmp vfs.json)" \
       || fail "could not write vfs.json"
     [ "$fails" != 0 ] || note "verdict: $(jq -r .verdict "$dir/vfs.json.partial")"
 
@@ -2134,6 +2157,38 @@ vfs_coverage() {
     ($d[0].sets | map(.set)) as $stack
     | { runs: [ $d[0].stack.vital[] | { text: "\(if .from == .to then "\(.from)" else "\(.from)-\(.to)" end) \(.where)" } ],
         sets: map(. + { in_stack: (.set as $s | $stack | index($s) != null) }) }'
+}
+
+# vfs_single_source <set> ...: one line per set of the VFS stack that alone
+# recovered any sector its image reaches, with those sectors as ranges. A
+# sector counts as recovered by a set when it lies within the set's image and
+# is not in its bad sector map.
+vfs_single_source() {
+  local id img
+  local -a args=()
+  for id; do
+    img="$OUT/$ORC_DIR/sets/$id/${id,,}_efm.dat"
+    [ -f "$img" ] || continue
+    args+=("$id" "$(( $(stat -L -c %s -- "$img" 2>/dev/null || stat -L -f %z -- "$img") / 2048 ))" "$img.bsm")
+  done
+  awk -v spec="${args[*]}" '
+    BEGIN {
+      k = split(spec, a, " ")
+      for (i = 1; i <= k; i += 3) {
+        m++; id[m] = a[i]; len[m] = a[i + 1] + 0
+        if (len[m] > top) top = len[m]
+        while ((getline line < a[i + 2]) > 0) if (line ~ /^[ \t]*[0-9]+[ \t]*$/) bad[m, line + 0] = 1
+      }
+      for (s = 0; s < top; s++) {
+        n = 0
+        for (j = 1; j <= m; j++) if (s < len[j] && !((j, s) in bad)) { n++; w = j }
+        if (n != 1) continue
+        if ((w in last) && last[w] == s - 1) { to[w] = s } else { if (w in last) out[w] = out[w] range(from[w], to[w]) " "; from[w] = s; to[w] = s }
+        last[w] = s; cnt[w]++
+      }
+      for (j = 1; j <= m; j++) if (cnt[j]) printf "%s alone recovered %d sector(s): %s%s\n", id[j], cnt[j], out[j], range(from[j], to[j])
+    }
+    function range(f, t) { return f == t ? f : f "-" t }'
 }
 
 # --- quality: the stacked video, measured as each set is -------------------

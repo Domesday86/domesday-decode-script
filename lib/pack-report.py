@@ -488,6 +488,17 @@ def table(header, rows, align=None, widths=None):
 # where a PDF is awkward (by an AI, say). The graphs are the PDF's own SVGs,
 # linked from the report's working directory; their text is kept as text.
 
+def single_source(vfs):
+    """The needed sectors that rest on one set, as one line, or None when there are none."""
+    n = (vfs.get("stack") or {}).get("vital_only") or 0
+    if not n:
+        return None
+    lines = vfs.get("single_source") or []
+    return (f"{n} sector(s) the filesystem needs were recovered by one set alone"
+            + (f" (vfs.accept: {vfs['accept']})" if vfs.get("accept") == "single-source" else "")
+            + ("; " + "; ".join(lines) if lines else ""))
+
+
 def vfs_baseline(b):
     """The vfs stage's comparison with the hand-built image, as one line, or None without one."""
     if not b or b.get("compared") is None:
@@ -787,6 +798,7 @@ def markdown(data, graphs):
             ("Filesystem", ("vfs-verifier passes the image" if v.get("verify_passed") else "vfs-verifier does not pass the image")
                            + f": free space map {v.get('fsm')}; directory {v.get('directory')}; {v.get('objects')} objects, "
                              f"{v.get('objects_damaged')} damaged"),
+            *([("On one set", v["single_source"])] if v.get("single_source") else []),
             *([("Hand-built image", v["baseline"])] if v.get("baseline") else []),
             ("Image", f"`{v.get('image_sha256')}`"), ("Bad sector map", f"`{v.get('bsm_sha256')}`")])
         w("### 9.3 Where the bad sectors fall")
@@ -1416,7 +1428,8 @@ def main():
                 "verify_passed": bool(vrf.get("passed")), "fsm": vrf.get("fsm", "–"), "directory": vrf.get("directory", "–"),
                 "objects": fmt(vrf.get("objects")), "objects_damaged": fmt(vrf.get("objects_damaged")),
                 "image_sha256": (vfs.get("image") or {}).get("sha256", "–"), "bsm_sha256": (vfs.get("image") or {}).get("bsm_sha256", "–"),
-                "baseline": vfs_baseline(vfs.get("baseline")), "bit_perfect": bool(vfs.get("bit_perfect"))},
+                "baseline": vfs_baseline(vfs.get("baseline")), "bit_perfect": bool(vfs.get("bit_perfect")),
+                "single_source": single_source(vfs)},
         "sector_counts": table(["set", "not recovered"], [[r["set"], fmt(len(r["bad"]))] for r in sector_rows]),
         "stages": stages,
         "compare_report": read_text(Path(man["compare_dir"]) / "report.txt"),

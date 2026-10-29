@@ -1,0 +1,71 @@
+# ORC Project File
+# Version: 2.0
+#
+# National A, one disc set: the EFM data track decoded to an ECMA-130
+# image, a bad sector map and a decode report. build-pack.sh's set stage copies
+# this beside its outputs and points "Disc" at the set's decode and "EFM" at
+# <set>_efm.dat with orc-cli nodes set; nothing else changes. Run with
+# --process, which triggers every sink, so this project holds no other sink.
+#
+# The EFM sink reads the source as decoded, not through a frame map, as in the
+# hand-built Domesday National A.orcprj. doubt_erasure_threshold stays 0, which
+# keeps the decode bit-exact (orc-cli stages help EFMSink has the
+# measurements).
+
+project:
+  name: National A set EFM
+  version: 2.0
+  video_format: PAL
+  source_format: Composite
+  amplitude_unit: 10bit
+dag:
+  nodes:
+    - id: 1
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: Disc
+      x: 50
+      y: 50
+      parameters:
+        input_path:
+          type: string
+          value: ""
+        y_path:
+          type: string
+          value: ""
+        c_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+    - id: 2
+      stage: EFMSink
+      node_type: SINK
+      display_name: EFM Decoder Sink
+      user_label: EFM
+      x: 275
+      y: 50
+      parameters:
+        output_path:
+          type: string
+          value: ""
+        decode_mode:
+          type: string
+          value: data
+        no_timecodes:
+          type: bool
+          value: false
+        output_metadata:
+          type: bool
+          value: true
+        doubt_erasure_threshold:
+          type: int32
+          value: 0
+        report:
+          type: bool
+          value: true
+  edges:
+    - from: 1
+      to: 2

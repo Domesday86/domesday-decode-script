@@ -307,6 +307,7 @@ Each set's EFM is decoded to an image of 2048-byte sectors and a map of the sect
   ("Not recovered", [#data.vfs.bad: #data.vfs.unrecovered bad in every set, #data.vfs.padded padding; #data.vfs.union sectors were recovered by some set]),
   ("Over the best set", [#data.vfs.recovered_over_best sector(s) recovered that the best single set (#data.vfs.best) lacks]),
   ("Filesystem", [#if data.vfs.verify_passed [vfs-verifier passes the image] else [vfs-verifier does not pass the image]: free space map #(data.vfs.fsm); directory #(data.vfs.directory); #data.vfs.objects objects, #data.vfs.objects_damaged damaged]),
+  ..if data.vfs.single_source != none { (("On one set", data.vfs.single_source),) },
   ..if data.vfs.baseline != none { (("Hand-built image", data.vfs.baseline),) },
   ("Image", mono(data.vfs.image_sha256)),
   ("Bad sector map", mono(data.vfs.bsm_sha256)),

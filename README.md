@@ -94,7 +94,7 @@ Every script takes the same core flags and environment variables:
 | `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
 | `--force` | | refuse | overwrite an existing decode |
-| `--adopt` | | | the pack scripts only (Volcanoes, Community South, EcoDisc): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
+| `--adopt` | | | the pack scripts only (Volcanoes, Community South, National A, EcoDisc, Countryside): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
 | `-n, --dry-run` | | | resolve starts and print the commands, decode nothing |
 | `--list` | | | list what the selectors chose and exit |
 
@@ -111,7 +111,8 @@ than with `--library` alone.
 Every script's output root sits under one folder,
 `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/`, in a subfolder named after the
 script's disc or pack: `domesday`, `volcanoes`, `community-south`,
-`ecodisc-side1`, `ecodisc-side2`, `city`, `countryside` and `north-polar`.
+`national-a`, `ecodisc-side1`, `ecodisc-side2`, `city`, `countryside-side1`,
+`countryside-side2` and `north-polar`.
 
 Output goes to `<output root>/<set>/<decoder>/<capture basename>.*`, where
 `<decoder>` names the ld-decode commit that produced the decode — see [Which
@@ -222,10 +223,11 @@ National disc carries **A** and **B**. Three sides of every set are CAV;
 **National B is CLV**.
 
 Each VP415e pack has its own decode script, which stamps its decodes for
-`build-pack.sh`. **Community South** has one, `decode-community-south.sh`
-(see [Building a VP415e pack](#building-a-vp415e-pack)), so it is no longer in
-this script's table, and naming it here says so. The other three sides stay
-here, 12 sets × 3 sides, until each gets a pack script of its own.
+`build-pack.sh`. **Community South** and **National A** have one each,
+`decode-community-south.sh` and `decode-national-a.sh` (see [Building a VP415e
+pack](#building-a-vp415e-pack)), so they are no longer in this script's table,
+and naming either here says so. The other two sides stay here, 12 sets × 2
+sides, until each gets a pack script of its own.
 
 ```sh
 nix develop
@@ -248,45 +250,47 @@ A selector picks sides, and selectors add together:
 
 | Selector | Means |
 | --- | --- |
-| *(none)* | every side of every set — 37 decodes |
+| *(none)* | every side of every set — 24 decodes |
 | `DS4` | every side of disc set 4 |
-| `DS4:NationalA` | one side of one set |
+| `DS4:NationalB` | one side of one set |
 | `NationalB` | that side of every set |
-| `NB` | the same, by short name (`CN` `NA` `NB`) |
+| `NB` | the same, by short name (`CN` `NB`) |
 
 `--side` narrows whatever the selectors chose rather than adding to it, so
 `--side NB DS4 DS7` and `DS4:NB DS7:NB` are the same request. Set and side names
 are matched regardless of case, and naming a side twice still decodes it once.
 
-The sides come out in table order — set by set, and within a set North, A,
+The sides come out in table order — set by set, and within a set North, then
 B — however the selectors were written.
 
 ### Sides captured in more than one pass
 
 A side the player could not read in one pass was captured in several, and each
-part is a decode in its own right, so a set can have more than four decodes.
-`DS1`'s National A is the one such side in the library: the player lost the disc
-at picture 37480 and a second pass picks up at 39001.
-
-Both parts are selected together — `DS1:NationalA` means the whole side — and
-`--list` numbers them:
+part is a decode in its own right. `DS1`'s National A is the one such side in
+the library: the player lost the disc at picture 37480 and a second pass picks
+up at 39001. It is decoded by `decode-national-a.sh`, which lists the two parts
+as two sets, `DS1` and `DS1B`:
 
 ```
-$ ./decode-domesday.sh --list DS1
-DS1:CommunityNorth       CAV  picture #1      …_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf
-DS1:NationalA part 1/2   CAV  picture #1      …_NationalA_PP_20191014_CAV_PAL_00001-37480.ldf
-DS1:NationalA part 2/2   CAV  picture #39001  …_NationalA_PP_20191014_CAV_PAL_39000-54000.ldf
-DS1:NationalB            CLV  picture #1      …_NationalB_PP_20191014_CLV_PAL_00-60.ldf
+$ ./decode-national-a.sh --list
+DS1   CAV PAL  picture #1      …_NationalA_PP_20191014_CAV_PAL_00001-37480.ldf
+DS1B  CAV PAL  picture #39001  …_NationalA_PP_20191014_CAV_PAL_39000-54000.ldf
+DS2   CAV PAL  picture #1      …_NationalA_PP_20191014_CAV_PAL_00001-54000.ldf
+…
 ```
 
-Part 2 begins at the very head of its capture, and the first frame ld-decode's
+`decode-domesday.sh` still decodes a side in parts, in table order, and
+numbers them in `--list` ("part 1/2"), though no side left in its table has
+more than one.
+
+`DS1B` begins at the very head of its capture, and the first frame ld-decode's
 CVBS writer will accept there is three frames in (see [Keeping the lead-in in
 the output](#keeping-the-lead-in-in-the-output)). A very short `--frames` never
 reaches it, and ld-decode then exits cleanly having written an empty file — so
 the scripts treat an empty video file as a failed decode and say so:
 
 ```
-$ ./decode-domesday.sh -f 2 DS1:NationalA
+$ ./decode-national-a.sh -f 2 DS1B
 ld-decode wrote an empty …_39000-54000.cvbs: its writer never reached a frame it
 could open the file on. This side's output opens later than --frames 2 reaches;
 decode more frames.
@@ -298,7 +302,7 @@ clear.
 The "picture #" column is what the start search converges on — the first frame
 of that capture's content. It is 1 for a capture that begins at the head of the
 side, and the part's own first picture for one that picks up mid-disc. That
-number cannot be taken from the filename's frame range: the range on part 2
+number cannot be taken from the filename's frame range: the range on `DS1B`
 reads `39000-54000`, but its first picture is 39001, and a search told to find
 39000 never lands on it. It is in the table instead.
 
@@ -312,12 +316,11 @@ Decodes go to `<output>/<set>/<decoder>/<capture basename>.*`:
     └── ld-decode-12be078/
         ├── Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.cvbs
         ├── Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.start
-        ├── Domesday_DD86-DS1_NationalA_PP_20191014_CAV_PAL_00001-37480.cvbs
-        ├── Domesday_DD86-DS1_NationalA_PP_20191014_CAV_PAL_39000-54000.cvbs
+        ├── Domesday_DD86-DS1_NationalB_PP_20191014_CLV_PAL_00-60.cvbs
         └── decoder.txt
 ```
 
-The capture basename already names the set and the side, and both parts of a
+The capture basename already names the set and the side, and the parts of a
 split side keep their own frame ranges, so nothing collides.
 
 ### Flags
@@ -780,37 +783,42 @@ its content frame, so its output opens nine frames into the decode; `--frames
 
 ## Decoding the Countryside disc
 
-`decode-countryside.sh` decodes the PAL BBC AIV **Countryside** disc (BBC,
-1988), a double-sided interactive videodisc about agriculture, the environment
-and the rural community.
+The PAL BBC AIV **Countryside** disc (BBC, 1988) is a double-sided interactive
+videodisc about agriculture, the environment and the rural community. Each side
+is a VP415e pack of its own, so each has its own decode script, which checks
+and stamps its decodes for `build-pack.sh` as
+[Volcanoes'](#checked-and-stamped-decodes) does:
+
+| Side | Script | Pack | Captures |
+| --- | --- | --- | --- |
+| Side 1 | `decode-countryside-side1.sh` | `countryside-side1`, stem `countryside_s1` | DS1–DS5 |
+| Side 2 | `decode-countryside-side2.sh` | `countryside-side2`, stem `countryside_s2` | DS1–DS5 |
 
 The library holds five sets — five independent captures of the disc, made
 between 2019 and 2021 — and every one has **both sides**, so there are **ten
-captures**. Each is decoded in its own right, so they can be compared against
-each other or combined.
+captures**, five per script. Each is decoded in its own right, so they can be
+compared against each other or combined.
 
 ```sh
 nix develop
-./decode-countryside.sh                       # all ten captures, first 1000 frames each
-./decode-countryside.sh --frames 30 DS1       # quick smoke test
-./decode-countryside.sh --frames all DS1:Side2  # one side in full
-./decode-countryside.sh --frames all S1 -j 2  # every first side, two at a time
-./decode-countryside.sh --frames all -j 2     # the whole disc, two at a time
-./decode-countryside.sh --list
+./decode-countryside-side1.sh --list              # the first side's five captures
+./decode-countryside-side1.sh --frames 30 DS1     # quick smoke test
+./decode-countryside-side1.sh --frames all DS3    # one set in full
+./decode-countryside-side2.sh --frames all -j 2   # the second side, two at a time
 ```
 
-Selectors work as they do for the other multi-sided scripts: `DS4` is every
-side of a set, `DS4:Side2` one side of one set, `Side2` (or `S2`) that side of
-every set, and they add together. `--side` narrows whatever the selectors chose.
-Set and side names are matched regardless of case. Output goes to
-`<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/countryside`.
+Sets are named `DS1` to `DS5`, matched regardless of case. With none named,
+every set the script lists is decoded. Output goes to
+`<output root>/<set>/<decoder>-<date>/<capture basename>.*`, with the output
+roots
+`/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/countryside-side1`
+and `.../countryside-side2`.
 
-### What the script asserts
+### What the scripts assert
 
 Every capture is PAL, is CAV on both sides, was made on an LD-V4300D, and
 carries EFM digital audio. Those are facts about the disc and the captures, so
-they are asserted in the script instead of offered as flags:
+they are asserted in the scripts instead of offered as flags:
 
 ```sh
 ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
@@ -819,8 +827,8 @@ ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
 Each was checked rather than assumed:
 
 - **CAV.** Probes every 1,000 pictures across both sides of DS1 and DS5 — 208
-  in all — read back exactly the CAV picture number aimed at, end to end. The format is still not passed: `ld-decode` reads it from the
-  VBI, and the table's format column records what it will find.
+  in all — read back exactly the CAV picture number aimed at, end to end. The
+  format is still not passed: `ld-decode` reads it from the VBI.
 - **LD-V4300D.** All ten captures carry the player's 8.4672MHz clock spur,
   29–49 dB above the local noise floor against 7–11 dB at neighbouring
   frequencies, so the coherent subtraction has something to remove — see
@@ -829,20 +837,24 @@ Each was checked rather than assumed:
   probes, as for [EcoDisc](#efm). As on the other AIV discs the digital audio is
   localised: it spans roughly pictures **#9000–#11000 on the first side and
   #9000–#21000 on the second**, identically on both sets, with no syncs
-  anywhere else. Within those spans
-  the stream frames up perfectly — sync rate and frame-588 fraction 1.000,
+  anywhere else. Within those spans the stream frames up perfectly — sync rate and frame-588 fraction 1.000,
   demodulator confidence 248–251 — and outside them it scores 0.000 at
   confidence 31–41, the signature of a section with none.
 
-Since both sides carry some EFM, the front end runs on every side: the table has
-no `efm` column, and the script no `--efm` / `--no-efm`. That is the City
-Disc's arrangement rather than EcoDisc's, whose second side carries none.
+Since both sides carry some EFM, the front end runs on every set of both
+scripts, and neither offers `--efm` / `--no-efm`; both packs have a VFS image.
+That is EcoDisc's first side, not its second, which carries none. Each script's
+check of a finished decode asks for EFM t-values on every frame from picture
+#9000 to the end, as EcoDisc Side 1's does from #6000.
+
+A decode's frame count is checked against its capture's last picture, from the
+file name: 54,085 on every first side and 51,000 on every second.
 
 ### Everything else
 
-The roots, the frame limit, lead-in, probe, jobs and threads work exactly as
-they do for the other scripts — see [Configuration](#configuration). Starts are
-resolved by `find-disc-start.sh` and cached beside the decode as
+The roots, the frame limit, lead-in, probe, jobs and threads, `--adopt`, work
+exactly as they do for Volcanoes — see [Configuration](#configuration). Starts
+are resolved by `find-disc-start.sh` and cached beside the decode as
 `<basename>.start`. Every capture begins at the head of its side, so the "first
 picture" column is `1` throughout. The `--start` values recorded by hand in the
 library's `Countryside_Notes.txt` are not used, but they agree with what this
@@ -1025,7 +1037,8 @@ inputs, so a re-run with nothing changed does nothing.
     dropped:
       - set: DS3
         reason: loses 1.7% of its EFM after C2
-    accept: incomplete       # optional: ship even if the filesystem still lacks sectors
+    accept: incomplete       # optional: ship even if the filesystem still lacks sectors,
+                             # or single-source: let needed sectors rest on one set
   ```
 
   Every set `map.orcprj` maps is either used or dropped with a reason, in
@@ -1103,6 +1116,10 @@ inputs, so a re-run with nothing changed does nothing.
   image stops the stage and lists each needed sector still bad, with its
   object, and which mapped sets' own images recover it. `accept: incomplete`
   under `vfs` in `selection.yaml` lets it through as `incomplete`.
+  `accept: single-source` is narrower: it lets through only an image whose
+  one failure is that some needed sectors were recovered by one set alone,
+  every one of them recovered. Its verdict is `complete`, and `check.txt`,
+  `vfs.json` and the pack report list the sectors each set alone recovered.
 
   The result is also checked against two things:
   - **the reference hashes** in `discs/<disc>/pack.sha256`. A person records
@@ -1201,6 +1218,18 @@ inputs, so a re-run with nothing changed does nothing.
     hand-built stack in `vp415e_projects/CommunityS_output`, which stacked
     DS4, DS6, DS8 and DS10. Its `selection.yaml` and `stack.orcprj` are
     written once the compare report is in.
+  - **Domesday National A** (`national-a`, stem `dd_natA_stack`): the 13
+    National A captures, decoded by `decode-national-a.sh`, which is
+    `decode-community-south.sh` with this side's set table and checks. DS1's
+    side is two passes, decoded as two sets: `DS1`, pictures 1–37480, and
+    `DS1B`, from 39001. DS1B is left out of the map stage, and so of both
+    stacks: Source Alignment compares captures only over frames every set
+    holds, and its EFM image places data where its capture cannot reach.
+    The side's EFM data runs from about picture 50 to 40900, so the decode
+    check runs from picture 100. The baselines are the hand-built stack in
+    `vp415e_projects/NationalA_output`, which stacked DS4, DS6, DS8 and DS10
+    (its mkv is `dd_natA_stack_001.mkv`). Its `selection.yaml` and
+    `stack.orcprj` are written once the compare report is in.
   - **EcoDisc Side 1** (`ecodisc-side1`, stem `ecodisc_s1`): the five
     first-side captures, decoded by `decode-ecodisc-side1.sh`. Its EFM data
     is localised, to about pictures 6000–8000, so the decode check runs from
@@ -1464,8 +1493,9 @@ that ld-decode is told, and the opening frame that says what the writer did with
 it. `--report` prints both, as `opens=`.
 
 **A capture that begins mid-disc may have no aligned frame at or before its
-first picture at all.** `DS1`'s National A part 2 starts at picture 39001, and
-the first frame its writer will accept is file frame 4 — picture 39004. No start
+first picture at all.** National A's `DS1B`, `DS1`'s second pass, starts at
+picture 39001, and the first frame its writer will accept is file frame 4 —
+picture 39004. No start
 can write the three frames in front of it, from any `--start`, so the search
 takes the earliest-opening start and says what that costs rather than failing:
 

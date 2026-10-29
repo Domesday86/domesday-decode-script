@@ -1,0 +1,46 @@
+# Countryside Side 1: which sets go into the video and the VFS stacks,
+# decided from the compare stage's report (orc-<rev>/compare/report.txt) as
+# described in docs/emulator-pack-plan.md, phase 4. The video lists its sets
+# the suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
+#
+# The evidence (orc-a690be7, 2026-10-28): one version of the disc. Every
+# set's Disc Mapper reads the same disc identity over the whole side (CAV
+# side 1, user code 1991, CX off, Amendment 2 present, sound bilingual,
+# pictures 1-54085), and every pair of EFM images holds the same bytes
+# wherever both recovered a sector. Source Alignment finds three stamper
+# groups, which are shared noise, not content: A = DS1 DS5, B = DS2 DS4,
+# C = DS3. DS3 is soft (5-6 MHz response 0.09); the others are 0.96-1.07.
+# Its noise model is trusted, and predicts σ 2.57 for the Weighted stack of
+# all five, against 4.29 for the best single set.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS4 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid), with the fewest padding frames (4). The rest by
+  # what each adds, the predicted stack σ without it (Source Alignment,
+  # a690be7, over all five), and its share of the weight: DS4 2.65 (9%), DS1
+  # 3.2 (36%), DS5 3.1 (32%), DS2 2.8 (21%). DS2's player stalled on picture
+  # 52791 for 2984 frames; the Disc Mapper removes its 3209 held frames, and
+  # it pads 320, so every output frame still has three sources or more.
+  sets: [DS4, DS1, DS5, DS2]
+  dropped:
+    # DS3 adds least (2.6, 3% of the weight): leaving it out costs 0.03 of
+    # the predicted σ. At 9% of the typical response at 5-6 MHz its capture
+    # chain has lost the fine detail the other four carry, which stacking it
+    # with them would blur.
+    - set: DS3
+      reason: soft (5-6 MHz response 0.09), and adds least; stacking it would blur the detail the sharp sets carry
+
+vfs:
+  # By data loss after C2: DS2 0.0000%, DS4 0.0001%, DS5 0.0001%, DS3
+  # 0.0606%, DS1 0.8686%. The five agree wherever two of them recovered a
+  # sector, and stacked they recover every sector the filesystem depends on
+  # (GOOD): DS1's 80 vital bad sectors are all held by the others. DS2 and
+  # DS4 have the same bad sector map, which vfs-stacker reads as one decode
+  # twice; they are two captures (different dates, noise and dropouts), whose
+  # only bad sectors are the gaps in the EFM timeline that every set shares.
+  sets: [DS2, DS4, DS5, DS3, DS1]
+  dropped: []

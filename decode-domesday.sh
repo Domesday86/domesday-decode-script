@@ -9,8 +9,9 @@
 # part is decoded in its own right -- so a set can have more than four decodes.
 #
 # Each VP415e pack has its own decode script, which stamps its decodes for
-# build-pack.sh. Community South has one, decode-community-south.sh, so it is
-# no longer listed here; the other three sides stay until each gets its own.
+# build-pack.sh. Community South and National A have one each,
+# decode-community-south.sh and decode-national-a.sh, so they are no longer
+# listed here; the other two sides stay until each gets its own.
 #
 # Each side is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
 # configurable number of lead-in frames before its first picture, so the
@@ -116,70 +117,59 @@ START_OVERRIDE=""
 # first frame of the side's content. It is 1 for a capture that begins at the
 # head of the side, which is nearly all of them; a side captured in more than
 # one pass has a part that picks up mid-disc, and that part's own first picture
-# is named instead. (DS1's National A is the one such side here: the player lost
-# the disc at picture 37480 and the second pass resumes at 39001.)
+# is named instead. (DS1's National A was the one such side here, before it
+# moved to decode-national-a.sh: the player lost the disc at picture 37480 and
+# the second pass resumes at 39001.)
 #
 # Two rows sharing a set and a side are the parts of one side, in capture order,
-# and are selected together: "DS1:NationalA" means both parts of it.
+# and are selected together: "DS1:NationalA" meant both parts of it.
 # ---------------------------------------------------------------------------
 
 SIDES=(
   "DS1|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS1/Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf"
-  "DS1|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS1/Domesday_DD86-DS1_NationalA_PP_20191014_CAV_PAL_00001-37480.ldf"
-  "DS1|NationalA|CAV|39001|BBC_AIV/Domesday/Domesday_DS1/Domesday_DD86-DS1_NationalA_PP_20191014_CAV_PAL_39000-54000.ldf"
   "DS1|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS1/Domesday_DD86-DS1_NationalB_PP_20191014_CLV_PAL_00-60.ldf"
 
   "DS2|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS2/Domesday_DD86-DS2_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf"
-  "DS2|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS2/Domesday_DD86-DS2_NationalA_PP_20191014_CAV_PAL_00001-54000.ldf"
   "DS2|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS2/Domesday_DD86-DS2_NationalB_PP_20191014_CLV_PAL_00-60.ldf"
 
   "DS3|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS3/Domesday_DD86-DS3_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf"
-  "DS3|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS3/Domesday_DD86-DS3_NationalA_NP_20191014_CAV_PAL_00001-50848.ldf"
   "DS3|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS3/Domesday_DD86-DS3_NationalB_NP_20191014_CLV_PAL_00-58.ldf"
 
   "DS4|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS4/Domesday_DD86-DS4_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf"
-  "DS4|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS4/Domesday_DD86-DS4_NationalA_PP_20191014_CAV_PAL_00001-54000.ldf"
   "DS4|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS4/Domesday_DD86-DS4_NationalB_PP_20191014_CLV_PAL_00-60.ldf"
 
   "DS5|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS5/Domesday_DD86-DS5_CommunityNorth_20191111_CAV_PAL_00001-54000.ldf"
-  "DS5|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS5/Domesday_DD86-DS5_NationalA_AK_20191111_CAV_PAL_00001-54000.ldf"
   "DS5|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS5/Domesday_DD86-DS5_NationalB_AK_20191111_CLV_PAL_00-60.ldf"
 
   "DS6|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS6/Domesday_DD86-DS6_CommunityNorth_20200803_CAV_PAL_00001-54000.ldf"
-  "DS6|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS6/Domesday_DD86-DS6_NationalA_PP_20200803_CAV_PAL_00001-54000.ldf"
   "DS6|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS6/Domesday_DD86-DS6_NationalB_PP_20200803_CLV_PAL_00-60.ldf"
 
   "DS7|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS7/Domesday_DD86-DS7_CommunityNorth_20200215_CAV_PAL_00001-54000.ldf"
-  "DS7|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS7/Domesday_DD86-DS7_NationalA_PP_20200215_CAV_PAL_00001-54000.ldf"
   "DS7|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS7/Domesday_DD86-DS7_NationalB_PP_20200215_CLV_PAL_00-44.ldf"
 
   "DS8|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS8/Domesday_DD86-DS8_CommunityNorth_20210104_CAV_PAL_00001-54000.ldf"
-  "DS8|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS8/Domesday_DD86-DS8_NationalA_PP_20210104_CAV_PAL_00001-54000.ldf"
   "DS8|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS8/Domesday_DD86-DS8_NationalB_PP_20210104_CLV_PAL_00-60.ldf"
 
   "DS9|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS9/Domesday_DD86-DS9_CommunityNorth_20200814_CAV_PAL_00001-54000.ldf"
-  "DS9|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS9/Domesday_DD86-DS9_NationalA_NP_20200829_CAV_PAL_00001-53000.ldf"
   "DS9|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS9/Domesday_DD86-DS9_NationalB_NP_20200829_CLV_PAL_00-58.ldf"
 
   "DS10|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS10/Domesday_DD86-DS10_CommunityNorth_20200814_CAV_PAL_00001-54000.ldf"
-  "DS10|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS10/Domesday_DD86-DS10_NationalA_PP_20200829_CAV_PAL_00001-51594.ldf"
   "DS10|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS10/Domesday_DD86-DS10_NationalB_PP_20200830_CLV_PAL_00-60.ldf"
 
   "DS11|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS11/Domesday_DD86-DS11_CommunityNorth_20200814_CAV_PAL_00001-54000.ldf"
-  "DS11|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS11/Domesday_DD86-DS11_NationalA_NP_20200830_CAV_PAL_00001-51000.ldf"
   "DS11|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS11/Domesday_DD86-DS11_NationalB_NP_20200830_CLV_PAL_00-60.ldf"
 
   "DS12|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS12/Domesday_DD86-DS12_CommunityNorth_20220710_CAV_PAL_00001-54000.ldf"
-  "DS12|NationalA|CAV|1|BBC_AIV/Domesday/Domesday_DS12/Domesday_DD86-DS12_NationalA_PP_20220710_CAV_PAL_00001-54000.ldf"
   "DS12|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS12/Domesday_DD86-DS12_NationalB_PP_20220710_CLV_PAL_00-60.ldf"
 )
 
 # Short names for the sides, so a side can be named without typing it out.
-SIDE_NAMES=(CommunityNorth NationalA NationalB)
-SIDE_ALIASES=(CN NA NB)
+SIDE_NAMES=(CommunityNorth NationalB)
+SIDE_ALIASES=(CN NB)
 
 # Sides that have a pack script of their own, and that script.
-MOVED_SIDES=("CommunitySouth|CS|decode-community-south.sh")
+MOVED_SIDES=("CommunitySouth|CS|decode-community-south.sh"
+             "NationalA|NA|decode-national-a.sh")
 
 # ---------------------------------------------------------------------------
 
@@ -193,9 +183,9 @@ every set is decoded.
 A selector picks what to decode:
 
   DS4               every side of disc set 4
-  DS4:NationalA     one side of one set
+  DS4:NationalB     one side of one set
   NationalB         that side of every set
-  NA                same, by its short name (CN NA NB)
+  NB                same, by its short name (CN NB)
 
 Selectors add together, so "DS4 DS7:NB" is all of set 4 plus set 7's National B.
 --side narrows whatever the selectors chose, so "--side NB DS4 DS7" is the same
@@ -205,7 +195,7 @@ case.
 Options:
   -l, --library DIR     capture library root (default: $LIBRARY)
   -o, --output DIR      decode output root (default: $OUTPUT)
-      --side NAME       only this side (repeatable: CN NA NB or full names)
+      --side NAME       only this side (repeatable: CN NB or full names)
       --decoder NAME    decoder directory name (default: from flake.lock)
       --no-verify-decoder
                         skip the check that ld-decode matches flake.lock
@@ -455,7 +445,7 @@ done
 
 # A side's parts are numbered by their position among the rows sharing that
 # side, so a split side's two decodes can be told apart in the console even
-# though the table names them both "DS1:NationalA".
+# though the table names them both "DS1:NationalA" (as it did).
 declare -A part_total=() part_seen=()
 for d in "${SIDES[@]}"; do
   IFS='|' read -r id side _ _ _ <<< "$d"
