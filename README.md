@@ -112,7 +112,8 @@ Every script's output root sits under one folder,
 `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/`, in a subfolder named after the
 script's disc or pack: `domesday`, `volcanoes`, `community-south`,
 `national-a`, `community-north`, `ecodisc-side1`, `ecodisc-side2`, `city`, `countryside-side1`,
-`countryside-side2`, `north-polar` and `dragons-lair`.
+`countryside-side2`, `north-polar`, `dragons-lair`, `apple-almanac-side-a` and
+`apple-almanac-side-b`.
 
 Output goes to `<output root>/<set>/<decoder>/<capture basename>.*`, where
 `<decoder>` names the ld-decode commit that produced the decode — see [Which
@@ -753,6 +754,11 @@ content=335 leadin=1 start=332 opens=332
 start: 332 (output opens at file frame 332, 3 frame(s) before picture #4; 1 requested)
 ```
 
+The search has since learnt to trust a reading confirmed two file frames on
+(for the Apple Visual Almanac), so it would now confirm picture #1 at 332 by
+#2 at 334. The table keeps `4` all the same: the start is the same either way,
+and the cached start is only reused for the target it was found for.
+
 ### Everything else
 
 The two roots, the frame limit, lead-in, probe, jobs and threads work exactly as
@@ -998,6 +1004,72 @@ That leaves 844 pictures missing, nearly all in #25001–#25975, for the Disc
 Mapper to sort out. Its decode writes 43,565 frames, which the script's
 `EXTRA_FRAMES` allows for, and ld-decode records it as
 `STANDARD_STABLE_UNLOCKED`, where the other four are locked.
+
+## Decoding the Apple Visual Almanac disc
+
+`decode-apple-almanac-side-a.sh` and `decode-apple-almanac-side-b.sh` decode
+the two sides of the **NTSC** **Apple Visual Almanac** (Apple, 1989), a CAV
+disc of stills, video and sound that a Macintosh drives over a serial link to
+the player. Like Dragon's Lair it has no VP415e pack, and is decoded as an
+**NTSC stacking reference for testing decode-orc**. The library has three
+copies, `DS1` to `DS3`, each side captured once
+(`Interactive_Video/Apple_Visual_Almanac`).
+
+```sh
+nix develop
+./decode-apple-almanac-side-a.sh --list
+./decode-apple-almanac-side-a.sh --frames 30 DS1   # quick smoke test
+./decode-apple-almanac-side-a.sh --frames all -j 2 # all three sets, two at a time
+```
+
+Output goes to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/apple-almanac-side-a`
+and `…/apple-almanac-side-b`. The decodes are checked and stamped as the pack
+scripts' are.
+
+### What the scripts assert
+
+```sh
+ld-decode --ntsc --noEFM --cvbs --cvbs-spec-origin ...
+```
+
+- **NTSC**, as for [Dragon's Lair](#decoding-the-dragons-lair-disc).
+- **No EFM.** The sound is analogue only. Three probes of each side of DS1,
+  30 frames each at file frames 1000, 20000 and 45000, found no frame sync:
+  sync rate 0.000, confidence 30–37.
+- **Pulldown in places.** Parts of each side are film with 3:2 pulldown, which
+  ld-decode logs as "CAV Pulldown/Telecine Frame", with no picture number; the
+  rest is video, one picture to a frame. So the side's length in frames is
+  measured, not worked out from its pictures. In DS1:
+
+| Side | pictures | #1 at | last picture at | frames | of them pulldown |
+| --- | --- | --- | --- | --- | --- |
+| A | #1–#50683 | 421 | 54420 | 54,000 | 3,317 |
+| B | #1–#53361 | 416 | 54416 | 54,001 | 640 |
+
+Side A's head is untidy. Before the real picture #1 there's a stray #1, then
+two lead-in frames. DS2 then holds picture #3 for four frames, and DS3 reports
+file frames that sometimes step by two. Each of those stopped the start search
+until it was taught to cope (see
+[Finding the start of the disc](#finding-the-start-of-the-disc)).
+
+| Capture | picture #1 at | `--start` | output opens at |
+| --- | --- | --- | --- |
+| DS1 side A | 421 | 419 | 420 |
+| DS2 side A | 425 | 423 | 424 |
+| DS3 side A | 439 | 438 | 439 |
+| DS1 side B | 416 | 413 | 414 |
+| DS2 side B | 449 | 447 | 447 |
+| DS3 side B | 392 | 390 | 390 |
+
+The library's notes give DS2 side A's start as unknown. DS3 side A opens on
+picture #1 itself, keeping no lead-in: the frames before it are off the
+colour sequence the CVBS writer opens on.
+
+All six pass their checks and are recorded `STANDARD_STABLE_LOCKED`. Each
+runs over the whole side, #1–#50683 or #1–#53361, in 54,004–54,013 frames.
+DS1 reads every picture in order on both sides. The other captures have a few
+frames out of order (DS2: 8 on side A, 20 on side B; DS3: 6 and 4), for the
+Disc Mapper to sort out. Decoding the six took two hours, both sides at once.
 
 ## Building a VP415e pack
 
@@ -1495,9 +1567,17 @@ search reports that it found none rather than guessing.
 Three guards keep it from repeating ld-find-start's mistake:
 
 * A probe reading is only trusted when two successive frames advance together
-  (file frame *n*→*n*+1 alongside picture *m*→*m*+1). A lone address in a
-  spin-up region can be a misread, and it is that kind of misread that sends the
-  arithmetic to the wrong part of the disc.
+  (file frame *n*→*n*+1 or *n*+2 alongside picture *m*→*m*+1). A lone address
+  in a spin-up region can be a misread, and it is that kind of misread that
+  sends the arithmetic to the wrong part of the disc. A step of two file frames
+  is allowed because on some captures the file frame ld-decode reports now and
+  then steps by two and then holds: Apple Visual Almanac DS3 side A reads
+  439 #1, 441 #2, 441 #3, so it never advances by one twice running.
+* **An estimate made twice is probed wide once.** It means the four-frame
+  window aimed at it missed the target, and would miss it again. On Apple
+  Visual Almanac DS2 side A the player holds picture #3 for four frames, two
+  after #1, so the window sees only #3. The search then probes 12 frames
+  around the estimate, and gives up only if that misses too.
 * An estimate landing before the head of the capture means the probe was itself
   inside spin-up, so the search moves deeper rather than clamping to zero and
   inventing an answer. It recovers from a badly chosen `--probe` this way, and

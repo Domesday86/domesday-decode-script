@@ -167,7 +167,11 @@ probe() {
       continue
     fi
     [ "${cav[i+1]}" = leadin ] && continue
-    if [ "${ff[i+1]}" -eq $(( ff[i] + 1 )) ] && \
+    # The next picture may be one file frame on or two: on some captures the
+    # file frame ld-decode reports is a nominal-length estimate that now and
+    # then steps by two, then holds (Apple Visual Almanac DS3 side A runs
+    # 439 #1, 441 #2, 441 #3), so it never advances by one twice running.
+    if [ "${ff[i+1]}" -gt "${ff[i]}" ] && [ "${ff[i+1]}" -le $(( ff[i] + 2 )) ] && \
        [ "${cav[i+1]}" -eq $(( cav[i] + 1 )) ]; then
       out+="${ff[i]} ${cav[i]}"$'\n'
     fi
@@ -312,6 +316,8 @@ opens earliest, at file frame $best_first"
 }
 
 visited=" "
+widened=" "
+WIDE_WINDOW=12
 frame="$PROBE"
 length=3
 attempt=0
@@ -398,11 +404,27 @@ are off the colour sequence and no start can write them"
     continue
   fi
 
+  # An estimate made twice means the window missed the target, and the next
+  # probe would only miss it again: the player repeated a picture just after
+  # it, say, so the window holds that one picture throughout (Apple Visual
+  # Almanac DS2 side A holds #3 for four frames, two after #1). So it is
+  # probed once more in a window of WIDE_WINDOW frames around it before the
+  # search gives up.
   case "$visited" in
     *" $next "*)
-      die "start search kept estimating file frame $next without reading \
+      case "$widened" in
+        *" $next "*)
+          die "start search kept estimating file frame $next without reading \
 picture #$TARGET there; probe by hand with: \
-ld-decode --$STANDARD --start $(probe_start_for "$next") --length $PROBE_WINDOW"
+ld-decode --$STANDARD --start $(( next - WIDE_WINDOW / 2 )) --length $WIDE_WINDOW"
+          ;;
+      esac
+      note "estimate $next made again; probing $WIDE_WINDOW frames around it"
+      widened="$widened$next "
+      frame=$(( next - WIDE_WINDOW / 2 ))
+      [ "$frame" -ge 0 ] || frame=0
+      length=$WIDE_WINDOW
+      continue
       ;;
   esac
   visited="$visited$next "
