@@ -1,0 +1,14 @@
+# Community North: the reference SHA-256 of the stacked VFS image and its bad
+# sector map, recorded once the image passed the test its selection asks for
+# (docs/emulator-pack-plan.md, phase 6). Every later vfs stage must match.
+#
+# Recorded 2026-10-30 from vfs-41ab10c: DS9 DS5 DS8 DS4 DS1 DS6 DS3 DS11 DS2
+# DS12 at decode-orc a690be7, ld-decode 6148260. 332089344 bytes, 162153 EFM
+# sectors; 34629 listed bad, all before the filesystem (143) or in free space
+# (34486). Bit-perfect: no sector the filesystem needs rests on one set, and
+# no vote was split. It holds the same bytes as the hand-built
+# vp415e_projects/CommunityN_output/dd_comN_stack.dat in all 127519 sectors
+# both recovered but 133242, past the end of the filesystem, which the
+# selection records (vfs.baseline_differs).
+08594e1dc15ef615c03504d470ab9944a080fe5e06d1459c8223126ebd28a157  dd_comN_stack.dat
+1b8e5c3917abf3bf61ead5e8cc99012cd83ea7af691677c093f5cd11bb36ab29  dd_comN_stack.dat.bsm

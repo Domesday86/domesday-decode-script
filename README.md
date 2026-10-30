@@ -94,7 +94,7 @@ Every script takes the same core flags and environment variables:
 | `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
 | `--force` | | refuse | overwrite an existing decode |
-| `--adopt` | | | the pack scripts only (Volcanoes, Community South, National A, EcoDisc, Countryside): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
+| `--adopt` | | | the pack scripts only (Volcanoes, Community South, National A, Community North, EcoDisc, Countryside): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
 | `-n, --dry-run` | | | resolve starts and print the commands, decode nothing |
 | `--list` | | | list what the selectors chose and exit |
 
@@ -111,8 +111,8 @@ than with `--library` alone.
 Every script's output root sits under one folder,
 `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/`, in a subfolder named after the
 script's disc or pack: `domesday`, `volcanoes`, `community-south`,
-`national-a`, `ecodisc-side1`, `ecodisc-side2`, `city`, `countryside-side1`,
-`countryside-side2` and `north-polar`.
+`national-a`, `community-north`, `ecodisc-side1`, `ecodisc-side2`, `city`, `countryside-side1`,
+`countryside-side2`, `north-polar` and `dragons-lair`.
 
 Output goes to `<output root>/<set>/<decoder>/<capture basename>.*`, where
 `<decoder>` names the ld-decode commit that produced the decode — see [Which
@@ -223,11 +223,12 @@ National disc carries **A** and **B**. Three sides of every set are CAV;
 **National B is CLV**.
 
 Each VP415e pack has its own decode script, which stamps its decodes for
-`build-pack.sh`. **Community South** and **National A** have one each,
-`decode-community-south.sh` and `decode-national-a.sh` (see [Building a VP415e
+`build-pack.sh`. **Community South**, **National A** and **Community North**
+have one each, `decode-community-south.sh`, `decode-national-a.sh` and
+`decode-community-north.sh` (see [Building a VP415e
 pack](#building-a-vp415e-pack)), so they are no longer in this script's table,
-and naming either here says so. The other two sides stay here, 12 sets × 2
-sides, until each gets a pack script of its own.
+and naming any of them here says so. National B stays here, 12 sets, until it
+gets a pack script of its own.
 
 ```sh
 nix develop
@@ -250,18 +251,18 @@ A selector picks sides, and selectors add together:
 
 | Selector | Means |
 | --- | --- |
-| *(none)* | every side of every set — 24 decodes |
+| *(none)* | every side of every set — 12 decodes |
 | `DS4` | every side of disc set 4 |
 | `DS4:NationalB` | one side of one set |
 | `NationalB` | that side of every set |
-| `NB` | the same, by short name (`CN` `NB`) |
+| `NB` | the same, by short name |
 
 `--side` narrows whatever the selectors chose rather than adding to it, so
 `--side NB DS4 DS7` and `DS4:NB DS7:NB` are the same request. Set and side names
 are matched regardless of case, and naming a side twice still decodes it once.
 
-The sides come out in table order — set by set, and within a set North, then
-B — however the selectors were written.
+The sides come out in table order, set by set, however the selectors were
+written.
 
 ### Sides captured in more than one pass
 
@@ -944,6 +945,60 @@ DS1's output opens eight frames after its `--start`, so as with Countryside and
 the City Disc, `--frames 2` is too short to smoke-test it; `--frames 30` clears
 it.
 
+## Decoding the Dragon's Lair disc
+
+`decode-dragons-lair.sh` decodes the **NTSC** arcade disc of **Dragon's Lair**
+(Cinematronics, 1983). It is not a Domesday or AIV title and has no VP415e
+pack: it is decoded as an **NTSC stacking reference for testing decode-orc**.
+The disc is single-sided, and the library has five copies, `DS1` to `DS5`,
+each captured once in December 2019 (`Arcade/Dragons_Lair`).
+
+```sh
+nix develop
+./decode-dragons-lair.sh --list
+./decode-dragons-lair.sh --frames 30 DS1  # quick smoke test
+./decode-dragons-lair.sh --frames all -j 2 # all five sets, two at a time
+```
+
+Output goes to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/dragons-lair`.
+The decodes are checked and stamped as the pack scripts' are.
+
+### What the script asserts
+
+```sh
+ld-decode --ntsc --noEFM --cvbs --cvbs-spec-origin ...
+```
+
+- **NTSC.** `--ntsc` takes the place of `--pal`, and the PAL sides'
+  `--V4300D_coherent_subtract` is not given: ld-decode documents it as PAL
+  only. CVBS comes out in ld-decode's NTSC encoding, `CVBS_U16_4FSC`, and
+  decode-orc reads it as an `NTSC_CVBS_Source`.
+- **No EFM.** The disc's sound is analogue only. Eight probes of DS1, 30
+  frames each at file frames 1000–40000, scored with `lddecode.efm_score` as
+  for [EcoDisc](#efm), found no frame sync: sync rate 0.000, confidence 28–32.
+- **3:2 pulldown.** The animation is film, so five frames carry four
+  pictures, and ld-decode logs every fifth frame as "CAV Lead In", with no
+  picture number; the picture check leaves those frames out. The side runs from picture #1 to #31805
+  (DS1), which is 39,756 frames, and the frame count check uses that figure.
+  The start search closes in on picture #1 more slowly for the same reason,
+  so the script allows it 16 probes. DS5 needs nine.
+
+| Capture | picture #1 at | `--start` | output opens at |
+| --- | --- | --- | --- |
+| DS1 | 520 | 516 | 517 |
+| DS2 | 538 | 535 | 535 |
+| DS3 | 532 | 528 | 529 |
+| DS4 | 597 | 593 | 594 |
+| DS5 | 603 | 599 | 600 |
+
+All five pass their checks. DS1–DS4 write 39,761 frames each. DS5's
+capture has a fault: the player sat on picture #25000 for 4,550 frames
+(about 2½ minutes), then went on in skips of about 65 pictures to #25975.
+That leaves 844 pictures missing, nearly all in #25001–#25975, for the Disc
+Mapper to sort out. Its decode writes 43,565 frames, which the script's
+`EXTRA_FRAMES` allows for, and ld-decode records it as
+`STANDARD_STABLE_UNLOCKED`, where the other four are locked.
+
 ## Building a VP415e pack
 
 `build-pack.sh <disc>` takes a disc from its captures to the `<stem>.mkv`,
@@ -1230,6 +1285,16 @@ inputs, so a re-run with nothing changed does nothing.
     `vp415e_projects/NationalA_output`, which stacked DS4, DS6, DS8 and DS10
     (its mkv is `dd_natA_stack_001.mkv`). Its `selection.yaml` and
     `stack.orcprj` are written once the compare report is in.
+  - **Domesday Community North** (`community-north`, stem `dd_comN_stack`):
+    the 12 Community North captures, decoded by `decode-community-north.sh`,
+    which is `decode-national-a.sh` with this side's set table and checks.
+    Its EFM data runs from about picture 1950 to 44410, as on Community
+    South, the other side of the same disc, so the decode check runs from
+    picture 2000. DS7 is left out, as on Community South: ld-decode hangs
+    in its lead-out. The side's metadata reads CAV side 2. The baselines are the
+    hand-built stack in `vp415e_projects/CommunityN_output`, which stacked
+    DS2, DS4, DS6, DS8 and DS10. Its `selection.yaml` and `stack.orcprj` are
+    written once the compare report is in.
   - **EcoDisc Side 1** (`ecodisc-side1`, stem `ecodisc_s1`): the five
     first-side captures, decoded by `decode-ecodisc-side1.sh`. Its EFM data
     is localised, to about pictures 6000–8000, so the decode check runs from

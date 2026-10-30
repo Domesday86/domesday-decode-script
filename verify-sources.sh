@@ -114,7 +114,7 @@ fi
 # sorted by path, so regenerating after a change produces a readable diff.
 
 if [ "$MODE" = generate ]; then
-  mapfile -t paths < <(grep -ohE '(BBC_AIV|Calibration)/[^"|]*\.ldf' "$SELF_DIR"/decode-*.sh | sort -u)
+  mapfile -t paths < <(grep -ohE '(BBC_AIV|Calibration|Arcade)/[^"|]*\.ldf' "$SELF_DIR"/decode-*.sh | sort -u)
   [ "${#paths[@]}" -gt 0 ] || die "no capture paths found in the decode scripts"
 
   # Written beside sources.sha256 and renamed over it, rather than in TMPDIR,

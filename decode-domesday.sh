@@ -9,9 +9,10 @@
 # part is decoded in its own right -- so a set can have more than four decodes.
 #
 # Each VP415e pack has its own decode script, which stamps its decodes for
-# build-pack.sh. Community South and National A have one each,
-# decode-community-south.sh and decode-national-a.sh, so they are no longer
-# listed here; the other two sides stay until each gets its own.
+# build-pack.sh. Community South, National A and Community North have one
+# each, decode-community-south.sh, decode-national-a.sh and
+# decode-community-north.sh, so they are no longer listed here; National B
+# stays until it gets its own.
 #
 # Each side is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
 # configurable number of lead-in frames before its first picture, so the
@@ -126,50 +127,28 @@ START_OVERRIDE=""
 # ---------------------------------------------------------------------------
 
 SIDES=(
-  "DS1|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS1/Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf"
   "DS1|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS1/Domesday_DD86-DS1_NationalB_PP_20191014_CLV_PAL_00-60.ldf"
-
-  "DS2|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS2/Domesday_DD86-DS2_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf"
   "DS2|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS2/Domesday_DD86-DS2_NationalB_PP_20191014_CLV_PAL_00-60.ldf"
-
-  "DS3|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS3/Domesday_DD86-DS3_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf"
   "DS3|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS3/Domesday_DD86-DS3_NationalB_NP_20191014_CLV_PAL_00-58.ldf"
-
-  "DS4|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS4/Domesday_DD86-DS4_CommunityNorth_20191014_CAV_PAL_00001-54000.ldf"
   "DS4|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS4/Domesday_DD86-DS4_NationalB_PP_20191014_CLV_PAL_00-60.ldf"
-
-  "DS5|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS5/Domesday_DD86-DS5_CommunityNorth_20191111_CAV_PAL_00001-54000.ldf"
   "DS5|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS5/Domesday_DD86-DS5_NationalB_AK_20191111_CLV_PAL_00-60.ldf"
-
-  "DS6|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS6/Domesday_DD86-DS6_CommunityNorth_20200803_CAV_PAL_00001-54000.ldf"
   "DS6|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS6/Domesday_DD86-DS6_NationalB_PP_20200803_CLV_PAL_00-60.ldf"
-
-  "DS7|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS7/Domesday_DD86-DS7_CommunityNorth_20200215_CAV_PAL_00001-54000.ldf"
   "DS7|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS7/Domesday_DD86-DS7_NationalB_PP_20200215_CLV_PAL_00-44.ldf"
-
-  "DS8|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS8/Domesday_DD86-DS8_CommunityNorth_20210104_CAV_PAL_00001-54000.ldf"
   "DS8|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS8/Domesday_DD86-DS8_NationalB_PP_20210104_CLV_PAL_00-60.ldf"
-
-  "DS9|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS9/Domesday_DD86-DS9_CommunityNorth_20200814_CAV_PAL_00001-54000.ldf"
   "DS9|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS9/Domesday_DD86-DS9_NationalB_NP_20200829_CLV_PAL_00-58.ldf"
-
-  "DS10|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS10/Domesday_DD86-DS10_CommunityNorth_20200814_CAV_PAL_00001-54000.ldf"
   "DS10|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS10/Domesday_DD86-DS10_NationalB_PP_20200830_CLV_PAL_00-60.ldf"
-
-  "DS11|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS11/Domesday_DD86-DS11_CommunityNorth_20200814_CAV_PAL_00001-54000.ldf"
   "DS11|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS11/Domesday_DD86-DS11_NationalB_NP_20200830_CLV_PAL_00-60.ldf"
-
-  "DS12|CommunityNorth|CAV|1|BBC_AIV/Domesday/Domesday_DS12/Domesday_DD86-DS12_CommunityNorth_20220710_CAV_PAL_00001-54000.ldf"
   "DS12|NationalB|CLV|1|BBC_AIV/Domesday/Domesday_DS12/Domesday_DD86-DS12_NationalB_PP_20220710_CLV_PAL_00-60.ldf"
 )
 
 # Short names for the sides, so a side can be named without typing it out.
-SIDE_NAMES=(CommunityNorth NationalB)
-SIDE_ALIASES=(CN NB)
+SIDE_NAMES=(NationalB)
+SIDE_ALIASES=(NB)
 
 # Sides that have a pack script of their own, and that script.
 MOVED_SIDES=("CommunitySouth|CS|decode-community-south.sh"
-             "NationalA|NA|decode-national-a.sh")
+             "NationalA|NA|decode-national-a.sh"
+             "CommunityNorth|CN|decode-community-north.sh")
 
 # ---------------------------------------------------------------------------
 
@@ -185,7 +164,7 @@ A selector picks what to decode:
   DS4               every side of disc set 4
   DS4:NationalB     one side of one set
   NationalB         that side of every set
-  NB                same, by its short name (CN NB)
+  NB                same, by its short name (NB)
 
 Selectors add together, so "DS4 DS7:NB" is all of set 4 plus set 7's National B.
 --side narrows whatever the selectors chose, so "--side NB DS4 DS7" is the same
@@ -195,7 +174,7 @@ case.
 Options:
   -l, --library DIR     capture library root (default: $LIBRARY)
   -o, --output DIR      decode output root (default: $OUTPUT)
-      --side NAME       only this side (repeatable: CN NB or full names)
+      --side NAME       only this side (repeatable: NB or full names)
       --decoder NAME    decoder directory name (default: from flake.lock)
       --no-verify-decoder
                         skip the check that ld-decode matches flake.lock

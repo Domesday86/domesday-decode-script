@@ -1648,6 +1648,54 @@ discs. The differences from Volcanoes:
   reference is in `pack.sha256`. It passed the hand check on the player on
   2026-10-29.
 
+**Under way: Community North** (`discs/community-north`, stem
+`dd_comN_stack`), from its 12 captures, one per Domesday set, each whole to
+picture 54000 by its file name.
+
+- `decode-community-north.sh` is `decode-national-a.sh` with this side's set
+  table. Community North has left `decode-domesday.sh`'s table, which now
+  holds National B alone.
+- The EFM data runs from about picture 1950 to 44410: the hand-built image's
+  good sectors are 5860-133242, besides a short run at 143-278, the same
+  layout as Community South's on the other side of the disc. So the EFM
+  check runs from picture 2000, as there.
+- DS7 is left out of the table and the map, as on Community South. Its
+  decode reached picture 54000 and then hung in the lead-out (field 108007;
+  Community South's DS7 hangs at 108011), where it ran on a core for 20
+  minutes without writing anything; it was stopped on 2026-10-29. National
+  A's DS7 finished. The side is built from the other eleven sets.
+- This is one of the two sides decode-orc's stacker study found pressed
+  twice, so its compare report is the real test of phase 4's choice of
+  pressing. The report finds one version. Wherever two EFM images both
+  recovered a sector they hold the same bytes, but for sector 61788
+  (GAZETTEER), which DS10 alone reads good with 861 bytes damaged. Every
+  set's Disc Mapper reads the same identity, but DS2's, which reads no user
+  code. Source Alignment's three stamper groups (A = DS1 DS4 DS5 DS8 DS9
+  DS10 DS11, B = DS2 DS6 DS12, C = DS3) are shared noise, not content. Its
+  noise model is not trusted, so the stacker weights every set equally.
+- The selection stacks all eleven mapped sets in the video, DS6 first (the
+  suggested reference). The VFS takes all but DS10, which is damaged (6.9%
+  data loss after C2), supplies no sector, and is the one set that dissents
+  anywhere.
+- The baselines are the hand-built stack in
+  `vp415e_projects/CommunityN_output` (DS2, DS4, DS6, DS8 and DS10). Its
+  metadata reads CAV side 2, user code 1067, Amendment 2 present, pictures
+  1-53999 in one run: it stops one picture short of the side.
+- `map.orcprj` is Community South's eleven sets, and the set projects are
+  Community South's, with the names changed. `selection.yaml` and `stack.orcprj`
+  follow the compare report.
+- Built 2026-10-30: pack `fb24c922f53ed3d1`. The video stack reads one run
+  over pictures 1-54000, 18 of them undecoded (from 27117), which
+  resolve by the arithmetic; its sample measures white SNR 39.1 dB, black
+  PSNR 35.73 dB. The VFS image is bit-perfect (GOOD; no needed sector rests
+  on one set) and recovers 62 sectors more than DS9 alone. It holds the
+  hand-built image's bytes in all 127519 sectors both recovered but one,
+  133242, in free space. That is the last sector of the hand-built image's
+  sets, a part-filled tail, which this decode-orc's images end before; DS3
+  alone runs past it and reads it blank. As on Community South (135117),
+  the selection records it in `vfs.baseline_differs`. The reference is in
+  `pack.sha256`. It awaits the hand check on the player.
+
 ## Decisions
 
 | Question | Decision |

@@ -1,0 +1,62 @@
+# Community North: which sets go into the video and the VFS stacks, decided
+# from the compare stage's report (orc-<rev>/compare/report.txt) as described
+# in docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
+#
+# The evidence (orc-a690be7, 2026-10-29; DS7 is not mapped: map.orcprj says
+# why): one version of the disc, although decode-orc's stacker study put
+# this side among those pressed twice. The EFM images hold the same bytes
+# wherever two of them recovered a sector, but for one sector where DS10
+# alone differs (below), and every set's Disc Mapper reads the same disc
+# identity over the whole side (CAV side 2, user code 1067, CX off,
+# Amendment 2 present, sound future_use) but DS2, which reads no user code,
+# its lead-in and lead-out unseen. Source Alignment finds three stamper
+# groups, which are shared noise, not content: A = DS1 DS4 DS5 DS8 DS9 DS10
+# DS11, B = DS2 DS6 DS12, C = DS3. Its noise model is not trusted, so the
+# stacker weights every set equally, and it predicts σ 3.7 for the stack of
+# all eleven.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS6 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid), with 3 padding frames; the next choice is DS8
+  # (16). The noise model is not trusted, so every set adds the same (the
+  # predicted stack σ without it is 3.88 for each), and the rest follow the
+  # table. DS2 and DS12 have the most Disc Mapper padding (188 and 173
+  # frames, against 3-45) and, with DS1 and DS11, the most dropouts; they
+  # stay in, since the stack fills the frames they lack from the others and
+  # averages more noise away with more sets.
+  sets: [DS6, DS1, DS2, DS3, DS4, DS5, DS8, DS9, DS10, DS11, DS12]
+  dropped: []
+
+vfs:
+  # By data loss after C2: DS9 0.0382%, DS5 0.0671%, DS8 0.0798%, DS4
+  # 0.0951%, DS1 0.1202%, DS6 0.1505%, DS3 0.1612%, DS11 0.2039%, DS2
+  # 0.2338%, DS12 0.6273%. Stacked, all eleven recover every sector the
+  # filesystem depends on (GOOD), and 62 that DS9, the best set alone,
+  # lacks; DS3 alone reads 6 of them.
+  sets: [DS9, DS5, DS8, DS4, DS1, DS6, DS3, DS11, DS2, DS12]
+  # The stack (vfs-41ab10c, 2026-10-30) holds the same bytes as the
+  # hand-built dd_comN_stack.dat in all 127519 sectors both recovered but
+  # one, 133242, in free space past the filesystem. The hand-built image's
+  # sets (DS2, DS4, DS6, DS8 and DS10, decoded with an earlier decode-orc)
+  # end at 133243 sectors, and DS2-DS8 hold the same part-filled tail in
+  # that last sector: data runs among 0x20 fill. This decode-orc's images
+  # end at 133242 sectors, so none of them reaches it, but DS3, which runs
+  # three sectors further, and those are blank (all 0x20), as are the
+  # sectors before them in every image. The stack takes DS3's.
+  baseline_differs:
+    sectors: [133242]
+    reason: the hand-built image's last sector is a part-filled tail that this decode-orc's images end before; DS3 alone reaches it, and reads it blank
+  dropped:
+    - set: DS10
+      reason: >-
+        damaged (21% of its sectors bad, 6.9% data loss after C2) and adds
+        nothing: it supplies no sector to the stack of all eleven. It is
+        the one set that differs anywhere, on sector 61788 (GAZETTEER),
+        which it reads good but holds 861 of 2048 bytes damaged ("efn Ca@w"
+        for "Cefn Caer"); left in, that sector is decided by a vote of the
+        other ten against it, and left out no vote is split.

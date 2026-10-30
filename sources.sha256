@@ -2,6 +2,11 @@
 # <sha256 of the first head-bytes>  <size in bytes>  <path relative to the library root>
 # Check with ./verify-sources.sh; regenerate with ./verify-sources.sh --generate.
 # head-bytes: 16777216
+59e206e8439de2c36ff5ecc828727f2691f6e8ccace939c4412cc3823d8cf03e  33665934325  Arcade/Dragons_Lair/Dragons-Lair_DS1_Side1_20191230_CAV_NTSC.ldf
+6bc5e4ec120d974d380af918207cc00849a5eab2ff36dfefb0830f2a7e80c898  33755904219  Arcade/Dragons_Lair/Dragons-Lair_DS2_Side1_20191230_CAV_NTSC.ldf
+ed632ed6e96e47adbed354b99d39908dbcccdcdfb5f1a184ab9c7912c7cc91c6  33855442041  Arcade/Dragons_Lair/Dragons-Lair_DS3_Side1_20191230_CAV_NTSC.ldf
+a950208dd0e1bae628bd8cb6b7239f1f2f2b7dfc62492be8e622466a0e0aa6d4  34098061967  Arcade/Dragons_Lair/Dragons-Lair_DS4_Side1_20191230_CAV_NTSC.ldf
+8fdc8e771cb5995e663438c306b414e5e1cbaad7f3259e8e7e79ef2860ceb094  37618111104  Arcade/Dragons_Lair/Dragons-Lair_DS5_Side1_20191230_CAV_NTSC.ldf
 eb4c1886f8837398bd97818a30508eddbeabb1e5f170f9822168562f377edc0a  42191771402  BBC_AIV/City_Disc/City_Disc_DS1/City-Disc_DD86-DS1_Culture1-Side1_20210101_CAV_PAL_00001-44003.ldf
 663042e4ad2ce438ad6ce45d502c3898d0364e09abbd4af70b6b44ef3762a161  42148664852  BBC_AIV/City_Disc/City_Disc_DS1/City-Disc_DD86-DS1_Culture1-Side2_20210101_CAV_PAL_00001-44003.ldf
 c16ac02bdb4e49b980478c5b9d6acd9e31ba3eca5a176bfc3e117a19a810c1e4  37600735606  BBC_AIV/City_Disc/City_Disc_DS1/City-Disc_DD86-DS1_Culture2-Side1_20210101_CAV_PAL_00001-39104.ldf
