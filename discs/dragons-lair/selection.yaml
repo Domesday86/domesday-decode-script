@@ -1,0 +1,42 @@
+# Dragon's Lair: which sets go into the video stack, decided from the compare
+# stage's report (orc-<rev>/compare/report.txt) as described in
+# docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds. Every mapped set the stack leaves out goes under dropped,
+# with a reason. The disc has no EFM (disc.conf, DISC_EFM=no), so there is
+# no VFS stack and no vfs section.
+#
+# The evidence (orc-1e62354, 2026-10-30): one version of the disc. Every
+# set's Disc Mapper reads the same disc identity (CAV side 1, 12 inch, user
+# code none, CX off, Amendment 2 present, sound mono, pictures 1-31805,
+# lead-in and lead-out seen). Source Alignment finds three stamper groups,
+# which are shared noise, not content: A = DS1 DS3, B = DS2 DS4, C = DS5,
+# and every set's picture numbers sit on its content. Its noise model is not
+# trusted (worst misfit 56%), so the stacker weights every set equally; it
+# predicts σ 4.31 for the stack of all five, against 9.47 for the best
+# single set. The Disc Mapper keeps 7,946-7,950 pulldown frames on each of
+# DS1-DS4. Source Alignment measures no picture band (no lumaCutoffMHz), so
+# the stack's Picture Band Limit takes its NTSC default, 5.0 MHz.
+#
+# The Stacker's pressing_repair is off (stack.orcprj): decode-orc#354 leaves
+# it unmeasured on real NTSC.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS3 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid), with 4 padding frames, the fewest; the next
+  # choice is DS4 (7). The noise model is not trusted, so every set adds the
+  # same (4.81 without it), and the rest follow in set order. DS1-DS4 read
+  # noise σ 9.47-9.85, white SNR 32.4-35.8 dB, and are locked.
+  sets: [DS3, DS1, DS2, DS4]
+  dropped:
+    - set: DS5
+      reason: >-
+        the faulty capture: noise σ 18.19 against 9.47-9.85, which under
+        the equal weights of an untrusted noise model counts as much as any
+        other set's; the most dropouts (343,608); the player sat on picture
+        #25000 for 4,550 frames and then skipped, leaving 4,819 duplicates,
+        722 padding frames in 22 gaps and one gap too wide to pad. It covers
+        output frames 1-39414 of 39758, is alone in its stamper group (C),
+        and is STANDARD_STABLE_UNLOCKED where the others are locked.

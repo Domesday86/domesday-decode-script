@@ -9,5 +9,5 @@
 # set, and no vote was split. It holds the same bytes as the hand-built
 # vp415e_projects/NationalA_output/dd_natA_stack.dat in all 120241 sectors
 # both recovered.
-b518974b0fadcd253c014896fabc845c393d596ff13e8c25ef947ee4bb102897  dd_natA_stack.dat
-2d06ce27ce62e18ae2c0e7587f10e1b8d55b61448e3dba85254877be085ed4dd  dd_natA_stack.dat.bsm
+b518974b0fadcd253c014896fabc845c393d596ff13e8c25ef947ee4bb102897  dd_national_a.dat
+2d06ce27ce62e18ae2c0e7587f10e1b8d55b61448e3dba85254877be085ed4dd  dd_national_a.dat.bsm

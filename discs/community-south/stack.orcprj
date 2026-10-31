@@ -2,9 +2,10 @@
 # Version: 2.0
 #
 # Community South, the video stack: the sets selection.yaml chooses for the
-# video, in its order, each through a Frame Map, all into one Source Align,
-# then the Stacker, Dropout Correction and the video sink that writes the
-# pack's mkv. build-pack.sh's video stage copies this beside its outputs,
+# video, in its order, each through a Frame Map and an FM Beat Cancel, all
+# into one Source Align, then the Stacker, Dropout Correction, Picture
+# Band Limit and the video sink that writes the pack's
+# mkv. build-pack.sh's video stage copies this beside its outputs,
 # points each source at its set's decode, sets each frame map and the
 # alignment from the committed discs/community-south/framemaps/ (made by the
 # map stage), and processes it. Nothing here is refreshed, so the stack is
@@ -14,8 +15,31 @@
 # in map.orcprj. The sources must be the video sets of selection.yaml, in
 # the same order: the first sets the Stacker's sample grid (the compare
 # report's suggested reference). Adding or dropping a set means editing this
-# project. The stage settings after the sources are Volcanoes'
+# project. The Stacker's other settings are Volcanoes'
 # (discs/volcanoes/stack.orcprj says why).
+#
+# The chain follows decode-orc#354's advice:
+#
+# - "<set> beat", FM Beat Cancel, between each frame map and Align: before
+#   the Stacker, since the beat's phase differs between masters. The video
+#   stage sets each one's carrier_black_mhz from framemaps/<set>.carrier,
+#   which the map stage measures.
+# - The Stacker is Weighted, with sample_align, still_frame_stacking and
+#   pressing_repair: the side's sets come from more than one stamper group
+#   (selection.yaml), and the repair replaces a defect every disc of one
+#   stamper carries with the stack of the other groups'.
+# - No Audio Channel Map vbi_mono_average: the sound is stereo. A PAL disc
+#   can't carry analogue sound and EFM at once, and the VBI's odd sound
+#   modes come from that, not from mono passages. No Domesday side uses it.
+#   audio_stacking stays Mean.
+# - Dropout Correction fills dropouts by interpolate, from the clean lines
+#   above and below, luma and chroma apart.
+# - "Band", Picture Band Limit, after Dropout Correction: it low-passes the
+#   luma where the picture ends, the map stage's lumaCutoffMHz (framemaps/
+#   picture-band), measured between captures of different stamper
+#   families. The video
+#   stage sets cutoff_mhz from it; rolloff_mhz stays 0.4. Chroma is
+#   untouched.
 
 project:
   name: Community South stack
@@ -412,6 +436,9 @@ dag:
         still_frame_stacking:
           type: bool
           value: true
+        pressing_repair:
+          type: bool
+          value: true
     - id: 25
       stage: dropout_correct
       node_type: TRANSFORM
@@ -420,6 +447,9 @@ dag:
       x: 950
       y: 50
       parameters:
+        method:
+          type: string
+          value: interpolate
         overcorrect_extension:
           type: uint32
           value: 0
@@ -457,7 +487,7 @@ dag:
           value: multiple
         decoder_schedule:
           type: string
-          value: transform2d, held:transform3d
+          value: transform2d, 1-3200:transform3d, 3201-44980:transform2d, 44981-54000:transform3d
         display_aspect_ratio:
           type: string
           value: 4:3
@@ -491,6 +521,141 @@ dag:
         video_filter:
           type: string
           value: ""
+    - id: 27
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS2 beat
+      x: 387
+      y: 50
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 28
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS3 beat
+      x: 387
+      y: 150
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 29
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS5 beat
+      x: 387
+      y: 250
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 30
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS11 beat
+      x: 387
+      y: 350
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 31
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS12 beat
+      x: 387
+      y: 450
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 32
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS4 beat
+      x: 387
+      y: 550
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 33
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS6 beat
+      x: 387
+      y: 650
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 34
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS1 beat
+      x: 387
+      y: 750
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 35
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS8 beat
+      x: 387
+      y: 850
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 36
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS9 beat
+      x: 387
+      y: 950
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 37
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS10 beat
+      x: 387
+      y: 1050
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 39
+      stage: picture_band_limit
+      node_type: TRANSFORM
+      display_name: Picture Band Limit
+      user_label: Band
+      x: 950
+      y: 150
+      parameters:
+        cutoff_mhz:
+          type: double
+          value: 5.4
+        rolloff_mhz:
+          type: double
+          value: 0.4
   edges:
     - from: 1
       to: 12
@@ -515,30 +680,54 @@ dag:
     - from: 11
       to: 22
     - from: 12
-      to: 23
+      to: 27
     - from: 13
-      to: 23
+      to: 28
     - from: 14
-      to: 23
+      to: 29
     - from: 15
-      to: 23
+      to: 30
     - from: 16
-      to: 23
+      to: 31
     - from: 17
-      to: 23
+      to: 32
     - from: 18
-      to: 23
+      to: 33
     - from: 19
-      to: 23
+      to: 34
     - from: 20
-      to: 23
+      to: 35
     - from: 21
-      to: 23
+      to: 36
     - from: 22
-      to: 23
+      to: 37
     - from: 23
       to: 24
     - from: 24
       to: 25
     - from: 25
+      to: 39
+    - from: 27
+      to: 23
+    - from: 28
+      to: 23
+    - from: 29
+      to: 23
+    - from: 30
+      to: 23
+    - from: 31
+      to: 23
+    - from: 32
+      to: 23
+    - from: 33
+      to: 23
+    - from: 34
+      to: 23
+    - from: 35
+      to: 23
+    - from: 36
+      to: 23
+    - from: 37
+      to: 23
+    - from: 39
       to: 26

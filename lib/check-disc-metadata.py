@@ -2,7 +2,8 @@
 
     pack-python lib/check-disc-metadata.py <orc-disc-metadata.yaml> \
         --frames N --format CAV|CLV --side N [--pictures FIRST-LAST] \
-        [--tag-version V] [--user-code CODE] [--amendment2 present|absent]
+        [--system PAL|NTSC] [--tag-version V] [--user-code CODE] \
+        [--amendment2 present|absent]
 
 The document is the one decode-orc's video sink attaches to an mkv
 (docs/technical/disc-metadata-format.md in decode-orc, format_version 1.0).
@@ -12,8 +13,9 @@ follows, and against what the pack expects of the side:
 - format and version: format is orc-disc-metadata, format_version a quoted
   MAJOR.MINOR with MAJOR 1, and the container's ORC_DISC_METADATA_VERSION
   tag the same;
-- video: PAL at exactly 25/1, two fields a frame, frame_count the frames
-  the container holds;
+- video: the side's system (PAL, the default, at exactly 25/1; NTSC at
+  30000/1001), two fields a frame, frame_count the frames the container
+  holds;
 - disc: the expected format and side, and the user code and Amendment 2
   the chosen pressing reads;
 - the address map, with every run's arithmetic applied to every file frame:
@@ -39,7 +41,11 @@ import sys
 import yaml
 
 KNOWN_MINOR = 0
-PAL_PICTURE_LIMIT = 79999  # the biphase decoder masks to the NTSC maximum
+PICTURE_LIMIT = 79999  # the biphase decoder masks to the NTSC maximum
+
+# Each system's exact frame rate as the document gives it, and the nominal
+# rate CLV timecode counts at.
+SYSTEMS = {"PAL": ([25, 1], 25), "NTSC": ([30000, 1001], 30)}
 
 
 def frame_set(block):
@@ -86,6 +92,7 @@ def main():
     ap.add_argument("--format", choices=["CAV", "CLV"], required=True)
     ap.add_argument("--side", type=int, required=True)
     ap.add_argument("--pictures", help="the programme's pictures, FIRST-LAST (CAV)")
+    ap.add_argument("--system", choices=sorted(SYSTEMS), default="PAL")
     ap.add_argument("--tag-version", help="the container's ORC_DISC_METADATA_VERSION")
     ap.add_argument("--user-code")
     ap.add_argument("--amendment2", choices=["present", "absent"])
@@ -138,11 +145,12 @@ def main():
 
     # --- video --------------------------------------------------------------
     video = doc.get("video") or {}
-    if (video.get("system"), video.get("frame_rate_exact"), video.get("fields_per_frame")) == ("PAL", [25, 1], 2):
-        ok("video is PAL, exactly 25/1, two fields a frame")
+    rate, fps = SYSTEMS[args.system]
+    if (video.get("system"), video.get("frame_rate_exact"), video.get("fields_per_frame")) == (args.system, rate, 2):
+        ok(f"video is {args.system}, exactly {rate[0]}/{rate[1]}, two fields a frame")
     else:
         fail(f"video is {video.get('system')}, {video.get('frame_rate_exact')}, "
-             f"{video.get('fields_per_frame')} fields a frame (PAL, [25, 1], 2 expected)")
+             f"{video.get('fields_per_frame')} fields a frame ({args.system}, {rate}, 2 expected)")
     count = video.get("frame_count")
     summary["frame_count"] = count
     if count == args.frames:
@@ -200,7 +208,6 @@ def main():
     covered = set()
     breaks = []
     beyond = []
-    fps = 25
     try:
         for i, run in enumerate(runs):
             start, n = run["file_frame"], run["count"]
@@ -238,8 +245,8 @@ def main():
                               "first_address": min(addresses, default=None),
                               "last_address": max(addresses, default=None)}
     if kind == "cav_picture":
-        if addresses and max(addresses) >= PAL_PICTURE_LIMIT:
-            fail(f"pictures reach {max(addresses)}: at or above {PAL_PICTURE_LIMIT} the biphase decoder misreads them")
+        if addresses and max(addresses) >= PICTURE_LIMIT:
+            fail(f"pictures reach {max(addresses)}: at or above {PICTURE_LIMIT} the biphase decoder misreads them")
         if args.pictures:
             first, last = map(int, args.pictures.split("-"))
             programme = set(range(first, last + 1))
@@ -258,8 +265,12 @@ def main():
         note(f"{len(breaks)} run break(s) (address discontinuities), at file frames {', '.join(map(str, breaks[:20]))}")
     else:
         note("one run: no address discontinuity")
-    if unnumbered:
+    if unnumbered and args.system == "PAL":
         note(f"{len(unnumbered)} unnumbered frame(s), unexpected on a PAL video disc: {ranges_text(unnumbered)}")
+    elif unnumbered:
+        # NTSC film in 3:2 pulldown: one frame in five carries no number.
+        note(f"{len(unnumbered)} unnumbered frame(s), the pulldown frames of NTSC film "
+             f"({len(unnumbered) / max(frames, 1):.1%} of the file, against 20% for 3:2 pulldown throughout)")
     if undecoded:
         note(f"{len(undecoded)} undecoded frame(s) (numbered on the disc, not recovered): {ranges_text(undecoded)}")
     else:

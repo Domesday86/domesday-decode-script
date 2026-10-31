@@ -20,11 +20,10 @@
 # several frames is stacked across them as well as across the sets, which is
 # most of what stacking gains on held pictures. still_frame_search,
 # luma_level_match and chroma_gain_match are left to decode-orc's defaults
-# (24 frames, on, on). The video sink decodes held pictures in 3D and every
-# other frame in 2D (decoder_type multiple, decoder_schedule
-# "transform2d, held:transform3d"): 3D is better only where the picture is
-# held, and worse on single-frame stills. build-pack.sh sets the decoder from
-# disc.conf, so the two are the same.
+# (24 frames, on, on). The video sink decodes by picture range, 3D on the
+# side's motion sequences and 2D on its stills (decoder_type multiple, the
+# decoder_schedule below; disc.conf gives the ranges). build-pack.sh sets
+# the decoder from disc.conf, so the two are the same.
 
 project:
   name: EcoDisc Side 1 stack
@@ -280,7 +279,7 @@ dag:
           value: multiple
         decoder_schedule:
           type: string
-          value: transform2d, held:transform3d
+          value: transform2d, 1-4750:transform3d, 4751-6648:transform2d, 6649-53520:transform3d, 53521-53550:transform2d, 53551-53800:transform3d, 53801-54000:transform2d
         display_aspect_ratio:
           type: string
           value: 4:3

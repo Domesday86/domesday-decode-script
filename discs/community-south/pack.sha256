@@ -9,5 +9,5 @@
 # same bytes as the hand-built one wherever both recovered a sector, but for
 # the 21 in vfs.baseline_differs, where the hand-built image holds damage the
 # sharp pressings share.
-c0afc7fc25d81f3cb7c847a49123bf960fcff98cf5faab8f788eb765549921a0  dd_comS_stack.dat
-8c19868f23d2723aabe0dc84e7cef6a15db77dd41f2706f977b76d448c2e30b5  dd_comS_stack.dat.bsm
+c0afc7fc25d81f3cb7c847a49123bf960fcff98cf5faab8f788eb765549921a0  dd_community_south.dat
+8c19868f23d2723aabe0dc84e7cef6a15db77dd41f2706f977b76d448c2e30b5  dd_community_south.dat.bsm

@@ -1,0 +1,79 @@
+# ORC Project File
+# Version: 2.0
+#
+# Dragon's Lair, one disc set: the SNR, dropout and burst level analysis of
+# its decode, for the selection report (phase 4). build-pack.sh's set stage
+# copies this beside its outputs and points "Disc" at the set's decode with
+# orc-cli nodes set, then runs each sink's tool with tools run --json --csv. It
+# is never run with --process, so the sinks write nothing themselves.
+#
+# Dropouts are counted over the whole field ("full"), VBI lines included,
+# since those carry the picture numbers the Disc Mapper reads.
+
+project:
+  name: Dragon's Lair set quality
+  version: 2.0
+  video_format: NTSC
+  source_format: Composite
+  amplitude_unit: 10bit
+dag:
+  nodes:
+    - id: 1
+      stage: NTSC_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: Disc
+      x: 50
+      y: 50
+      parameters:
+        input_path:
+          type: string
+          value: ""
+        y_path:
+          type: string
+          value: ""
+        c_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+    - id: 2
+      stage: snr_analysis_sink
+      node_type: ANALYSIS_SINK
+      display_name: SNR Analysis Sink
+      user_label: SNR
+      x: 275
+      y: 50
+      parameters:
+        mode:
+          type: string
+          value: both
+    - id: 3
+      stage: dropout_analysis_sink
+      node_type: ANALYSIS_SINK
+      display_name: Dropout Analysis Sink
+      user_label: Dropouts
+      x: 275
+      y: 175
+      parameters:
+        mode:
+          type: string
+          value: full
+        report_format:
+          type: string
+          value: csv
+    - id: 4
+      stage: burst_level_analysis_sink
+      node_type: ANALYSIS_SINK
+      display_name: Burst Level Analysis Sink
+      user_label: Burst
+      x: 275
+      y: 300
+  edges:
+    - from: 1
+      to: 2
+    - from: 1
+      to: 3
+    - from: 1
+      to: 4

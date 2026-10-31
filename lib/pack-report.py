@@ -213,8 +213,7 @@ STACKER_TEXT = ("The stacker measures each input's noise on the flat areas of th
                 "one mother share theirs (a family). It weights each set by what it adds under that model, so a set "
                 "alone in its stamper group, whose noise no other set carries, adds the most. Where the model does not "
                 "explain the sets' differences, the block is stacked with equal weights. It stacks repeats too: a "
-                "picture held over several frames is stacked across them as well as across the sets, and the video "
-                "sink decodes held pictures in 3D and every other frame in 2D.")
+                "picture held over several frames is stacked across them as well as across the sets.")
 UNTRUSTED_TEXT = ("A selection holds the sets of one content version of the disc, which may be cut from several stampers. "
                   "Over these frames the stacker's noise model did not explain how the sets differ, so its weights are not "
                   "the model's; frames that fell back were stacked with equal weights.")

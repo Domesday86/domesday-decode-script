@@ -118,6 +118,17 @@ DISC_EFM="${DISC_EFM:-yes}"
 case "$DISC_EFM" in yes|no) ;; *) die "DISC_EFM is $DISC_EFM in ${DISC_DIR#"$SELF_DIR"/}/disc.conf: yes or no" ;; esac
 has_efm() { [ "$DISC_EFM" = yes ]; }
 
+# The video system (DISC_SYSTEM in disc.conf, PAL unless it says NTSC): what
+# the video stage expects of the mkv, as the video sink writes it (720x576
+# at 25/1, or 720x484 at 30000/1001), and of its disc metadata. The projects
+# in discs/<disc>/ give the same system.
+DISC_SYSTEM="${DISC_SYSTEM:-PAL}"
+case "$DISC_SYSTEM" in
+  PAL)  VIDEO_SIZE=720x576 VIDEO_RATE=25/1 ;;
+  NTSC) VIDEO_SIZE=720x484 VIDEO_RATE=30000/1001 ;;
+  *)    die "DISC_SYSTEM is $DISC_SYSTEM in ${DISC_DIR#"$SELF_DIR"/}/disc.conf: PAL or NTSC" ;;
+esac
+
 # The frames in each block of the quality stage's sample (see the quality
 # stage); a disc.conf may set it.
 QUALITY_SAMPLE_BLOCK="${QUALITY_SAMPLE_BLOCK:-1500}"
@@ -299,6 +310,21 @@ map_sets() {
   yq -r '.dag.nodes[] | select(.stage == "*_CVBS_Source") | .user_label' "$MAP_PROJECT"
 }
 
+# has_beat <project> <set>: whether the project puts the set through an FM
+# Beat Cancel, "<set> beat". In map.orcprj it is calibrated, and the map stage
+# commits the carrier it measures as framemaps/<set>.carrier; in stack.orcprj
+# it is set from that file. A PAL side whose captures carry the beat has one
+# on every set in both projects; NTSC has none.
+has_beat() {
+  [ -f "$1" ] && [ "$(yq -r "[.dag.nodes[] | select(.stage == \"fm_beat_cancel\" and .user_label == \"$2 beat\")] | length" "$1")" = 1 ]
+}
+
+# has_band <project>: whether the project has a Picture Band Limit, "Band",
+# whose cutoff the video stage sets from framemaps/picture-band.
+has_band() {
+  [ -f "$1" ] && [ "$(yq -r '[.dag.nodes[] | select(.stage == "picture_band_limit" and .user_label == "Band")] | length' "$1")" = 1 ]
+}
+
 STACK_PROJECT="$DISC_DIR/stack.orcprj"
 
 # stack_problems: what is wrong with stack.orcprj for the selection, one line
@@ -315,6 +341,15 @@ stack_problems() {
     case "$id" in Align|"Video Out") ;; *) id="$id map" ;; esac
     [ "$(yq -r "[.dag.nodes[] | select(.user_label == \"$id\")] | length" "$STACK_PROJECT")" = 1 ] \
       || printf 'has no one stage named "%s"\n' "$id"
+  done
+  # An FM Beat Cancel on a set exactly where the map stage measures its
+  # carrier.
+  for id in $have; do
+    if has_beat "$MAP_PROJECT" "$id" && ! has_beat "$STACK_PROJECT" "$id"; then
+      printf 'has no "%s beat", though %s measures its carrier\n' "$id" "${MAP_PROJECT#"$SELF_DIR"/}"
+    elif has_beat "$STACK_PROJECT" "$id" && ! has_beat "$MAP_PROJECT" "$id"; then
+      printf 'has "%s beat", but %s does not measure its carrier\n' "$id" "${MAP_PROJECT#"$SELF_DIR"/}"
+    fi
   done
 }
 
@@ -421,8 +456,12 @@ describe_map() {
   stage_input_file "map project" "$MAP_PROJECT"
   stage_output analysis.json
   stage_output refresh.json
-  for id in "${ups[@]}"; do stage_output "framemaps/${id%%|*}.ranges"; done
+  for id in "${ups[@]}"; do
+    stage_output "framemaps/${id%%|*}.ranges"
+    ! has_beat "$MAP_PROJECT" "${id%%|*}" || stage_output "framemaps/${id%%|*}.carrier"
+  done
   stage_output framemaps/alignment
+  stage_output framemaps/picture-band
   stage_output check.txt
 }
 
@@ -483,16 +522,19 @@ describe_video() {
   for id in "${ups[@]}"; do
     stage_input_stamp "decode:${id%%|*}" "${id#*|}"
     stage_input_file "frame map ${id%%|*}" "$FRAMEMAPS/${id%%|*}.ranges"
+    ! has_beat "$STACK_PROJECT" "${id%%|*}" || stage_input_file "carrier ${id%%|*}" "$FRAMEMAPS/${id%%|*}.carrier"
   done
   stage_input_stamp map "$VIDEO_MAP"
   stage_input_file "alignment" "$FRAMEMAPS/alignment"
+  ! has_band "$STACK_PROJECT" || stage_input_file "picture band" "$FRAMEMAPS/picture-band"
   stage_input "video sets" "$(selected_sets video | paste -sd' ' -)"
   stage_input_file "project" "$DISC_DIR/stack.orcprj"
   stage_input_tool decode-orc
   stage_input "decoder" "$VIDEO_DECODER${VIDEO_DECODER_SCHEDULE:+, schedule $VIDEO_DECODER_SCHEDULE}"
   stage_input "noise reduction" "$(video_noise_reduction) dB still_only"
-  stage_input "disc" "$DISC_FORMAT side $DISC_SIDE, pictures $DISC_PICTURES, user code and Amendment 2 $VIDEO_EXPECT"
+  stage_input "disc" "$DISC_SYSTEM $DISC_FORMAT side $DISC_SIDE, pictures $DISC_PICTURES, user code and Amendment 2 $VIDEO_EXPECT"
   stage_input_file "metadata check" "$SELF_DIR/lib/check-disc-metadata.py"
+  stage_input_file "address map check" "$SELF_DIR/lib/check-address-map.py"
   stage_input "baseline" "${VIDEO_BASELINE:-none}"
   stage_output "$STEM.mkv"
   stage_output metadata.yaml
@@ -1082,6 +1124,22 @@ check_map() {
         + ([.sources[0] | select(.signal_state != null) | ", \(.signal_state)"] | add // "")' "$report")"
       jq -r --arg n "$node" '.nodes[] | select(.node == $n) | .items[]? | select(.type != "info") | .message' "$report" \
         | while IFS= read -r line; do note "$id: $line"; done
+
+      # Its FM-beat carrier, where the project calibrates one: FM Beat
+      # Calibration on "<set> beat", a branch off the frame map that the
+      # stack's FM Beat Cancel takes the measured value from.
+      if has_beat "$MAP_PROJECT" "$id"; then
+        node="$id beat"
+        status=$(jq -r --arg n "$node" '.nodes[]? | select(.node == $n) | .status' "$report" 2>/dev/null) || status=""
+        ranges=$(jq -r --arg n "$node" '.nodes[]? | select(.node == $n) | .parameter_changes.carrier_black_mhz // empty' "$report" 2>/dev/null) || ranges=""
+        if [ "$status" = success ] && [ -n "$ranges" ]; then
+          ok "$id FM-beat carrier at black: $ranges MHz ($(jq -r --arg n "$node" '.nodes[] | select(.node == $n) | .statistics
+            | "\(.linesCorrected) of \(.pictureLines) lines corrected on \(.fieldsSearched) fields, \(.removedRmsIre * 100 | round / 100) IRE RMS removed"' "$report"))"
+          printf '%s\n' "$ranges" > "$(stage_tmp "framemaps/$id.carrier")"
+        else
+          fail "$id's FM-beat carrier was not measured (${status:-no report})"
+        fi
+      fi
     done
 
     # Everything the selection report (phase 4) reads from this stage, by set.
@@ -1123,6 +1181,32 @@ check_map() {
                   + (.referenceRunnerUp | if . == null then "" else ", next choice \($ARGS.positional[. - 1])" end))' \
              "${order[@]}" < "$report" \
         | while IFS= read -r line; do note "$line"; done
+
+      # Picture numbers against content: a set whose pictures sit off its
+      # content would blend the neighbouring picture into the stack. The
+      # comparison's warnings above give where, and the map that corrects it.
+      n=$(jq -r '.nodes[] | select(.tool == "source_alignment") | .statistics.contentOffsetSources // "?"' "$report")
+      if [ "$n" = 0 ]; then
+        ok "every set's picture numbers sit on its content"
+      elif [ "$n" = "?" ]; then
+        fail "Source Alignment did not check the picture numbers against the content"
+      else
+        fail "$n set(s) hold picture numbers off their content: correct the alignment by hand or leave the set out (the warnings above)"
+      fi
+
+      # Where the picture ends, which the stack's Picture Band Limit cuts at.
+      # Measured only between captures of two or more stamper families;
+      # without it, the stage's default for the system.
+      jq -r '.nodes[] | select(.tool == "source_alignment") | .statistics
+             | "\(.lumaCutoffMHz // "none") \(.chromaCutoffMHz // "none")"' "$report" | {
+        read -r luma chroma
+        if [ "$luma" = none ]; then
+          note "picture band: not measured (Source Alignment gives no lumaCutoffMHz); the stack's Picture Band Limit takes its default"
+        else
+          note "picture band: luma ends at $luma MHz, chroma at $chroma MHz"
+        fi
+        printf '%s\n' "$luma" > "$(stage_tmp framemaps/picture-band)"
+      }
     else
       fail "Source Alignment did not run to success (${status:-no report})"
     fi
@@ -1527,8 +1611,30 @@ run_video() {
   stage_prune "$OUT" orc video/stage.stamp
 }
 
+# single_project <stack project> <vbi dir>: the stack project cut back to its
+# sources and frame maps, with a Daphne VBI sink on each frame map writing
+# <vbi dir>/<set>.vbi: every set alone, through its committed map, as the
+# stack reads it. The sink decodes only the VBI. Its picture numbers are what
+# the stacked mkv's address map is checked against (lib/check-address-map.py).
+# As in quality_project, the cut is made by yq on the YAML itself.
+single_project() {
+  # shellcheck disable=SC2016 # yq's own variables
+  VBI_DIR="$2" yq '
+    ([ .dag.nodes[].id ] | max) as $top
+    | [ .dag.nodes[] | select(.stage == "*_CVBS_Source" or .stage == "frame_map") | .id ] as $keep
+    | [ .dag.nodes[] | select(.stage == "frame_map") ] as $maps
+    | .project.name += " single captures"
+    | .dag.nodes |= map(select(.id as $i | $keep | any_c(. == $i)))
+    | .dag.edges |= map(select((.from as $i | $keep | any_c(. == $i)) and (.to as $i | $keep | any_c(. == $i))))
+    | .dag.nodes += ($maps | to_entries | map({ "id": $top + 1 + .key, "stage": "daphne_vbi_sink", "node_type": "SINK",
+        "display_name": "Daphne VBI Sink", "user_label": (.value.user_label | sub(" map$"; " vbi")), "x": 500, "y": .value.y,
+        "parameters": { "output_path": { "type": "file_path",
+          "value": (strenv(VBI_DIR) + "/" + (.value.user_label | sub(" map$"; "")) + ".vbi") } } }))
+    | .dag.edges += ($maps | to_entries | map({ "from": .value.id, "to": $top + 1 + .key }))' "$1"
+}
+
 build_video() {
-  local dir d id cvbs rel n=0 mode pad min map="" problems mkv rc t
+  local dir d id cvbs rel n=0 mode pad min map="" problems mkv rc t band spid
   describe_video
   dir="$STAGE_DIR"
   problems=$(stack_problems)
@@ -1543,8 +1649,13 @@ build_video() {
   # The committed maps must still be the map stage's, and the alignment one
   # that pads, which a subset of the sets can take by moving every padding
   # down by the least.
-  for d in "${VIDEO_SETS[@]}" "alignment|"; do
-    id="${d%%|*}"; [ "$id" = alignment ] || id="$id.ranges"
+  local -a committed=(alignment)
+  ! has_band "$STACK_PROJECT" || committed+=(picture-band)
+  for d in "${VIDEO_SETS[@]}"; do
+    committed+=("${d%%|*}.ranges")
+    ! has_beat "$STACK_PROJECT" "${d%%|*}" || committed+=("${d%%|*}.carrier")
+  done
+  for id in "${committed[@]}"; do
     if ! cmp -s -- "$FRAMEMAPS/$id" "$VIDEO_MAP/framemaps/$id"; then
       printf 'video: %s is not the map stage'\''s %s; review with: diff %s %s\n' "${FRAMEMAPS#"$SELF_DIR"/}/$id" \
         "$VIDEO_MAP/framemaps/$id" "${FRAMEMAPS#"$SELF_DIR"/}/$id" "$VIDEO_MAP/framemaps/$id" >&2
@@ -1558,23 +1669,40 @@ build_video() {
   stage_mkdir "$dir" || return 1
   stage_unstamp || return 1
   rm -rf -- "$dir"/*.mkv* "$dir"/*.json* "$dir"/*.yaml* "$dir"/*.log "$dir"/*.orcprj \
-            "$dir"/check.txt* "$dir"/check.failed.txt "$dir"/crash_bundle_*.zip
+            "$dir"/check.txt* "$dir"/check.failed.txt "$dir"/crash_bundle_*.zip "$dir"/vbi
 
   mkv="$STEM.building.mkv"
   cp -- "$STACK_PROJECT" "$dir/stack.orcprj"
+  VIDEO_SINGLE=()
   for d in "${VIDEO_SETS[@]}"; do
     id="${d%%|*}" cvbs="${d#*|}"
     n=$(( n + 1 ))
     pad=$(awk -v s="$id" '$1 == s { print $2 }' "$FRAMEMAPS/alignment")
     [[ "$pad" =~ ^[0-9]+$ ]] || { printf 'video: %s has no padding in the alignment\n' "$id" >&2; return 1; }
     map+="${map:+, }$n+$(( pad - min ))"
+    VIDEO_SINGLE+=("$id=vbi/$id.vbi@$(( pad - min ))")
     rel=$(realpath --relative-to="$dir" -- "$cvbs")
     if ! { orc-cli nodes set "$dir/stack.orcprj" "$id" "input_path=$rel" \
            && orc-cli nodes set "$dir/stack.orcprj" "$id map" "ranges=$(paste -sd, - < "$FRAMEMAPS/$id.ranges")"; } >/dev/null; then
       printf 'video: could not point %s at %s and its frame map\n' "$id" "$cvbs" >&2
       return 1
     fi
+    if has_beat "$STACK_PROJECT" "$id" \
+       && ! orc-cli nodes set "$dir/stack.orcprj" "$id beat" "carrier_black_mhz=$(cat -- "$FRAMEMAPS/$id.carrier")" >/dev/null; then
+      printf 'video: could not set %s'\''s FM-beat carrier\n' "$id" >&2
+      return 1
+    fi
   done
+  # The picture band's cutoff, where the map stage measured one; otherwise
+  # the stage's default for the system.
+  band=""
+  if has_band "$STACK_PROJECT"; then
+    band=$(cat -- "$FRAMEMAPS/picture-band")
+    if [ "$band" != none ] && ! orc-cli nodes set "$dir/stack.orcprj" Band "cutoff_mhz=$band" >/dev/null; then
+      printf 'video: could not set the picture band cutoff\n' >&2
+      return 1
+    fi
+  fi
   if ! { orc-cli nodes set "$dir/stack.orcprj" Align "alignmentMode=$mode" "alignmentMap=$map" \
          && orc-cli nodes set "$dir/stack.orcprj" "Video Out" "output_path=$mkv" "decoder_type=$VIDEO_DECODER" \
               "decoder_schedule=${VIDEO_DECODER_SCHEDULE:-}" \
@@ -1587,9 +1715,20 @@ build_video() {
   printf 'video: stacking %s (alignment %s), decoder %s%s, noise reduction %s dB; progress is in %s/stack.log\n' \
     "$(selected_sets video | paste -sd' ' -)" "$map" "$VIDEO_DECODER" "${VIDEO_DECODER_SCHEDULE:+ ($VIDEO_DECODER_SCHEDULE)}" \
     "$(video_noise_reduction)" "$dir"
+  # Every set alone, through its committed map, for the address map check:
+  # the VBI only, so it reads the decodes beside the stack rather than
+  # after it.
+  mkdir -p -- "$dir/vbi"
+  single_project "$dir/stack.orcprj" vbi > "$dir/single.orcprj" \
+    || { printf 'video: could not make the single-capture project\n' >&2; return 1; }
+  orc-cli "$dir/single.orcprj" --process --log-file "$dir/single.log" --log-out file > "$dir/single-console.log" 2>&1 &
+  spid=$!
   t=$SECONDS rc=0
   orc-cli "$dir/stack.orcprj" --process --log-file "$dir/stack.log" --log-out file > "$dir/console.log" 2>&1 || rc=$?
   printf 'video: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+  VIDEO_SINGLE_RC=0
+  wait "$spid" || VIDEO_SINGLE_RC=$?
+  printf 'video: the single captures'\'' VBI read, orc-cli exited %s\n' "$VIDEO_SINGLE_RC"
 
   if ! check_video "$dir" "$rc" "$mkv"; then
     cat -- "$dir/check.failed.txt" >&2
@@ -1618,6 +1757,14 @@ check_video() {
     printf 'stage:   video\nsets:    %s\ndecoder: %s\nnoise reduction: %s dB still_only\nchecked: %s\n\n' "${sets[*]}" \
       "$VIDEO_DECODER${VIDEO_DECODER_SCHEDULE:+ ($VIDEO_DECODER_SCHEDULE)}" "$(video_noise_reduction)" "$(date '+%F %T')"
 
+    # The chain's measured settings, as the stack was given them.
+    for id in "${sets[@]}"; do
+      ! has_beat "$dir/stack.orcprj" "$id" \
+        || note "FM Beat Cancel on $id: carrier at black $(yq -r ".dag.nodes[] | select(.user_label == \"$id beat\") | .parameters.carrier_black_mhz.value" "$dir/stack.orcprj") MHz"
+    done
+    ! has_band "$dir/stack.orcprj" \
+      || note "Picture Band Limit: luma cut at $(yq -r '.dag.nodes[] | select(.user_label == "Band") | .parameters.cutoff_mhz.value' "$dir/stack.orcprj") MHz$([ "$(cat -- "$FRAMEMAPS/picture-band")" != none ] || printf ' (the default: the map stage measured no band)')"
+
     if [ "$rc" = 0 ] && grep -q 'VideoSink: Successfully wrote' "$dir/stack.log" 2>/dev/null; then
       ok "the stack was processed: $(sed -n 's/.*VideoSink: Successfully wrote \([0-9]*\) frames.*/\1/p' "$dir/stack.log" | tail -1) frames written"
     else
@@ -1625,6 +1772,21 @@ check_video() {
     fi
 
     check_mkv "$mkv" "$dir" "$(stage_tmp metadata.yaml)"
+
+    # The address map against the single captures: every frame most of the
+    # video sets read one picture number on must carry that picture in the
+    # mkv. It is what found Weighted stacking and Dropout Correction
+    # corrupting the VBI (decode-orc 9afae69c), which the metadata check
+    # sees only where a picture is lost outright.
+    if [ "${VIDEO_SINGLE_RC:-1}" = 0 ] && [ -s "$(stage_tmp metadata.yaml)" ]; then
+      pack-python "$SELF_DIR/lib/check-address-map.py" "$(stage_tmp metadata.yaml)" "${VIDEO_SINGLE[@]}" \
+        > "$dir/address-map-check.json" || true
+      while IFS=$'\t' read -r level text; do "$level" "address map: $text"; done < <(
+        jq -r '.checks[] | "\(.level)\t\(.text)"' "$dir/address-map-check.json" 2>/dev/null \
+          || printf 'fail\tthe address map check did not run\n')
+    else
+      fail "address map: the single captures' VBI could not be read (orc-cli exited ${VIDEO_SINGLE_RC:-?}; $dir/single.log)"
+    fi
 
     # The embedded document's sound mode and status agreement against what
     # the Disc Mapper read from the same sets over the whole side (the
@@ -1730,9 +1892,9 @@ check_mkv() {
         (if ($v | length) != 1 then "fail\t\($v | length) video streams, not one" else $v[0] |
           check(.codec_name == "ffv1"; "video is FFV1"; "video is \(.codec_name), not FFV1"),
           check(.pix_fmt == "yuv422p" and .bits_per_raw_sample == "8"; "video is yuv422p, 8-bit"; "video is \(.pix_fmt), \(.bits_per_raw_sample)-bit, not yuv422p 8-bit"),
-          check([.width, .height, .coded_width, .coded_height] == [720, 576, 720, 576]; "video is 720x576, coded 720x576";
-                "video is \(.width)x\(.height), coded \(.coded_width)x\(.coded_height), not 720x576"),
-          check(.r_frame_rate == "25/1"; "video is exactly 25/1"; "video is \(.r_frame_rate), not 25/1"),
+          check("\(.width)x\(.height)" == $size and "\(.coded_width)x\(.coded_height)" == $size; "video is \($size), coded \($size)";
+                "video is \(.width)x\(.height), coded \(.coded_width)x\(.coded_height), not \($size)"),
+          check(.r_frame_rate == $rate; "video is exactly \($rate)"; "video is \(.r_frame_rate), not \($rate)"),
           check(.display_aspect_ratio == "4:3"; "display aspect 4:3 (sample aspect \(.sample_aspect_ratio))"; "display aspect \(.display_aspect_ratio), not 4:3") end),
         (if ($a | length) == 0 then "fail\tno audio stream" else $a[] |
           check(.codec_name == "flac" and .sample_rate == "48000";
@@ -1740,7 +1902,8 @@ check_mkv() {
                 "audio stream \(.index) is \(.codec_name) at \(.sample_rate) Hz, not FLAC at 48 kHz") end),
         ([ .streams[] | select(.codec_type == "attachment" and .tags.filename == "orc-disc-metadata.yaml"
                                and .tags.mimetype == "application/vnd.decode-orc.disc-metadata+yaml") ] | length
-         | check(. == 1; "the disc metadata is attached, by its filename and MIME type"; "\(.) attachments named orc-disc-metadata.yaml with its MIME type, not one"))' "$work/probe.json")
+         | check(. == 1; "the disc metadata is attached, by its filename and MIME type"; "\(.) attachments named orc-disc-metadata.yaml with its MIME type, not one"))' \
+      --arg size "$VIDEO_SIZE" --arg rate "$VIDEO_RATE" "$work/probe.json")
 
     # Every packet a keyframe, counted over the whole stream.
     read -r frames keys < <(ffprobe -v error -select_streams v:0 -show_entries packet=flags -of csv=p=0 "$mkv" \
@@ -1759,7 +1922,8 @@ check_mkv() {
       expect=(--amendment2 "$a2")
       [ "$code" = none ] || expect+=(--user-code "$code")
       pack-python "$SELF_DIR/lib/check-disc-metadata.py" "$meta" --frames "$frames" \
-        --format "$DISC_FORMAT" --side "$DISC_SIDE" --pictures "$DISC_PICTURES" --tag-version "$tagv" "${expect[@]}" \
+        --format "$DISC_FORMAT" --side "$DISC_SIDE" --pictures "$DISC_PICTURES" --system "$DISC_SYSTEM" \
+        --tag-version "$tagv" "${expect[@]}" \
         > "$work/metadata-check.json" || true
       while IFS=$'\t' read -r level text; do "$level" "metadata: $text"; done < <(
         jq -r '.checks[] | "\(.level)\t\(.text)"' "$work/metadata-check.json" 2>/dev/null || printf 'fail\tthe metadata check did not run\n')

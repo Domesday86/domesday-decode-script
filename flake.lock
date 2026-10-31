@@ -8,18 +8,20 @@
           "flake-utils"
         ],
         "nixpkgs": "nixpkgs",
-        "qtnodes": "qtnodes"
+        "qtnodes": "qtnodes",
+        "videosynth": "videosynth"
       },
       "locked": {
-        "lastModified": 1793127420,
-        "narHash": "sha256-UG0RPP022mH79RH3b+fHwTUDyxMW3NP7Ca9+ZRv7JwA=",
+        "lastModified": 1793449074,
+        "narHash": "sha256-cFLJWiK2DT//L/j72I1RTu0z1xI6wSIrpyvBgnPCDVQ=",
         "owner": "decode-orc",
         "repo": "decode-orc",
-        "rev": "a690be7233c112b1200943fbbbd2f3a62e975b5f",
+        "rev": "dc3b7ee86c376e375826de264f24757524de004d",
         "type": "github"
       },
       "original": {
         "owner": "decode-orc",
+        "ref": "20261030-001",
         "repo": "decode-orc",
         "type": "github"
       }
@@ -193,6 +195,32 @@
       "original": {
         "owner": "Domesday86",
         "repo": "vfs-verifier",
+        "type": "github"
+      }
+    },
+    "videosynth": {
+      "inputs": {
+        "flake-utils": [
+          "decode-orc",
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "decode-orc",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793359502,
+        "narHash": "sha256-U/jsKcG+WzwlWc+tm7sL2YWagOx4d0JbMQtNwcQiAFw=",
+        "owner": "decode-orc",
+        "repo": "videosynth",
+        "rev": "139b31e50f7b955001daf2901af7175b8e094552",
+        "type": "github"
+      },
+      "original": {
+        "owner": "decode-orc",
+        "repo": "videosynth",
+        "rev": "139b31e50f7b955001daf2901af7175b8e094552",
         "type": "github"
       }
     }

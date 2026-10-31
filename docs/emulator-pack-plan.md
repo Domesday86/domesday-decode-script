@@ -985,15 +985,17 @@ The stack template is filled in with the selected video sets. Its stages are:
   `still_frame_search` (24 by default; 50 measured the same),
   `luma_level_match` and `chroma_gain_match` (on) are left at decode-orc's
   defaults, so the projects do not store them.
-- **The decoder schedule.** Video Out takes `decoder_type` `multiple` with
-  `decoder_schedule` `transform2d, held:transform3d`, from the disc's
-  `VIDEO_DECODER` and `VIDEO_DECODER_SCHEDULE`. A frame whose picture the
-  stacker marks as held for at least 4 frames either side is decoded in 3D,
-  so the filter never spans two pictures; every other frame is decoded in
-  2D. 3D is about 1 dB better on held pictures and 2.7 dB worse on the
-  single-frame stills that make up most of a still-frame disc, so it is
-  taken only where the picture is held. The table below is the decoder for
-  frames that are not held.
+- **The decoder schedule.** Video Out takes the disc's `VIDEO_DECODER` and
+  `VIDEO_DECODER_SCHEDULE`. A side with both motion and stills uses
+  `decoder_type` `multiple` with a schedule of picture ranges, 3D on the
+  motion sequences and 2D on the stills. The ranges are the side's known
+  content, given by a person, and replace the earlier
+  `transform2d, held:transform3d`, which let the stacker guess where a
+  picture was held. 3D is about 1 dB better on held pictures and 2.7 dB
+  worse on single-frame stills. The schedule counts the sink's frames
+  0-based; on a CAV side whose address map is one run with picture p on
+  frame p, the picture ranges are the frame ranges. The table below gives
+  each side's decoder.
 - **Noise reduction** stays off by default. The selection's owner may set
   `video.noise_reduction` (dB) in `selection.yaml`; it is applied in
   `still_only` mode, which averages only across held frames and has no
@@ -1008,14 +1010,17 @@ programme.
 
 | Disc / side | Content | Decoder |
 | --- | --- | --- |
-| Volcanoes | Mostly stills (AIV still-frame sets), with some motion sequences | `transform2d` (for now) |
-| Domesday National A, Community N/S | Mostly stills (photos, maps, surrogate walks) | `transform2d` (for now) |
-| Domesday National B | Motion (the CLV side) | `transform3d` |
-| EcoDisc side 1 | Mostly stills | `transform2d` |
+| Volcanoes | Motion, then stills (AIV still-frame sets) | By picture: `transform3d` 1–46750 and 47601–49200, `transform2d` 46751–47600 and 49201–54000 |
+| Domesday National A | Stills (photos, maps, surrogate walks), with motion at each end | By picture: `transform3d` 1–801 and 40841–54000, `transform2d` 802–40840 |
+| Domesday Community North | The same | By picture: `transform3d` 1–3200 and 44381–54000, `transform2d` 3201–44380 |
+| Domesday Community South | The same | By picture: `transform3d` 1–3200 and 44981–54000, `transform2d` 3201–44980 |
+| Domesday National B | Motion (the CLV side) | `transform3d` on every frame |
+| EcoDisc side 1 | Motion, with still sections | By picture: `transform3d` 1–4750, 6649–53520 and 53551–53800, `transform2d` 4751–6648, 53521–53550 and 53801–54000 |
 | EcoDisc side 2 | A TV programme (motion) | `transform3d` |
 | City (both sides) | Likely mostly stills | `transform2d` |
 | North Polar | Mostly motion | `transform3d` |
-| Countryside | Mostly stills | `transform2d` |
+| Countryside side 1 | Motion, with a still section | By picture: `transform3d` 1–5999 and 11500–54085, `transform2d` 6000–11499 |
+| Countryside side 2 | Stills, with motion at each end | By picture: `transform3d` 1–850 and 31001–51000, `transform2d` 851–31000 |
 
 This is a content decision, not a measurement. It is confirmed by a person
 when a disc is added, and recorded in its configuration.
@@ -1481,12 +1486,16 @@ does nothing, in about 8 s. The first waits on the hand check.
 
 ### Phase 8: Roll out to the other discs
 
-Next come the Domesday sides. Their stems already exist: `dd_natA_stack`,
-`dd_natB_stack`, `dd_comS_stack` and `dd_comN_stack`. Then the other AIV
+Next come the Domesday sides. Their stems are `dd_national_a`,
+`dd_national_b`, `dd_community_south` and `dd_community_north`, which
+vp415e shows as DD NATIONAL A and so on (the hand-built stacks in the
+library keep their old `dd_natA_stack`-style names). Then the other AIV
 discs. The differences from Volcanoes:
 
 - **National B is CLV and has chapters.** The Disc Mapper and Source Alignment
-  work on timecodes, and the chapter metadata needs its own check.
+  work on timecodes, and the chapter metadata needs its own check. It is
+  motion throughout, so its `disc.conf` will set `VIDEO_DECODER=transform3d`
+  with no schedule: every frame in 3D.
 - **Several captures can make up one side.** A side whose capture was taken in
   more than one pass (the `first picture` column) has passes that must be
   joined before the Disc Mapper runs, or mapped as separate sources.
@@ -1497,7 +1506,7 @@ discs. The differences from Volcanoes:
   test of phase 4.
 
 **Under way: Community South** (`discs/community-south`, stem
-`dd_comS_stack`), from its 12 captures, one per Domesday set.
+`dd_community_south`), from its 12 captures, one per Domesday set.
 
 - `decode-community-south.sh` is `decode-volcanoes.sh` with this side's set
   table, the same flags, and two checks changed:
@@ -1543,6 +1552,19 @@ discs. The differences from Volcanoes:
   rest; no three sets manage that. The hand-built image, stacked from sharp
   sets only, took the damaged bytes as good, so it differs from this one in
   those 21 sectors (`vfs.baseline_differs`).
+- Rebuilt on decode-orc 1e62354 (decode-orc#354), 2026-10-30, scripts and
+  projects only so far:
+  - `map.orcprj` calibrates an FM Beat Cancel on every set (`<set> beat`).
+    The carriers are committed as `framemaps/<set>.carrier`, beside where
+    the side's picture ends (`framemaps/picture-band`).
+  - `stack.orcprj` puts each set through its beat cancel before Align, sets
+    `pressing_repair` (no `vbi_mono_average`: the side is stereo), sets
+    Dropout Correction to `interpolate`, and adds `Band` (Picture Band
+    Limit) before the sink.
+  - The map stage fails a set whose picture numbers sit off its content.
+  - Not yet run: decode-orc's `transform3d` chroma decoder may have a bug to
+    fix first. `selection.yaml` stands until the new compare report has
+    been read.
 
 **Under way: EcoDisc**, one pack per side, each with its own decode script.
 
@@ -1599,7 +1621,7 @@ discs. The differences from Volcanoes:
   `4dbbdd206654fe8e`), Side 2 complete (pack `b9fb322187cfd621`). Both
   passed the hand check on the player on 2026-10-29.
 
-**Complete: National A** (`discs/national-a`, stem `dd_natA_stack`).
+**Complete: National A** (`discs/national-a`, stem `dd_national_a`).
 
 - Thirteen captures: one per set, but DS1's, which is two passes. The player
   lost the disc at picture 37480, and the second pass picks up at 39001. The
@@ -1648,8 +1670,39 @@ discs. The differences from Volcanoes:
   reference is in `pack.sha256`. It passed the hand check on the player on
   2026-10-29.
 
+**Under way: Dragon's Lair** (`discs/dragons-lair`, stem `dragons_lair`),
+an NTSC CAV film disc with 3:2 pulldown, from its five captures. It is not
+a VP415e title: it is built as a video-only pack, as an NTSC reference for
+decode-orc, the same way as EcoDisc side 2 (no EFM, no VFS stack).
+
+- `disc.conf` gives `DISC_SYSTEM=NTSC`. build-pack.sh then expects an mkv of
+  720×484 at 30000/1001, and `check-disc-metadata.py --system NTSC` checks
+  the video block. The unnumbered frames are noted as pulldown, not as
+  unexpected.
+- The projects are NTSC (`NTSC_CVBS_Source`). The stack follows
+  decode-orc#354's chain with these differences:
+  - no FM Beat Cancel, which is PAL only;
+  - no `vbi_mono_average`: the disc says mono but carries its sound on one
+    carrier;
+  - `pressing_repair` stays off: decode-orc#354 leaves it unmeasured on
+    real NTSC.
+
+  The sink decodes with `ntsc3d`.
+- Built through compare on 2026-10-30. `selection.yaml` stacks DS3 DS1 DS2
+  DS4 and drops DS5 (the faulty capture). The video stage failed its
+  metadata check. decode-orc 1e62354's Dropout Correction marks VBI lines as
+  dropouts and replaces them from other lines, which corrupts the picture
+  numbers, so pictures drop out of the mkv's address map. It waits on the
+  decode-orc fix, then reruns from the video stage, Weighted. The fix is
+  decode-orc 9afae69c (branch 20261030-001, pinned in flake.nix until it
+  merges). Weighted now marks only the active picture, Dropout Correction
+  leaves lines outside it alone, and the sink's address map recognises a
+  pulldown frame by its VBI. The video stage now also checks the mkv's
+  address map against every video set alone (lib/check-address-map.py),
+  which is what found it.
+
 **Under way: Community North** (`discs/community-north`, stem
-`dd_comN_stack`), from its 12 captures, one per Domesday set, each whole to
+`dd_community_north`), from its 12 captures, one per Domesday set, each whole to
 picture 54000 by its file name.
 
 - `decode-community-north.sh` is `decode-national-a.sh` with this side's set
@@ -1701,7 +1754,7 @@ picture 54000 by its file name.
 | Question | Decision |
 | --- | --- |
 | Display aspect | 4:3 |
-| Chroma decoder | Per side: `transform3d` for Domesday National B, EcoDisc side 2 and North Polar; `transform2d` for every other side, Volcanoes and Domesday for now (phase 5 table) |
+| Chroma decoder | Per side (phase 5 table): `transform3d` on every frame for Domesday National B, EcoDisc side 2 and North Polar; by known picture ranges for Volcanoes, EcoDisc side 1, both Countryside sides, National A and Community North and South; `transform2d` for every other side |
 | Library access | Read-only, never written; all output and r/w goes to the decodes share |
 | Choosing sets and removing outliers | Decided by a person from the phase 4 results, then committed; the scripts are not dynamic |
 | Outputs per title | One emulation output per AIV title (one stem per side); outlier sets are dropped, never made into a second output |

@@ -10,5 +10,5 @@
 # vp415e_projects/CommunityN_output/dd_comN_stack.dat in all 127519 sectors
 # both recovered but 133242, past the end of the filesystem, which the
 # selection records (vfs.baseline_differs).
-08594e1dc15ef615c03504d470ab9944a080fe5e06d1459c8223126ebd28a157  dd_comN_stack.dat
-1b8e5c3917abf3bf61ead5e8cc99012cd83ea7af691677c093f5cd11bb36ab29  dd_comN_stack.dat.bsm
+08594e1dc15ef615c03504d470ab9944a080fe5e06d1459c8223126ebd28a157  dd_community_north.dat
+1b8e5c3917abf3bf61ead5e8cc99012cd83ea7af691677c093f5cd11bb36ab29  dd_community_north.dat.bsm

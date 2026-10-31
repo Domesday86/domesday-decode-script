@@ -488,7 +488,7 @@ dag:
           value: multiple
         decoder_schedule:
           type: string
-          value: transform2d, held:transform3d
+          value: transform2d, 1-801:transform3d, 802-40840:transform2d, 40841-54000:transform3d
         display_aspect_ratio:
           type: string
           value: 4:3

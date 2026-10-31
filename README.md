@@ -954,10 +954,34 @@ it.
 ## Decoding the Dragon's Lair disc
 
 `decode-dragons-lair.sh` decodes the **NTSC** arcade disc of **Dragon's Lair**
-(Cinematronics, 1983). It is not a Domesday or AIV title and has no VP415e
-pack: it is decoded as an **NTSC stacking reference for testing decode-orc**.
-The disc is single-sided, and the library has five copies, `DS1` to `DS5`,
-each captured once in December 2019 (`Arcade/Dragons_Lair`).
+(Cinematronics, 1983). It is not a Domesday or AIV title: it is decoded as
+an **NTSC stacking reference for testing decode-orc**. The disc is
+single-sided, and the library has five copies, `DS1` to `DS5`, each
+captured once in December 2019 (`Arcade/Dragons_Lair`).
+
+`build-pack.sh dragons-lair` builds it a **video-only pack**,
+`dragons_lair.mkv`, the same way as EcoDisc side 2: the disc has no EFM,
+so there is no VFS stack. `discs/dragons-lair/` has the following:
+- `disc.conf`: `DISC_SYSTEM=NTSC`, `DISC_EFM=no`, CAV side 1, pictures
+  1–31805, and the `ntsc3d` decoder on every frame;
+- `map.orcprj`, `set-quality.orcprj` and `stack.orcprj`, all NTSC;
+- `selection.yaml`, which is written once the compare report is in.
+
+The stack uses decode-orc#354's chain with two exceptions:
+- no FM Beat Cancel, which is PAL only;
+- no `vbi_mono_average`, because the disc says mono but carries its sound on
+  one carrier.
+
+Its first video stage, on decode-orc 1e62354, failed the metadata check:
+the Weighted stacker marked VBI lines 17 and 18 as dropouts, and Dropout
+Correction pasted picture over them. That lost 25 picture numbers, each next
+to a pulldown frame. decode-orc 9afae69c fixes it, and the address map check
+against the single captures (see the video stage under [Building a VP415e
+pack](#building-a-vp415e-pack)) now guards against it.
+
+The 3:2 pulldown frames are kept unnumbered in the frame maps and the mkv.
+The metadata check notes how many there are, and they fall near 20% of the
+file.
 
 ```sh
 nix develop
@@ -1116,7 +1140,20 @@ inputs, so a re-run with nothing changed does nothing.
     attaches to its report, not from its summary text;
   - `refresh.json`, decode-orc's own report, and `check.txt`;
   - `framemaps/<set>.ranges` (one entry per line, 0-based as a project
-    stores them) and `framemaps/alignment` (each set's padding).
+    stores them) and `framemaps/alignment` (each set's padding);
+  - `framemaps/picture-band`: where the picture ends, Source Alignment's
+    `lumaCutoffMHz`, which it measures only between captures of two or more
+    stamper families (`none` otherwise);
+  - `framemaps/<set>.carrier`, on a side whose `map.orcprj` puts a set
+    through an FM Beat Cancel (`<set> beat`, a branch off its frame map that
+    feeds nothing): the master's FM carrier at black, measured by the refresh's
+    FM Beat Calibration. Community South has one on every set. The stage is
+    PAL only.
+
+  The stage fails if Source Alignment finds a set whose picture numbers sit
+  off its content (`contentOffsetSources`). Stacking that set would blend in
+  the neighbouring picture. Its warning gives the alignment map that would
+  correct it: fix the set's alignment by hand, or leave the set out.
 
   The frame maps and alignment are also copied into `discs/<disc>/framemaps/`
   for committing, so a change in mapping shows up in `git diff`. A set that
@@ -1191,16 +1228,35 @@ inputs, so a re-run with nothing changed does nothing.
   `VIDEO_DECODER` and `VIDEO_DECODER_SCHEDULE`, the selection's noise
   reduction, audio, chapters and disc metadata).
 
+  A stack project rebuilt on decode-orc#354's advice (Community South and
+  Dragon's Lair so far) adds to that chain. The video stage sets the
+  measured values from the committed `framemaps/`, and `check.txt` notes
+  them:
+  - **`<set> beat`**: FM Beat Cancel between each frame map and Align, on
+    PAL only. Its `carrier_black_mhz` comes from `framemaps/<set>.carrier`.
+    The stack must have one on exactly the sets whose carrier `map.orcprj`
+    measures.
+  - **`pressing_repair`** on the Stacker, where the sets come from more than
+    one stamper group.
+  - No **`vbi_mono_average`** on any Domesday side: their sound is stereo.
+    A PAL disc can't carry analogue sound and EFM at once, and the VBI's
+    odd sound modes come from that, not from mono passages.
+  - **Dropout Correction** with `method: interpolate`.
+  - **`Band`**: Picture Band Limit after Dropout Correction. Its `cutoff_mhz`
+    comes from `framemaps/picture-band`; when no band was measured, it takes
+    the stage's default for the system (5.4 MHz PAL, 5.0 MHz NTSC).
+
   The Stacker stacks repeats (`still_frame_stacking`): a picture held over
   several frames is stacked across them as well as across the sets, which is
   most of what stacking gains on held pictures. It leaves `still_frame_search`
   (24), `luma_level_match` and `chroma_gain_match` (on) at decode-orc's
-  defaults. The video sink decodes with `decoder_type` `multiple` and the
-  schedule `transform2d, held:transform3d`: a frame whose picture the
-  stacker marks as held for at least 4 frames either side is decoded in 3D,
-  and every other frame in 2D. 3D is about 1 dB better on held pictures and
-  2.7 dB worse on the single-frame stills that make up most of a disc, so it
-  is taken only where the picture is held. It writes:
+  defaults. The video sink decodes by picture range, from the side's
+  `disc.conf`: `decoder_type` `multiple`, 3D on the motion sequences and 2D
+  on the stills, the ranges given by a person from the side's known content
+  (3D is about 1 dB better on held pictures and 2.7 dB worse on single-frame
+  stills). The schedule counts frames 0-based, and on these sides picture p
+  is frame p. A side that is motion throughout (National B, EcoDisc side 2,
+  Dragon's Lair) takes one 3D decoder on every frame. It writes:
   - `<stem>.mkv`;
   - `metadata.yaml`, the disc metadata document taken from the mkv;
   - `video.json`: the container's figures, the metadata summary, each set's
@@ -1210,7 +1266,9 @@ inputs, so a re-run with nothing changed does nothing.
   - `check.txt`.
 
   The mkv is checked as vp415e loads it:
-  - Matroska and FFV1, `yuv422p` 8-bit, 720×576, exactly 25/1 and 4:3;
+  - Matroska and FFV1, `yuv422p` 8-bit and 4:3, at the size and rate of the
+    disc's `DISC_SYSTEM`: 720×576 at exactly 25/1 for PAL (the default), or
+    720×484 at 30000/1001 for NTSC (what decode-orc's video sink writes);
   - every packet a keyframe;
   - FLAC audio at 48 kHz.
 
@@ -1218,12 +1276,29 @@ inputs, so a re-run with nothing changed does nothing.
   dev shell's `pack-python`. It reads the document as decode-orc's format
   spec says a reader must, and checks:
   - the version;
+  - the video system and its exact rate (`--system`);
   - the frame count;
   - the disc's format and side (`DISC_FORMAT`, `DISC_SIDE`);
   - the user code and Amendment 2 that the chosen sets read in the `compare`
     stage;
   - every picture in `DISC_PICTURES` resolving to exactly one frame;
   - unmapped frames only in the lead-in and lead-out.
+
+
+  The **address map** is also checked against the single captures, by
+  `lib/check-address-map.py`. While the stack is processed, each video set
+  is run alone through its committed frame map into decode-orc's Daphne VBI
+  sink, which decodes only the VBI. That takes minutes beside the stack, not
+  hours. For every frame where most of the sets that read a picture number
+  agree on one, P, the mkv's address map must put picture P on that frame.
+  A frame left without a picture, or given another, fails the stage. Frames
+  no majority reads aren't compared: pulldown frames, padding, and numbers
+  the captures disagree on.
+
+  This is the check that found decode-orc's Weighted stacker and Dropout
+  Correction corrupting the VBI: they marked lines 17 and 18 as dropouts and
+  pasted picture over them (fixed in 9afae69c). The metadata check sees that
+  only where a picture is lost outright; this one sees it on every frame.
 - **Phase 6 is in place:** the `vfs` stage. It stacks the selection's VFS
   sets' EFM images, best first, with `vfs-stacker` (majority consensus), and
   checks the result with `vfs-verifier`. It writes, under `vfs-<rev>/`:
@@ -1336,7 +1411,7 @@ inputs, so a re-run with nothing changed does nothing.
   at once. Each runs its decodes two at a time, and two discs' decodes
   together take the host past its measured best, so start the second when the
   first is past its decodes.
-  - **Domesday Community South** (`community-south`, stem `dd_comS_stack`):
+  - **Domesday Community South** (`community-south`, stem `dd_community_south`):
     the 12 Community South captures, decoded by `decode-community-south.sh`,
     which is `decode-volcanoes.sh` with this side's set table and checks. Its
     EFM data runs from about picture 1950 to 45040, not to the end of the
@@ -1345,7 +1420,7 @@ inputs, so a re-run with nothing changed does nothing.
     hand-built stack in `vp415e_projects/CommunityS_output`, which stacked
     DS4, DS6, DS8 and DS10. Its `selection.yaml` and `stack.orcprj` are
     written once the compare report is in.
-  - **Domesday National A** (`national-a`, stem `dd_natA_stack`): the 13
+  - **Domesday National A** (`national-a`, stem `dd_national_a`): the 13
     National A captures, decoded by `decode-national-a.sh`, which is
     `decode-community-south.sh` with this side's set table and checks. DS1's
     side is two passes, decoded as two sets: `DS1`, pictures 1–37480, and
@@ -1357,7 +1432,7 @@ inputs, so a re-run with nothing changed does nothing.
     `vp415e_projects/NationalA_output`, which stacked DS4, DS6, DS8 and DS10
     (its mkv is `dd_natA_stack_001.mkv`). Its `selection.yaml` and
     `stack.orcprj` are written once the compare report is in.
-  - **Domesday Community North** (`community-north`, stem `dd_comN_stack`):
+  - **Domesday Community North** (`community-north`, stem `dd_community_north`):
     the 12 Community North captures, decoded by `decode-community-north.sh`,
     which is `decode-national-a.sh` with this side's set table and checks.
     Its EFM data runs from about picture 1950 to 44410, as on Community
