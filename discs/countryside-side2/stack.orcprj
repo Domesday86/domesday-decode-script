@@ -2,28 +2,46 @@
 # Version: 2.0
 #
 # Countryside Side 2, the video stack: the sets selection.yaml chooses for the
-# video, in its order, each through a Frame Map, all into one Source Align,
-# then the Stacker, Dropout Correction and the video sink that writes the
-# pack's mkv. build-pack.sh's video stage copies this beside its outputs,
-# points each source at its set's decode, sets each frame map and the
-# alignment from the committed discs/countryside-side2/framemaps/ (made by the
-# map stage), and processes it. Nothing here is refreshed, so the stack is
-# built from the reviewed maps.
+# video, in its order, each through a Frame Map and an FM Beat Cancel, all
+# into one Source Align, then the Stacker, Dropout Correction, Picture Band
+# Limit and the video sink that writes the pack's mkv. build-pack.sh's video
+# stage copies this beside its outputs, points each source at its set's
+# decode, sets each frame map and the alignment from the committed
+# discs/countryside-side2/framemaps/ (made by the map stage), and processes
+# it. Nothing here is refreshed, so the stack is built from the reviewed maps.
 #
-# Each source is labelled with its set id and its frame map "<set> map", as
-# in map.orcprj. The sources must be the video sets of selection.yaml, in
-# the same order: the first sets the Stacker's sample grid (the compare
-# report's suggested reference). Adding or dropping a set means editing this
-# project.
+# Each source is labelled with its set id and its frame map "<set> map", as in
+# map.orcprj. The sources must be the video sets of selection.yaml, in the
+# same order: the first sets the Stacker's sample grid (the compare report's
+# suggested reference). Adding or dropping a set means editing this project.
+#
+# The chain follows decode-orc#354's advice, as on Community South:
+#
+# - "<set> beat", FM Beat Cancel, between each frame map and Align: before the
+#   Stacker, since the beat's phase differs between masters. The video stage
+#   sets each one's carrier_black_mhz from framemaps/<set>.carrier, which the
+#   map stage measures.
+# - The Stacker is Weighted, with sample_align, still_frame_stacking and
+#   pressing_repair: the side's video sets come from more than one stamper
+#   group (selection.yaml), and the repair replaces a defect every disc of one
+#   stamper carries with the stack of the other groups'.
+# - No Audio Channel Map vbi_mono_average. audio_stacking stays Mean.
+# - Dropout Correction fills dropouts by interpolate, from the clean lines
+#   above and below, luma and chroma apart.
+# - "Band", Picture Band Limit, after Dropout Correction: it low-passes the
+#   luma where the picture ends, the map stage's lumaCutoffMHz
+#   (framemaps/picture-band), measured between captures of different stamper
+#   families. The video stage sets cutoff_mhz from it; rolloff_mhz stays 0.4.
+#   Chroma is untouched.
 #
 # The Stacker stacks repeats (still_frame_stacking): a picture held over
 # several frames is stacked across them as well as across the sets, which is
 # most of what stacking gains on held pictures. still_frame_search,
-# luma_level_match and chroma_gain_match are left to decode-orc's defaults
-# (24 frames, on, on). The video sink decodes by picture range, 3D on the
-# side's motion sequences and 2D on its stills (decoder_type multiple, the
-# decoder_schedule below; disc.conf gives the ranges). build-pack.sh sets
-# the decoder from disc.conf, so the two are the same.
+# luma_level_match and chroma_gain_match are left to decode-orc's defaults (24
+# frames, on, on). The video sink decodes by picture range, 3D on the side's
+# motion sequences and 2D on its stills (decoder_type multiple, the
+# decoder_schedule below; disc.conf gives the ranges). build-pack.sh sets the
+# decoder from disc.conf, so the two are the same.
 
 project:
   name: Countryside Side 2 stack
@@ -203,6 +221,9 @@ dag:
         still_frame_stacking:
           type: bool
           value: true
+        pressing_repair:
+          type: bool
+          value: true
     - id: 11
       stage: dropout_correct
       node_type: TRANSFORM
@@ -211,6 +232,9 @@ dag:
       x: 950
       y: 50
       parameters:
+        method:
+          type: string
+          value: interpolate
         overcorrect_extension:
           type: uint32
           value: 0
@@ -282,6 +306,64 @@ dag:
         video_filter:
           type: string
           value: ""
+    - id: 13
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS5 beat
+      x: 387
+      y: 50
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 14
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS2 beat
+      x: 387
+      y: 175
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 15
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS1 beat
+      x: 387
+      y: 300
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 16
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS4 beat
+      x: 387
+      y: 425
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 17
+      stage: picture_band_limit
+      node_type: TRANSFORM
+      display_name: Picture Band Limit
+      user_label: Band
+      x: 950
+      y: 150
+      parameters:
+        cutoff_mhz:
+          type: double
+          value: 5.4
+        rolloff_mhz:
+          type: double
+          value: 0.4
   edges:
     - from: 1
       to: 5
@@ -292,16 +374,26 @@ dag:
     - from: 4
       to: 8
     - from: 5
-      to: 9
+      to: 13
     - from: 6
-      to: 9
+      to: 14
     - from: 7
-      to: 9
+      to: 15
     - from: 8
-      to: 9
+      to: 16
     - from: 9
       to: 10
     - from: 10
       to: 11
     - from: 11
+      to: 17
+    - from: 13
+      to: 9
+    - from: 14
+      to: 9
+    - from: 15
+      to: 9
+    - from: 16
+      to: 9
+    - from: 17
       to: 12

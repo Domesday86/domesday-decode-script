@@ -218,34 +218,6 @@ vfs_baseline_differs() {
 # reviewed; every later stack is checked against it.
 VFS_REFERENCE="$DISC_DIR/pack.sha256"
 
-# The hand check of the pack on the player: a list of checks, each naming the
-# pack by its id, with the date, the vp415e version and the result. A person
-# writes it; the pack stage only reads it.
-PLAYER_CHECK="$DISC_DIR/player-check.yaml"
-
-# player_check_problems: what is wrong with PLAYER_CHECK, one line each, or
-# nothing.
-player_check_problems() {
-  local json
-  [ -f "$PLAYER_CHECK" ] || return 0
-  json=$(yq -o=json . "$PLAYER_CHECK" 2>/dev/null) || { printf 'it is not valid YAML\n'; return 0; }
-  jq -r '
-    if type != "object" or (.checks | type) != "array" then "it has no list of checks" else
-      .checks | to_entries[] | "check \(.key + 1)" as $c | .value
-      | (if (.pack | type) == "string" and (.pack | test("^[0-9a-f]{16}$")) then empty else "\($c) names no pack id (16 hex digits, in quotes)" end),
-        (if (.date // "" | tostring | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")) then empty else "\($c) has no date (YYYY-MM-DD)" end),
-        (if (.vp415e // "" | tostring) != "" then empty else "\($c) names no vp415e version" end),
-        (if .result == "pass" or .result == "fail" then empty else "\($c) has result \(.result // "none"), not pass or fail" end)
-    end' <<< "$json"
-}
-
-# player_check_for <pack id>: the last check recorded for that pack, as JSON,
-# or null.
-player_check_for() {
-  [ -f "$PLAYER_CHECK" ] || { printf 'null\n'; return 0; }
-  yq -o=json . "$PLAYER_CHECK" | jq -c --arg id "$1" '[ .checks[]? | select(.pack == $id) ] | last'
-}
-
 # selection_problems: what is wrong with selection.yaml, one line each, or
 # nothing. Each stack names its sets in its order (the video's suggested
 # reference first, then by what each adds; the VFS's best first), from the
@@ -589,9 +561,8 @@ describe_quality() {
 # whole. Its directory is named after the key of what it holds (the two
 # stacks and the stem), so each distinct pack is a version of its own and the
 # newest two are kept. What only its provenance takes -- the compare stage's
-# evidence, the selection and the hand check on the player -- is stamped too,
-# but leaves the name alone, so recording the hand check restamps the same
-# pack. So does what only its report takes: the quality stage's figures for
+# evidence and the selection -- is stamped too, but leaves the name alone, so
+# a change to it restamps the same pack. So does what only its report takes: the quality stage's figures for
 # the stack, and the report's script and layout, by their bytes (the layout's
 # lines that start with # are code). PACK_VIDEO, PACK_VFS, PACK_COMPARE,
 # PACK_MAP and PACK_QUALITY are left naming those stages' directories, and
@@ -614,7 +585,6 @@ describe_pack() {
   STAGE_DIR="$OUT/$(stage_version_name "$OUT" "pack-${key:0:12}")"
   stage_input_stamp compare "$PACK_COMPARE"
   stage_input_file "selection" "$SELECTION"
-  stage_input_file "player check" "$PLAYER_CHECK"
   stage_input_stamp quality "$PACK_QUALITY"
   stage_input "report" "$(for f in "$SELF_DIR"/lib/pack-report.*; do printf '%s %s ' "${f##*/}" "$(sha256_stdin < "$f" | cut -c1-12)"; done)"
   stage_output "$STEM.mkv"
@@ -690,11 +660,6 @@ unit_state() {
     fi
   fi
   describe_unit "$unit"
-  # An up-to-date pack also says whether it has passed the hand check.
-  if [ "$unit" = pack ] && state=$(stage_state); then
-    printf '%s; %s\n' "$state" "$(jq -r '.status // "status unknown"' "$STAGE_DIR/pack.json" 2>/dev/null || echo 'status unknown')"
-    return 0
-  fi
   stage_state
 }
 
@@ -2613,15 +2578,12 @@ check_quality() {
 # Beside them go SHA256SUMS and <stem>.provenance.yaml, which vp415e ignores:
 # the captures' fingerprints, the tool revisions, the selection and the
 # compare stage's evidence for it, the stacker's weights, the vfs verdict,
-# every stage's checks and the hand check on the player.
+# and every stage's checks.
 #
-# vp415e cannot open a side without the player's hardware, so the last check
-# is a person's, on the player, recorded in PLAYER_CHECK against the pack's
-# id: the first 16 hex digits of the sha256 of SHA256SUMS' lines for the three
-# files the player loads (for the mkv alone, on a side with no EFM). A pack is
-# complete only once a check that passed is recorded for its id. Until then it
-# is built and stamped, and awaits that check; a check that failed fails the
-# stage.
+# The pack's id is the first 16 hex digits of the sha256 of SHA256SUMS' lines
+# for the three files the player loads (for the mkv alone, on a side with no
+# EFM). Putting the pack on the player is install-pack.sh's, run by hand, and
+# not part of the build.
 #
 # $OUT/pack links to the current version, for install-pack.sh.
 
@@ -2685,7 +2647,7 @@ build_pack() {
 # check.txt, SHA256SUMS, pack.json and the provenance to their stage_tmp
 # names, and return non-zero if any failed.
 check_pack() {
-  local dir="$1" out fails=0 level text frames=0 keys=0 a name src how hashpid accept sums id record problems
+  local dir="$1" out fails=0 level text frames=0 keys=0 a name src how hashpid accept sums id
   local dathash bsmhash
   local -a rows=()
   shift
@@ -2782,20 +2744,6 @@ check_pack() {
       id=unknown
     fi
 
-    # The hand check on the player.
-    problems=$(player_check_problems)
-    record=null
-    if [ -n "$problems" ]; then
-      while IFS= read -r text; do fail "${PLAYER_CHECK#"$SELF_DIR"/}: $text"; done <<< "$problems"
-    else
-      record=$(player_check_for "$id")
-      while IFS=$'\t' read -r level text; do "$level" "$text"; done < <(jq -r --arg id "$id" --arg file "${PLAYER_CHECK#"$SELF_DIR"/}" --arg disc "$DISC" '
-        if . == null then
-          "note\tawaiting the hand check on the player: install the pack (./install-pack.sh \($disc) <host>), check it there, and record the result in \($file) as a check with pack: \"\($id)\", date, vp415e (its version) and result (pass or fail)"
-        elif .result == "pass" then "ok\tchecked by hand on the player on \(.date) with vp415e \(.vp415e): passed"
-        else "fail\tchecked by hand on the player on \(.date) with vp415e \(.vp415e): failed\(if .notes then " (\(.notes))" else "" end)" end' <<< "$record")
-    fi
-
     printf '\nresult: %s\n' "$([ "$fails" = 0 ] && echo pass || echo "FAIL ($fails)")"
   } > "$out"
 
@@ -2809,13 +2757,9 @@ check_pack() {
     IFS='|' read -r name src how <<< "$a"
     rows+=("$name|$(file_size "$dir/$name")|$(awk -v n="$name" '$2 == n { print $1 }' "$sums")|${src#"$OUT"/}|$how")
   done
-  jq -n --arg id "$id" --argjson check "$record" --args '
+  jq -n --arg id "$id" --args '
     { id: $id,
-      files: [ $ARGS.positional[] | split("|") | { name: .[0], bytes: (.[1] | tonumber), sha256: .[2], from: .[3], how: .[4] } ],
-      player_check: $check,
-      complete: ($check.result? == "pass") }
-    | .status = (if .complete then "complete: passed the hand check on the player"
-                 else "awaiting the hand check on the player (pack id \($id))" end)' "${rows[@]}" > "$(stage_tmp pack.json)" \
+      files: [ $ARGS.positional[] | split("|") | { name: .[0], bytes: (.[1] | tonumber), sha256: .[2], from: .[3], how: .[4] } ] }' "${rows[@]}" > "$(stage_tmp pack.json)" \
     || { printf 'pack: could not write pack.json\n' >&2; return 1; }
   pack_provenance "$dir" > "$(stage_tmp "$STEM.provenance.yaml")" || { printf 'pack: could not write the provenance\n' >&2; return 1; }
   printf '%s  %s\n' "$(sha256_stdin < "$dir/$STEM.provenance.yaml.partial")" "$STEM.provenance.yaml" >> "$sums"
@@ -2934,9 +2878,8 @@ pack_provenance() {
           else { dropped: ([ $selection[$stack].dropped[]? | select(.set == $set) | .reason ] | first) } end;
       $pack[0] as $p
       | { disc: $disc, stem: $stem,
-          pack: { id: $p.id, version: $version, built: $built, script: $script, status: $p.status, complete: $p.complete },
+          pack: { id: $p.id, version: $version, built: $built, script: $script },
           files: $p.files,
-          player_check: $p.player_check,
           captures: [ $ARGS.positional[] | split("|") as [$set, $first, $path, $decode]
                       | ([ $fingerprints[] | select(.path == $path) ] | first) as $f
                       | { set: $set, first_picture: ($first | tonumber), library_path: $path,

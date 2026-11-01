@@ -7,7 +7,7 @@
 # side with no EFM (DISC_EFM=no) has no data area: its pack is the mkv alone.
 #
 # Never part of the build: build-pack.sh makes the pack, and this is run by
-# hand to put it on the player for the hand check, or once it has passed.
+# hand to put it on the player.
 #
 # The media directory is the player's own (vp415e's provisioning makes it):
 # group vp415d, mode 2775, so that the setgid bit gives every file in it the
@@ -107,7 +107,6 @@ BYTES=0
 for f in "${FILES[@]}"; do BYTES=$(( BYTES + $(file_size "$PACK/$f") )); done
 
 printf 'pack:   %s (id %s), %s GB\n' "$PACK" "$ID" "$(awk -v b="$BYTES" 'BEGIN { printf "%.1f", b / 1e9 }')"
-printf 'status: %s\n' "$(jq -r .status "$PACK/pack.json")"
 printf 'to:     %s:%s\n\n' "$HOST" "$MEDIA_DIR"
 
 # --- the player ------------------------------------------------------------
@@ -191,25 +190,4 @@ printf '\nchecking the files on the player\n'
 remote "$CHECK" "$MEDIA_DIR" "$GROUP" "${FILES[@]}" \
   || die "the pack on the player is not the pack here, or not usable by $GROUP (above)"
 
-cat <<EOF
-
-installed: $STEM (pack id $ID) on $HOST:$MEDIA_DIR
-
-EOF
-if [ "$(jq -r .complete "$PACK/pack.json")" = true ]; then
-  printf 'This pack has already passed the hand check on the player.\n'
-else
-  cat <<EOF
-Now check it on the player, then record the result in
-discs/$DISC/player-check.yaml:
-
-checks:
-  - pack: "$ID"
-    date: $(date +%F)
-    vp415e: <the player's vp415e version>
-    result: pass          # or fail
-    notes: <what was checked>
-
-and run ./build-pack.sh $DISC, which restamps the pack as complete.
-EOF
-fi
+printf '\ninstalled: %s (pack id %s) on %s:%s\n' "$STEM" "$ID" "$HOST" "$MEDIA_DIR"

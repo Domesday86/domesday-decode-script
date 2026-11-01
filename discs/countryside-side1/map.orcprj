@@ -13,7 +13,15 @@
 # set that cannot be mapped is dropped from the map stage by deleting its
 # source and frame map here. The refresh tools are recorded under
 # tool_refresh: field_mapping on every frame map (lead-in and lead-out kept),
-# source_alignment on Align (pad_for_alignment).
+# source_alignment on Align (pad_for_alignment),
+# and fm_beat_calibration on each "<set> beat".
+#
+# Each "<set> beat" is an FM Beat Cancel on a branch off its frame map,
+# feeding nothing: the refresh's FM Beat Calibration measures the master's
+# carrier on it (300 frames, about 30 s a set), and the map stage commits the
+# value as framemaps/<set>.carrier, for the stack's FM Beat Cancel on that set
+# (decode-orc#354). The captures of one master measure within 1-3 kHz of each
+# other.
 
 project:
   name: Countryside Side 1 map
@@ -204,6 +212,71 @@ dag:
         alignmentMode:
           type: string
           value: pad_for_alignment
+    - id: 12
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS1 beat
+      x: 387
+      y: 50
+      tool_refresh:
+        tool: fm_beat_calibration
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 13
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS2 beat
+      x: 387
+      y: 175
+      tool_refresh:
+        tool: fm_beat_calibration
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 14
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS3 beat
+      x: 387
+      y: 300
+      tool_refresh:
+        tool: fm_beat_calibration
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 15
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS4 beat
+      x: 387
+      y: 425
+      tool_refresh:
+        tool: fm_beat_calibration
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 16
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS5 beat
+      x: 387
+      y: 550
+      tool_refresh:
+        tool: fm_beat_calibration
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
   edges:
     - from: 1
       to: 6
@@ -217,11 +290,21 @@ dag:
       to: 10
     - from: 6
       to: 11
+    - from: 6
+      to: 12
     - from: 7
       to: 11
+    - from: 7
+      to: 13
     - from: 8
       to: 11
+    - from: 8
+      to: 14
     - from: 9
       to: 11
+    - from: 9
+      to: 15
     - from: 10
       to: 11
+    - from: 10
+      to: 16

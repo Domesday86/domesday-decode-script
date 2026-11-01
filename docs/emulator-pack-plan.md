@@ -4,7 +4,9 @@ Status: **phases 0–7 are built, and `selection.yaml` is decided.** The
 Volcanoes pack passed its hand check on the player on 2026-10-29, the last of
 phase 7's exit criteria. Phase 8 is under way: Domesday Community South and
 National A and the two EcoDisc and two Countryside sides are complete, each
-checked on the player.
+checked on the player. Since 2026-11-01 that check is no longer part of the
+build: the repo covers only the automation, and `install-pack.sh` is how a
+pack gets to the player.
 Volcanoes is the pilot disc; the other discs follow once the process is
 proven on it.
 
@@ -277,9 +279,9 @@ decode-orc.url   = "github:simoninns/decode-orc";
 vfs-verifier.url = "github:Domesday86/vfs-verifier";
 ```
 
-vp415e is not an input. No build step runs it, because the final check is
-done by hand on the player. Its acceptance rules are re-implemented as the
-phase 5 checks instead.
+vp415e is not an input. No build step runs it, because it cannot run without
+the player's hardware. Its acceptance rules are re-implemented as the phase 5
+checks instead.
 
 - The dev shell gains `orc-cli`, `vfs-stacker` and `vfs-verifier`, plus
   `sqlite` and `yq` for reading `.meta` files and the metadata YAML.
@@ -1379,10 +1381,9 @@ SHA256SUMS
   outputs. Nothing is recomputed.
 - **Acceptance:**
   - Rerun the phase 5 and 6 checks on the assembled files.
-  - vp415e cannot open a side without the player hardware, so the **final
-    check is done by hand on the player**. The pack is not marked complete
-    until that check is recorded in the provenance file: date, vp415e
-    version, result.
+  - Checking a pack on the player is outside the build. Until 2026-11-01 the
+    stage waited for a hand check recorded in `discs/<disc>/player-check.yaml`;
+    that record and the wait are gone.
 - **Installing** is separate and explicit: `install-pack.sh <host>`. It is
   never part of the build. It sets group `vp415d`, directories `2775`, files
   `0644`, and avoids the `rsync -a` group carry-over that `vp415-selftest`
@@ -1392,15 +1393,16 @@ SHA256SUMS
 - The Volcanoes pack passes the hand check on the player.
 - `build-pack.sh volcanoes` on an unchanged tree does no work.
 
-**As built.** The second exit criterion is met: a rerun on an unchanged tree
-does nothing, in about 8 s. The first waits on the hand check.
+**As built.** Both exit criteria are met: a rerun on an unchanged tree does
+nothing, in about 8 s, and the Volcanoes pack passed the hand check on
+2026-10-29.
 
 - **Where the pack goes.** Each pack is a version, `pack-<key>/`, where the
   key covers what it holds: the video and vfs stamps and the stem. The newest
   two are kept, as for every other stage, and `decode-script/volcanoes/pack`
   links to the current one. Some inputs only feed the provenance: the compare
-  stamp, `selection.yaml` and the hand check. They are stamped, but they don't
-  change the key, so recording the hand check restamps the same version.
+  stamp and `selection.yaml`. They are stamped, but they don't change the
+  key, so a change to them restamps the same version.
 - **Assembly.** The stage hard-links the three files from
   `orc-<rev>/video/` and `vfs-<rev>/`. The decodes share allows it, so
   nothing is copied. Where it can't link, it copies, and checks the copy byte
@@ -1418,10 +1420,9 @@ does nothing, in about 8 s. The first waits on the hand check.
 - **Outputs:**
   - `SHA256SUMS`: the three files, then the provenance.
   - `volcanoes_stack.provenance.yaml`. It holds:
-    - the pack's id, version and status, and the commit of this repo it was
-      built from;
+    - the pack's id and version, and the commit of this repo it was built
+      from;
     - each file's size, hash and source;
-    - the hand check;
     - every mapped capture's library path, `sources.sha256` fingerprint,
       decode and place in each stack, or why it was dropped;
     - the locked revisions and narHashes of ld-decode, decode-orc (with its
@@ -1432,25 +1433,9 @@ does nothing, in about 8 s. The first waits on the hand check.
     - the compare, video and vfs stamps;
     - every check line of the video, vfs and pack stages.
   - `pack.json` and `check.txt`.
-- **The hand check** is recorded in the repo, not edited into the
-  provenance. A build output is the build's to write, and the repo receives
-  only reviewed decisions. The record goes in
-  `discs/<disc>/player-check.yaml`, as a list of checks. Each check gives:
-  - the pack's id, in quotes;
-  - the date;
-  - the vp415e version;
-  - `pass` or `fail`;
-  - notes, if any.
-
-  The id is the first 16 hex digits of the sha256 of the three files'
-  `SHA256SUMS` lines. It names the bytes, not the inputs, so a check is never
-  carried over to a pack that differs. The provenance is left out of the id,
-  because it changes when the check is recorded. The stage copies the last
-  check for its id into the provenance and `pack.json`:
-  - `pass`: the pack is complete;
-  - `fail`: the stage fails;
-  - none yet: the pack is stamped and waits. `status` reports "up to date;
-    awaiting the hand check on the player (pack id …)".
+- **The pack's id** is the first 16 hex digits of the sha256 of the three
+  files' `SHA256SUMS` lines. It names the bytes, not the inputs. The
+  provenance is left out of it.
 - **Installing.** `install-pack.sh <disc> <host>` takes the disc as well as
   the host. Before copying, it checks the player's side over one ssh call:
   - the media directory is group `vp415d` and mode `2775`, and the user can
@@ -1562,9 +1547,13 @@ discs. The differences from Volcanoes:
     Dropout Correction to `interpolate`, and adds `Band` (Picture Band
     Limit) before the sink.
   - The map stage fails a set whose picture numbers sit off its content.
-  - Not yet run: decode-orc's `transform3d` chroma decoder may have a bug to
-    fix first. `selection.yaml` stands until the new compare report has
-    been read.
+  - Built 2026-11-01 on decode-orc ddae9e8 (merged to main as a7ec003):
+    pack `fec2fe07b8db33e2`, every check passed. The video stage took
+    198 min.
+  - The other PAL sides' projects took the same chain on 2026-11-01:
+    Community North, National A, both EcoDisc and both Countryside sides
+    with `pressing_repair`, Volcanoes without it (one stamper group). Their
+    packs rebuild on decode-orc main.
 
 **Under way: EcoDisc**, one pack per side, each with its own decode script.
 
@@ -1694,8 +1683,8 @@ decode-orc, the same way as EcoDisc side 2 (no EFM, no VFS stack).
   dropouts and replaces them from other lines, which corrupts the picture
   numbers, so pictures drop out of the mkv's address map. It waits on the
   decode-orc fix, then reruns from the video stage, Weighted. The fix is
-  decode-orc 9afae69c (branch 20261030-001, pinned in flake.nix until it
-  merges). Weighted now marks only the active picture, Dropout Correction
+  decode-orc 9afae69c (branch 20261030-001, merged to main in #355, which
+  flake.nix pins again). Weighted now marks only the active picture, Dropout Correction
   leaves lines outside it alone, and the sink's address map recognises a
   pulldown frame by its VBI. The video stage now also checks the mkv's
   address map against every video set alone (lib/check-address-map.py),
@@ -1747,7 +1736,7 @@ picture 54000 by its file name.
   sets, a part-filled tail, which this decode-orc's images end before; DS3
   alone runs past it and reads it blank. As on Community South (135117),
   the selection records it in `vfs.baseline_differs`. The reference is in
-  `pack.sha256`. It awaits the hand check on the player.
+  `pack.sha256`.
 
 ## Decisions
 
@@ -1761,6 +1750,6 @@ picture 54000 by its file name.
 | Choosing a pressing | The content version (disc identity, vfs-stacker's systematic dissent) with the most available sources; sets of other versions are dropped. Source Alignment's stamper groups are shared noise, not versions, and a set alone in one is kept (since 2026-10-26) |
 | Project files | Committed per disc side, built for its selected sets |
 | Decode scripts | One per pack (disc side), which lists that side's captures and stamps its decodes; `decode-domesday.sh` keeps the Domesday sides that have no pack yet |
-| Final pack check | By hand on the player (vp415e cannot run without its hardware) |
+| Final pack check | Outside the build since 2026-11-01: the pack stage's own checks are the last; `install-pack.sh` puts a pack on the player |
 | Old outputs | Keep the current version and the previous one only |
 | Linux mounts | No fstab or automount snippet in the repo; the script prints the mount command if a share is missing |

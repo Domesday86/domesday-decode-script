@@ -1245,9 +1245,7 @@ def main():
                        "checks": [list(c) for c in read_checks(Path(d) / "check.txt")]})
     stages.append({"name": "pack", "dir": man["pack_version"], "key": "(stamped when this build passes)", "stamped": "–",
                    "inputs": man["pack_inputs"],
-                   # The hand check is the player's business, not the build's: its
-                   # note says how to install the pack, which a record does not need.
-                   "checks": [list(c) for c in read_checks(man["pack_check"]) if not (c[1].startswith(("awaiting the hand check", "checked by hand on the player")) or "player-check.yaml" in c[1])]})
+                   "checks": [list(c) for c in read_checks(man["pack_check"])]})
 
     tools = prov.get("tools") or {}
     tool_rows = []
@@ -1362,7 +1360,6 @@ def main():
         "built": pack.get("built", "–"), "version": man["pack_version"],
         # Where the pack directory sits on the decodes share, whatever its mount point.
         "place": "/".join(Path(man["out"]).parts[-2:]), "id": pack.get("id", "–"),
-        "status": pack.get("status", "–"), "complete": bool(pack.get("complete")),
         "script": man["script"], "pipeline": table(["step", "tool", "what it does", "what it made here", "checks"], pipeline, ["left"] * 5),
         "files": table(["file", "bytes", "sha256", "in the pack"], files, ["left", "right", "left", "left"]),
         "sums": read_text(man["sums"]),

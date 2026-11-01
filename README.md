@@ -1147,7 +1147,7 @@ inputs, so a re-run with nothing changed does nothing.
   - `framemaps/<set>.carrier`, on a side whose `map.orcprj` puts a set
     through an FM Beat Cancel (`<set> beat`, a branch off its frame map that
     feeds nothing): the master's FM carrier at black, measured by the refresh's
-    FM Beat Calibration. Community South has one on every set. The stage is
+    FM Beat Calibration. Every PAL side has one on every set. The stage is
     PAL only.
 
   The stage fails if Source Alignment finds a set whose picture numbers sit
@@ -1228,8 +1228,8 @@ inputs, so a re-run with nothing changed does nothing.
   `VIDEO_DECODER` and `VIDEO_DECODER_SCHEDULE`, the selection's noise
   reduction, audio, chapters and disc metadata).
 
-  A stack project rebuilt on decode-orc#354's advice (Community South and
-  Dragon's Lair so far) adds to that chain. The video stage sets the
+  Every stack project follows decode-orc#354's advice, which adds to that
+  chain (Dragon's Lair as far as it applies to NTSC). The video stage sets the
   measured values from the committed `framemaps/`, and `check.txt` notes
   them:
   - **`<set> beat`**: FM Beat Cancel between each frame map and Align, on
@@ -1237,7 +1237,7 @@ inputs, so a re-run with nothing changed does nothing.
     The stack must have one on exactly the sets whose carrier `map.orcprj`
     measures.
   - **`pressing_repair`** on the Stacker, where the sets come from more than
-    one stamper group.
+    one stamper group: every PAL side but Volcanoes, which has one.
   - No **`vbi_mono_average`** on any Domesday side: their sound is stereo.
     A PAL disc can't carry analogue sound and EFM at once, and the VBI's
     odd sound modes come from that, not from mono passages.
@@ -1346,22 +1346,10 @@ inputs, so a re-run with nothing changed does nothing.
 
   `pack` on the decodes share links to the current version.
 
-  The last check is a person's, on the player. Until it is recorded, `status`
-  says the pack is awaiting the hand check, and gives its id: the first 16 hex
-  digits of the hash of its three files' `SHA256SUMS` lines. Record the check
-  in `discs/<disc>/player-check.yaml`:
-
-  ```yaml
-  checks:
-    - pack: "298eb83fe340638a"   # the pack's id, in quotes
-      date: 2026-10-25
-      vp415e: <the player's vp415e version>
-      result: pass               # or fail
-      notes: <what was checked>
-  ```
-
-  The next build restamps the same pack as complete. A recorded `fail` fails
-  the stage.
+  The pack's id is the first 16 hex digits of the hash of its three files'
+  `SHA256SUMS` lines. Installing the pack on the player, and checking it
+  there, is outside the build (see [Installing a pack on the
+  player](#installing-a-pack-on-the-player)).
 - **The pack report.** Every pack build writes `<stem>.report.pdf` beside the
   pack, and the same report as Markdown in `<stem>.report.md`, for giving to
   an AI or anything else that reads text more easily than a PDF. The
@@ -1483,7 +1471,7 @@ directory over ssh. It is never part of the build:
 
 ```sh
 ./install-pack.sh volcanoes development@vp415e-pi --dry-run   # check both ends, copy nothing
-./install-pack.sh volcanoes development@vp415e-pi             # copy, then check on the player
+./install-pack.sh volcanoes development@vp415e-pi             # copy, and check the copies
 ./install-pack.sh volcanoes development@vp415e-pi --pack <decodes>/decode-script/volcanoes/pack-<key>
 ```
 

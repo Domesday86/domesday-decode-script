@@ -1,9 +1,0 @@
-# The hand check of the pack on the VP415e player (docs/emulator-pack-plan.md,
-# phase 7): a person's, recorded here. The pack stage reads the last check for
-# the pack's id.
-checks:
-  - pack: "1a0929b9ee3eb84e"
-    date: 2026-10-29
-    vp415e: "0.0.0, /nix/store/pmcsh4mmzsk64n7x37j2yx2g7npxwjaa-vp415d-0.0.0 (profile generation 90)"
-    result: pass
-    notes: installed in /srv/vp415e/media and checked on the player; all ok

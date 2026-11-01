@@ -29,8 +29,9 @@
 #   In decode-orc 1e62354 it can mark VBI lines as dropouts and replace them
 #   from other lines, which corrupts the picture numbers: on this disc the
 #   mkv's address map lost pictures at 25 places, next to pulldown frames,
-#   and the video stage's metadata check failed. A fix is in progress in
-#   decode-orc; the video stage waits for it.
+#   and the video stage's metadata check failed. decode-orc 9afae69c fixed
+#   it (merged to main in #355): Dropout Correction leaves lines outside the
+#   active picture alone.
 # - Picture Band Limit low-passes the luma where the picture ends: the map
 #   stage's lumaCutoffMHz, measured between captures of two or more stamper
 #   families; without it, the stage's NTSC default, 5.0 MHz. The chroma is

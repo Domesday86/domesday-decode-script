@@ -14,16 +14,12 @@
     # decode-orc (orc-cli) maps, aligns and stacks the decodes into the video
     # and writes the per-set EFM images; vfs-verifier supplies vfs-stacker
     # and vfs-verifier for the VFS image. Both are pinned at whatever their
-    # branch was when flake.lock was last updated: main for vfs-verifier;
-    # for decode-orc, its branch 20261030-001 until that merges, for the
-    # fix to Weighted stacking and Dropout Correction corrupting the VBI
-    # (9afae69c), then main again. Each
-    # keeps its own nixpkgs: they
+    # main was when flake.lock was last updated. Each keeps its own nixpkgs: they
     # are built and tested against those, and nothing here links against
     # them, so sharing one would save closure size at the cost of building
     # them against a nixpkgs neither project has tried.
     decode-orc = {
-      url = "github:decode-orc/decode-orc/20261030-001";
+      url = "github:decode-orc/decode-orc";
       inputs.flake-utils.follows = "ld-decode/flake-utils";
     };
     vfs-verifier = {
