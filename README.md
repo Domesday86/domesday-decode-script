@@ -218,60 +218,42 @@ decode scripts' tables, so a capture added to a table cannot be left out.
 
 ## Decoding the Domesday discs
 
-`decode-domesday.sh` decodes the twelve PAL Domesday disc sets. Each set is two
+The library holds twelve PAL Domesday disc sets. Each set is two
 double-sided discs — the Community disc carries **North** and **South**, the
 National disc carries **A** and **B**. Three sides of every set are CAV;
 **National B is CLV**.
 
-Each VP415e pack has its own decode script, which stamps its decodes for
-`build-pack.sh`. **Community South**, **National A** and **Community North**
-have one each, `decode-community-south.sh`, `decode-national-a.sh` and
-`decode-community-north.sh` (see [Building a VP415e
-pack](#building-a-vp415e-pack)), so they are no longer in this script's table,
-and naming any of them here says so. National B stays here, 12 sets, until it
-gets a pack script of its own.
+Each side is a VP415e pack, and each has its own decode script, which lists
+that side's captures and stamps its decodes for `build-pack.sh` (see
+[Building a VP415e pack](#building-a-vp415e-pack)):
+
+| Side | Script | Captures |
+| --- | --- | --- |
+| Community North | `decode-community-north.sh` | 11 (DS7 left out) |
+| Community South | `decode-community-south.sh` | 11 (DS7 left out) |
+| National A | `decode-national-a.sh` | 13 (DS1 in two passes, `DS1B` the second) |
+| National B | `decode-national-b.sh` | 12, CLV, no EFM |
 
 ```sh
 nix develop
-./decode-domesday.sh --list                       # what is in the table
-./decode-domesday.sh -f 2 DS1                     # quick smoke test of one set
-./decode-domesday.sh DS1                          # set 1, first 1000 frames a side
-./decode-domesday.sh --frames all DS1:NationalB   # one side in full
-./decode-domesday.sh --frames all NB -j 3         # every National B, three at a time
-./decode-domesday.sh --frames all -j 3            # the whole library
+./decode-national-b.sh --list                 # what is in the table
+./decode-national-b.sh -f 10 DS1              # quick smoke test of one set
+./decode-national-b.sh --frames all DS4       # one set in full
+./decode-national-b.sh --frames all -j 2      # every set, two at a time
 ```
 
 `--frames` is the switch to reach for while testing: it defaults to **1000
-frames** a side, and `--frames all` decodes the whole side. Everything else —
+frames** a set, and `--frames all` decodes the whole side. Everything else —
 the start search, the output layout, the decoder check — behaves identically
 either way, so a 1000-frame run is a faithful rehearsal of a full one.
-
-### Choosing what to decode
-
-A selector picks sides, and selectors add together:
-
-| Selector | Means |
-| --- | --- |
-| *(none)* | every side of every set — 12 decodes |
-| `DS4` | every side of disc set 4 |
-| `DS4:NationalB` | one side of one set |
-| `NationalB` | that side of every set |
-| `NB` | the same, by short name |
-
-`--side` narrows whatever the selectors chose rather than adding to it, so
-`--side NB DS4 DS7` and `DS4:NB DS7:NB` are the same request. Set and side names
-are matched regardless of case, and naming a side twice still decodes it once.
-
-The sides come out in table order, set by set, however the selectors were
-written.
 
 ### Sides captured in more than one pass
 
 A side the player could not read in one pass was captured in several, and each
 part is a decode in its own right. `DS1`'s National A is the one such side in
 the library: the player lost the disc at picture 37480 and a second pass picks
-up at 39001. It is decoded by `decode-national-a.sh`, which lists the two parts
-as two sets, `DS1` and `DS1B`:
+up at 39001. `decode-national-a.sh` lists the two parts as two sets, `DS1` and
+`DS1B`:
 
 ```
 $ ./decode-national-a.sh --list
@@ -280,10 +262,6 @@ DS1B  CAV PAL  picture #39001  …_NationalA_PP_20191014_CAV_PAL_39000-54000.ldf
 DS2   CAV PAL  picture #1      …_NationalA_PP_20191014_CAV_PAL_00001-54000.ldf
 …
 ```
-
-`decode-domesday.sh` still decodes a side in parts, in table order, and
-numbers them in `--list` ("part 1/2"), though no side left in its table has
-more than one.
 
 `DS1B` begins at the very head of its capture, and the first frame ld-decode's
 CVBS writer will accept there is three frames in (see [Keeping the lead-in in
@@ -306,33 +284,32 @@ of that capture's content. It is 1 for a capture that begins at the head of the
 side, and the part's own first picture for one that picks up mid-disc. That
 number cannot be taken from the filename's frame range: the range on `DS1B`
 reads `39000-54000`, but its first picture is 39001, and a search told to find
-39000 never lands on it. It is in the table instead.
+39000 never lands on it. It is in the table instead. On National B, which is
+CLV, the picture is the one ld-decode derives from the timecode, and picture
+#1 is 0:00:00.01.
 
 ### Output layout
 
-Decodes go to `<output>/<set>/<decoder>/<capture basename>.*`:
+Decodes go to `<output>/<set>/<decoder>-<date>/<capture basename>.*`, under
+each side's own directory:
 
 ```
-/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/domesday/
+/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/national-b/
 └── DS1/
-    └── ld-decode-12be078/
-        ├── Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.cvbs
-        ├── Domesday_DD86-DS1_CommunityNorth_20191014_CAV_PAL_00001-54000.start
+    └── ld-decode-6148260-20261101-093540/
         ├── Domesday_DD86-DS1_NationalB_PP_20191014_CLV_PAL_00-60.cvbs
+        ├── Domesday_DD86-DS1_NationalB_PP_20191014_CLV_PAL_00-60.start
         └── decoder.txt
 ```
 
-The capture basename already names the set and the side, and the parts of a
-split side keep their own frame ranges, so nothing collides.
-
 ### Flags
 
-`decode-domesday.sh` takes the common flags and environment variables — see
-[Configuration](#configuration) — with `--side` and `--efm` added. `--start N` still applies to a single capture, so
-the selectors have to choose exactly one. It also passes
-`--V4300D_coherent_subtract` on every side — see [Player spur
-removal](#player-spur-removal) — and `--noEFM` on the CLV ones — see [EFM and the
-National B sides](#efm-and-the-national-b-sides).
+The Domesday scripts take the common flags and environment variables — see
+[Configuration](#configuration). Each passes `--V4300D_coherent_subtract` on
+every set — see [Player spur removal](#player-spur-removal) — and
+`decode-national-b.sh` passes `--noEFM` as well — see [EFM and the National B
+sides](#efm-and-the-national-b-sides). Neither is offered as a flag: each is a
+fact about the captures.
 
 ### EFM and the National B sides
 
@@ -348,11 +325,10 @@ Run against a side that has none, the front end spends its time demodulating
 noise and writes it out: the DS1 National B decode made before this was switched
 off carries a 1.4GB `.efm` of nothing. The CAV sides do carry EFM and keep it.
 
-This is the one place the table's CAV/CLV column reaches the decoder. It does
-not steer the demodulator — ld-decode reads CAV or CLV out of the VBI itself —
-but what is recorded on a side is a fact about that side, and within this
-library CLV means National B means no EFM. `--efm` (`DD_EFM=1`) forces it back
-on, for checking that claim on a side or for a CLV capture that does carry EFM.
+`decode-national-b.sh` asserts it in its `DECODE_FLAGS`, and its
+`disc.conf` says `DISC_EFM=no`, which `build-pack.sh` checks against the flags.
+The disc format is not passed: ld-decode reads CAV or CLV out of the VBI
+itself.
 
 Decodes made before this land under their own decoder directory and still have
 their `.efm` files; nothing already decoded changes.
@@ -387,7 +363,7 @@ from the `--start` values in the library's `Domesday_AIV_DiscSet_Notes.txt`;
 those are recorded by hand against a different ld-decode and are not what this
 build wants.
 
-The 49 starts are resolved before any decode begins, and at the same `--jobs`
+A script's starts are resolved before any of its decodes begins, and at the same `--jobs`
 concurrency as the decodes. A start search is several short ld-decode probes that spend most of
 their wall clock seeking into the `.ldf` rather than working, so run one at a
 time the whole library takes well over an hour before the first frame is
@@ -1832,8 +1808,8 @@ With `-j` above 1:
   missing source or an existing output is reported in seconds rather than after
   hours of decoding. The resolves run at the same `-j` concurrency as the
   decodes, because a start search spends most of its time seeking, and with
-  `decode-domesday.sh`'s 49 sides to get through the serial version costs over
-  an hour before the first frame is decoded. Nothing is contended for: the
+  twelve sets to get through the serial version costs a good part of an hour
+  before the first frame is decoded. Nothing is contended for: the
   resolve phase finishes before any decode is launched.
 * **`--threads` auto aims for four workers per decode** and divides the host
   between the jobs rather than letting each claim it in full:
@@ -1853,7 +1829,7 @@ recorded separately, the discs that succeed are still finished and renamed, and
 the run ends by naming the ones that failed:
 
 ```
-decode-domesday.sh: decode failed for: DS3:NationalB (see each side's .log)
+decode-national-b.sh: decode failed for: DS3 (see each set's .log)
 ```
 
 ### Following a long decode

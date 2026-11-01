@@ -91,7 +91,7 @@ def main():
     ap.add_argument("--frames", type=int, required=True, help="frames the container holds")
     ap.add_argument("--format", choices=["CAV", "CLV"], required=True)
     ap.add_argument("--side", type=int, required=True)
-    ap.add_argument("--pictures", help="the programme's pictures, FIRST-LAST (CAV)")
+    ap.add_argument("--pictures", help="the programme's addresses, FIRST-LAST (CAV pictures, or CLV timecodes in frames)")
     ap.add_argument("--system", choices=sorted(SYSTEMS), default="PAL")
     ap.add_argument("--tag-version", help="the container's ORC_DISC_METADATA_VERSION")
     ap.add_argument("--user-code")
@@ -247,20 +247,22 @@ def main():
     if kind == "cav_picture":
         if addresses and max(addresses) >= PICTURE_LIMIT:
             fail(f"pictures reach {max(addresses)}: at or above {PICTURE_LIMIT} the biphase decoder misreads them")
-        if args.pictures:
-            first, last = map(int, args.pictures.split("-"))
-            programme = set(range(first, last + 1))
-            missing = programme - addresses
-            beyond = sorted(addresses - programme)
-            summary["address_map"]["pictures_missing"] = len(missing)
-            summary["address_map"]["pictures_implied"] = len(set(implied) & programme)
-            if missing:
-                fail(f"{len(missing)} of pictures {first}-{last} resolve to no file frame: {ranges_text(missing)}")
-            else:
-                ok(f"every picture {first}-{last} resolves to one file frame"
-                   + (f" ({len(set(implied) & programme)} only by the arithmetic, at undecoded frames)" if implied else ""))
-            if beyond:
-                note(f"{len(beyond)} address(es) beyond the programme's {first}-{last}: {ranges_text(beyond)}")
+    # On CLV an address is the timecode counted in frames, so the programme is
+    # checked the same way.
+    if args.pictures:
+        first, last = map(int, args.pictures.split("-"))
+        programme = set(range(first, last + 1))
+        missing = programme - addresses
+        beyond = sorted(addresses - programme)
+        summary["address_map"]["pictures_missing"] = len(missing)
+        summary["address_map"]["pictures_implied"] = len(set(implied) & programme)
+        if missing:
+            fail(f"{len(missing)} of pictures {first}-{last} resolve to no file frame: {ranges_text(missing)}")
+        else:
+            ok(f"every picture {first}-{last} resolves to one file frame"
+               + (f" ({len(set(implied) & programme)} only by the arithmetic, at undecoded frames)" if implied else ""))
+        if beyond:
+            note(f"{len(beyond)} address(es) beyond the programme's {first}-{last}: {ranges_text(beyond)}")
     if breaks:
         note(f"{len(breaks)} run break(s) (address discontinuities), at file frames {', '.join(map(str, breaks[:20]))}")
     else:

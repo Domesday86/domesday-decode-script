@@ -1749,7 +1749,7 @@ picture 54000 by its file name.
 | Outputs per title | One emulation output per AIV title (one stem per side); outlier sets are dropped, never made into a second output |
 | Choosing a pressing | The content version (disc identity, vfs-stacker's systematic dissent) with the most available sources; sets of other versions are dropped. Source Alignment's stamper groups are shared noise, not versions, and a set alone in one is kept (since 2026-10-26) |
 | Project files | Committed per disc side, built for its selected sets |
-| Decode scripts | One per pack (disc side), which lists that side's captures and stamps its decodes; `decode-domesday.sh` keeps the Domesday sides that have no pack yet |
+| Decode scripts | One per pack (disc side), which lists that side's captures and stamps its decodes; `decode-domesday.sh`, which held the Domesday sides without one, was removed once National B got its own |
 | Final pack check | Outside the build since 2026-11-01: the pack stage's own checks are the last; `install-pack.sh` puts a pack on the player |
 | Old outputs | Keep the current version and the previous one only |
 | Linux mounts | No fstab or automount snippet in the repo; the script prints the mount command if a share is missing |
