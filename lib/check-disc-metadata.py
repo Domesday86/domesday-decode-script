@@ -91,7 +91,8 @@ def main():
     ap.add_argument("--frames", type=int, required=True, help="frames the container holds")
     ap.add_argument("--format", choices=["CAV", "CLV"], required=True)
     ap.add_argument("--side", type=int, required=True)
-    ap.add_argument("--pictures", help="the programme's addresses, FIRST-LAST (CAV pictures, or CLV timecodes in frames)")
+    ap.add_argument("--pictures", help="the programme's addresses, FIRST-LAST (CAV pictures, or CLV timecodes in frames; "
+                    "on CLV a FIRST of 0 is met by a programme that starts at .01)")
     ap.add_argument("--system", choices=sorted(SYSTEMS), default="PAL")
     ap.add_argument("--tag-version", help="the container's ORC_DISC_METADATA_VERSION")
     ap.add_argument("--user-code")
@@ -248,11 +249,18 @@ def main():
         if addresses and max(addresses) >= PICTURE_LIMIT:
             fail(f"pictures reach {max(addresses)}: at or above {PICTURE_LIMIT} the biphase decoder misreads them")
     # On CLV an address is the timecode counted in frames, so the programme is
-    # checked the same way.
+    # checked the same way. The spec starts a CLV programme at 0:00:00.00, but
+    # discs often start it at .01, as Domesday does, so either is a start:
+    # address 0 missing is noted, and address 0 present where the programme
+    # starts at 1 is noted below with the other addresses beyond it.
     if args.pictures:
         first, last = map(int, args.pictures.split("-"))
         programme = set(range(first, last + 1))
         missing = programme - addresses
+        if kind == "clv_timecode" and first == 0 and 0 in missing and 1 in addresses:
+            missing.discard(0)
+            first = 1
+            note("the programme starts at 0:00:00.01, not at .00 as the spec has it")
         beyond = sorted(addresses - programme)
         summary["address_map"]["pictures_missing"] = len(missing)
         summary["address_map"]["pictures_implied"] = len(set(implied) & programme)

@@ -173,7 +173,16 @@ SETS=(
 # (_PAL_00-<minutes>, 1500 pictures a minute, at most SIDE_FRAMES). Each is
 # measured from the decode's log, counting only the pictures read in step
 # with a neighbour, so a lone VBI misread does not move it.
-declare -A LAST_PICTURE=()
+#
+# Both run on past their last picture, so the check counts the frames to it
+# and notes the rest. DS3's name says 58 minutes, and it holds the programme
+# to 58:09.19, then about 1540 frames of the player hunting back and forth
+# around it before the capture stops. DS7's says 44, and it reads in step to
+# 43:42.24, then scans on to 47:11 in steps of about 70 pictures.
+declare -A LAST_PICTURE=(
+  [DS3]=87244
+  [DS7]=65574
+)
 
 # ---------------------------------------------------------------------------
 
@@ -741,7 +750,7 @@ sql() { sqlite3 -readonly -separator ' ' "file:$1?immutable=1" "$2"; }
 # write check.txt to its stage_tmp name, and return non-zero if any failed.
 check_decode() {
   local id="$1" dest="$2" base="$3" target="$4" start="$5" report="$6"
-  local out fails=0 ext f frames want tol lo hi tol_text kept content opens state cont last
+  local out fails=0 ext f frames want tol lo hi tol_text kept content opens state cont last end
   local prj orc status sstate scont pics first_file first_pic last_pic irregular
   local wav desc
   local held longest
@@ -825,6 +834,13 @@ check_decode() {
          && [ $(( frames - held )) -ge "$lo" ] && [ $(( frames - held )) -le "$hi" ]; then
       ok "$frames frames written, $(( frames - held )) without the $held that repeat the picture before (expected $want$tol_text)"
       note "the player held pictures for $held extra frame(s), the longest $longest"
+    elif [ "$FRAMES" = all ] && [ -n "${LAST_PICTURE[$id]:-}" ] && [ "$frames" -gt "$hi" ] \
+         && [ -s "$dest/$base.log" ] \
+         && end=$(log_pictures "$dest/$base.log" \
+              | awk -v last="$last" '!e && $3 == last && $3 == p + 1 { e = $1 + 1 } { p = $3 } END { if (e) print e }') \
+         && [ -n "$end" ] && [ "$end" -ge "$lo" ] && [ "$end" -le "$hi" ]; then
+      ok "$frames frames written, $end of them to picture #$last (expected $want$tol_text)"
+      note "the capture runs on past picture #$last for $(( frames - end )) frame(s), which the Disc Mapper sorts out (phase 3)"
     else
       bad "$frames frames written (expected $want$tol_text)"
     fi
