@@ -53,7 +53,7 @@ dag:
       stage: PAL_CVBS_Source
       node_type: SOURCE
       display_name: CVBS Source
-      user_label: DS10
+      user_label: DS6
       x: 50
       y: 50
       parameters:
@@ -253,7 +253,7 @@ dag:
       stage: PAL_CVBS_Source
       node_type: SOURCE
       display_name: CVBS Source
-      user_label: DS6
+      user_label: DS10
       x: 50
       y: 1050
       parameters:
@@ -273,7 +273,7 @@ dag:
       stage: frame_map
       node_type: TRANSFORM
       display_name: Frame Map
-      user_label: DS10 map
+      user_label: DS6 map
       x: 275
       y: 50
       parameters:
@@ -383,7 +383,7 @@ dag:
       stage: frame_map
       node_type: TRANSFORM
       display_name: Frame Map
-      user_label: DS6 map
+      user_label: DS10 map
       x: 275
       y: 1050
       parameters:
@@ -525,7 +525,7 @@ dag:
       stage: fm_beat_cancel
       node_type: TRANSFORM
       display_name: FM Beat Cancel
-      user_label: DS10 beat
+      user_label: DS6 beat
       x: 387
       y: 50
       parameters:
@@ -635,7 +635,7 @@ dag:
       stage: fm_beat_cancel
       node_type: TRANSFORM
       display_name: FM Beat Cancel
-      user_label: DS6 beat
+      user_label: DS10 beat
       x: 387
       y: 1050
       parameters:

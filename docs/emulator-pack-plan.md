@@ -4,8 +4,8 @@ Status: **phases 0–7 are built, and `selection.yaml` is decided.** The
 Volcanoes pack passed its hand check on the player on 2026-10-29, the last of
 phase 7's exit criteria. Phase 8 is under way: Domesday Community South and
 National A and the two EcoDisc and two Countryside sides are complete, each
-checked on the player. Since 2026-11-01 that check is no longer part of the
-build: the repo covers only the automation, and `install-pack.sh` is how a
+checked on the player, and National B is built. Since 2026-11-01 that check
+is no longer part of the build: the repo covers only the automation, and `install-pack.sh` is how a
 pack gets to the player.
 Volcanoes is the pilot disc; the other discs follow once the process is
 proven on it.
@@ -1737,6 +1737,59 @@ picture 54000 by its file name.
   alone runs past it and reads it blank. As on Community South (135117),
   the selection records it in `vfs.baseline_differs`. The reference is in
   `pack.sha256`.
+
+**Complete: National B** (`discs/national-b`, stem `dd_national_b`), from
+its 12 captures, one per Domesday set.
+
+- The side is CLV, an hour of motion with no EFM. `decode-national-b.sh` is
+  `decode-national-a.sh` with this side's set table, `--noEFM`, and its
+  checks counted in timecode. ld-decode derives a picture number from the
+  timecode, and the programme runs from 0:00:00.01 for 89924 frames.
+  `disc.conf` gives `DISC_FORMAT=CLV`, `DISC_EFM=no` (as on EcoDisc side 2:
+  no VFS stack, and the pack is the mkv alone), and `transform3d` on every
+  frame. The sound is analogue stereo, though the VBI says mono.
+- The spec starts a CLV programme at .00, but Domesday's starts at .01, as
+  many CLV discs' may. `check-disc-metadata.py` now checks the programme's
+  coverage on CLV as on CAV. A programme given from 0 is met by one that
+  starts at .01, and the check notes it.
+- ld-decode 6148260 hung on DS3 at 58:09, as on Community South's DS7. Its
+  fix (63c24fd, "Drop a field whose sync stops partway") is in 1e8f04a,
+  which flake.lock pins, and every set then decoded.
+- Two captures run on past their programmes, so their frame count failed
+  at first. `LAST_PICTURE` gives the measured last picture, and the check
+  counts the frames to its first in-step read and notes the rest:
+  - DS3 holds the programme to 87244 (58:09.19), then about 1680 frames of
+    the player hunting around it.
+  - DS7 reads in step to 65574 (43:42.24), then scans to 47:11 in steps of
+    about 70 pictures.
+- Expected two pressings, but the compare report finds one version. Every
+  set reads CLV side 1, user code 1987, Amendment 2 present. Source
+  Alignment's four stamper groups (A = DS1 DS2 DS7 DS10 DS12, B = DS3 DS9,
+  C = DS4 DS5 DS6 DS8, D = DS11) are shared noise, not content. It predicts
+  σ 5.65 for the Weighted stack, against 11.63 for the best set alone.
+- The selection stacks eleven sets, DS6 first (the suggested reference), with
+  `pressing_repair`. DS7 is dropped: the Disc Mapper places its scan frames
+  as pictures up to output frame 70210, about 4600 of them among padding,
+  and it adds little (σ 5.67 without it).
+- The mkv's address map took two decode-orc fixes (decode-orc#356). The
+  first frame of the programme is mixed: lead-in on one field, .01 on the
+  other.
+  - On a7ec003 the metadata writer gave that frame a run of its own, so two
+    frames claimed .01. The hand-built stack has the same flaw.
+  - 088bf80 made lead-in strict, which left picture 1 with no frame.
+  - 2f60470 (#358) holds that a field carrying a number is the first field
+    of its picture, as IEC 60856/60857 has it. In the Disc Mapper and the
+    metadata, the mixed frame is now picture 1. When a picture repeats, the
+    Disc Mapper keeps the copy with the lead field. DS10 had kept its
+    repeat and sat a frame off from the other sets, so the suggested
+    reference moved from DS10 to DS6.
+- The baseline is the hand-built stack in `vp415e_projects/NationalB_output`
+  (DS4, DS8, DS10 and DS6, Mean; 89926 frames, CLV side 1, user code 1987).
+- Built 2026-11-03 on decode-orc 2f60470: pack `70245855795eba86`. The
+  stack reads one run, from file frame 1 at .01, over pictures 1-89924,
+  with no undecoded frames (the baseline has two runs and one undecoded).
+  Its sample measures white SNR 39.08 dB, black PSNR 40.71 dB (in Mean
+  38.55 and 40.24). The video stage took 408 min.
 
 ## Decisions
 

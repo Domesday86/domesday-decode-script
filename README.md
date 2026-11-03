@@ -94,7 +94,7 @@ Every script takes the same core flags and environment variables:
 | `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
 | `--force` | | refuse | overwrite an existing decode |
-| `--adopt` | | | the pack scripts only (Volcanoes, Community South, National A, Community North, EcoDisc, Countryside): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
+| `--adopt` | | | the pack scripts only (Volcanoes, Community South, National A, National B, Community North, EcoDisc, Countryside): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
 | `-n, --dry-run` | | | resolve starts and print the commands, decode nothing |
 | `--list` | | | list what the selectors chose and exit |
 
@@ -110,8 +110,8 @@ than with `--library` alone.
 
 Every script's output root sits under one folder,
 `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/`, in a subfolder named after the
-script's disc or pack: `domesday`, `volcanoes`, `community-south`,
-`national-a`, `community-north`, `ecodisc-side1`, `ecodisc-side2`, `city`, `countryside-side1`,
+script's disc or pack: `volcanoes`, `community-south`, `national-a`,
+`national-b`, `community-north`, `ecodisc-side1`, `ecodisc-side2`, `city`, `countryside-side1`,
 `countryside-side2`, `north-polar`, `dragons-lair`, `apple-almanac-side-a` and
 `apple-almanac-side-b`.
 
@@ -1424,6 +1424,19 @@ inputs, so a re-run with nothing changed does nothing.
 
     The side is a TV programme, motion throughout, so its video sink decodes
     every frame with `transform3d` rather than the held schedule.
+  - **Domesday National B** (`national-b`, stem `dd_national_b`): the 12
+    National B captures, decoded by `decode-national-b.sh`, which is
+    `decode-national-a.sh` with this side's set table and checks. The side
+    is CLV, an hour of motion, so pictures are counted from the timecode,
+    and the programme runs from 0:00:00.01 for 89924 frames. The spec
+    starts a CLV programme at .00, so the metadata check takes either start.
+    The side has no EFM (`DISC_EFM=no`, as on EcoDisc side 2), and the pack
+    is the mkv alone, decoded with `transform3d` throughout. DS3's and DS7's
+    captures run on past their programmes (the player hunting, then
+    scanning), so `LAST_PICTURE` gives their last pictures and the frame
+    count check counts to them. DS7 is left out of the stack: its scan is
+    mapped as scattered pictures. The baseline is the hand-built stack in
+    `vp415e_projects/NationalB_output`, which stacked DS4, DS6, DS8 and DS10.
 
 ```sh
 ./build-pack.sh volcanoes status                 # each stage: up to date, or stale and why
