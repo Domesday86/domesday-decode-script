@@ -4,7 +4,7 @@ Status: **phases 0–7 are built, and `selection.yaml` is decided.** The
 Volcanoes pack passed its hand check on the player on 2026-10-29, the last of
 phase 7's exit criteria. Phase 8 is under way: Domesday Community South and
 National A and the two EcoDisc and two Countryside sides are complete, each
-checked on the player, and National B and City Culture 1 are built. Since 2026-11-01 that check
+checked on the player, and National B and City Culture 1 and 2 are built. Since 2026-11-01 that check
 is no longer part of the build: the repo covers only the automation, and `install-pack.sh` is how a
 pack gets to the player.
 Volcanoes is the pilot disc; the other discs follow once the process is
@@ -1832,6 +1832,37 @@ has one of each of the disc's two sides.
   free space (107762); stacking gains 4 sectors over DS2S2 alone. Its hash
   is recorded in `discs/city-culture1/pack.sha256`. The video stage took
   60 min.
+
+**Under way: City Culture 2** (`discs/city-culture2`, stem
+`city_culture2`), from two captures, one in each of the library's two City
+sets. The disc is single-sided.
+
+- `decode-city-culture2.sh` is `decode-city-culture1.sh` with this disc's
+  set table, and Culture 2 leaves `decode-city.sh`. DS1's start target
+  stays picture 4, as it was there. Its EFM data runs from about picture
+  31000 to the end on both captures, so the EFM check runs from picture
+  31100. That was found with `efm_score` probes of both: every 1,000 file
+  frames, then every 100 around the edge.
+- Its projects are Culture 1's, with two sets.
+- The compare evidence (orc-5323ee1, 2026-11-04): one version.
+  - Both sets read CAV **side 2**, user code 1996, pictures 1-39104,
+    though the library names the captures `Side1`. `DISC_SIDE` is 2.
+  - Source Alignment finds one stamper group. The predicted stack σ is
+    4.73, against 6.68 for either set alone.
+  - The video stacks DS2 DS1, the report's order. The VFS stacks DS1 DS2.
+- The VFS is GOOD and whole, but not bit-perfect. Of the sectors the
+  filesystem needs, 102 were recovered by one set alone (68 by DS1, 34 by
+  DS2), and with two captures there is no third to back them. The two sets
+  agree wherever both recovered a sector. `vfs.accept: single-source`
+  accepts that, as on Countryside Side 2.
+- Built 2026-11-04 on decode-orc 5323ee1: pack `b7d5f2b12ce0882d`. The
+  stack reads one run over pictures 1-39104. 14 frames are undecoded
+  (numbered on the disc, not recovered), and every picture still
+  resolves. Its sample measures white SNR 33.82 dB, black PSNR 32.67 dB
+  (in Mean 33.82 and 32.68). The VFS image has 92902 bad sectors, all
+  before the filesystem (140) or in free space (92762). Its hash is
+  recorded in `discs/city-culture2/pack.sha256`. The video stage took
+  28 min.
 
 ## Decisions
 

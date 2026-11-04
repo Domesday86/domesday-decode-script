@@ -15,8 +15,9 @@
 #
 # Each VP415e pack has its own decode script, which stamps its decodes for
 # build-pack.sh. Culture 1 has one, decode-city-culture1.sh, which lists the
-# four captures of both its sides, so they are no longer listed here; the
-# other three discs stay until each gets its own.
+# four captures of both its sides, and Culture 2 has one,
+# decode-city-culture2.sh, so neither is listed here; the two Financial discs
+# stay until each gets its own.
 #
 # Every capture is CAV. Each is decoded to CVBS (<name>.cvbs + <name>.meta)
 # starting a configurable number of lead-in frames before its first picture, so
@@ -112,8 +113,9 @@ START_OVERRIDE=""
 # Side table: set | side | format | first picture | path relative to LIBRARY
 #
 # A "side" here names a disc and a side of it, because a City set is four discs
-# rather than one: Culture2-Side1, Financial1-Side1 and Financial2-Side1 here,
-# and Culture1-Side1 and Culture1-Side2 in decode-city-culture1.sh.
+# rather than one: Financial1-Side1 and Financial2-Side1 here, Culture1-Side1
+# and Culture1-Side2 in decode-city-culture1.sh, and Culture2-Side1 in
+# decode-city-culture2.sh.
 #
 # Every capture is PAL and, as the format column records, CAV. The format is not
 # passed to ld-decode, which reads it from the VBI itself; it is here because it
@@ -126,42 +128,27 @@ START_OVERRIDE=""
 # which carry none. See the note above the ld-decode command in decode_one.
 #
 # "first picture" is the picture number the start search converges on. It is 1
-# for four of the five captures, each of which begins at the head of its side.
-# The exception is DS1's Culture2-Side1, which is 4, and that is a fact about
-# the capture rather than about the disc. Picture #1 is present on it, at file
-# frame 332, right behind the lead-in at 330-331 -- but the capture reports a
-# duplicated file frame just after it (#2 and #3 both land on file frame 334),
-# and find-disc-start.sh only trusts a reading that its successor confirms by
-# advancing one file frame and one picture together. Picture #1 can therefore
-# never be confirmed there and the search runs out of probes on it. Picture #4,
-# at file frame 335, is confirmed by #5 at 336 and converges immediately.
-#
-# Nothing is lost by aiming at #4. The start that keeps the lead-in has to land
-# on the colour-sequence lattice ld-decode's CVBS writer opens on, and the
-# nearest one below 335 opens the output at file frame 332 -- picture #1 itself.
-# The start report says so on every run: "output opens at file frame 332, 3
-# frame(s) before picture #4".
+# for all three captures, each of which begins at the head of its side.
 #
 # DS1 has no Financial 1 capture: that disc was missing from the set. That is a
 # fact about the set, not a gap in the library.
 # ---------------------------------------------------------------------------
 
 SIDES=(
-  "DS1|Culture2-Side1|CAV|4|BBC_AIV/City_Disc/City_Disc_DS1/City-Disc_DD86-DS1_Culture2-Side1_20210101_CAV_PAL_00001-39104.ldf"
   "DS1|Financial2-Side1|CAV|1|BBC_AIV/City_Disc/City_Disc_DS1/City-Disc_DD86-DS1_Financial2-Side1_20210101_CAV_PAL_00001-52523.ldf"
 
-  "DS2|Culture2-Side1|CAV|1|BBC_AIV/City_Disc/City_Disc_DS2/City-Disc_DD86-DS2_Culture2-Side1_20210101_CAV_PAL_00001-39104.ldf"
   "DS2|Financial1-Side1|CAV|1|BBC_AIV/City_Disc/City_Disc_DS2/City-Disc_DD86-DS2_Financial1-Side1_20200126_CAV_PAL_00001-53981.ldf"
   "DS2|Financial2-Side1|CAV|1|BBC_AIV/City_Disc/City_Disc_DS2/City-Disc_DD86-DS2_Financial2-Side1_20210101_CAV_PAL_00001-44611.ldf"
 )
 
 # Short names for the sides, so a side can be named without typing it out.
-SIDE_NAMES=(Culture2-Side1 Financial1-Side1 Financial2-Side1)
-SIDE_ALIASES=(C2S1 F1S1 F2S1)
+SIDE_NAMES=(Financial1-Side1 Financial2-Side1)
+SIDE_ALIASES=(F1S1 F2S1)
 
 # Sides that have a pack script of their own, and that script.
 MOVED_SIDES=("Culture1-Side1|C1S1|decode-city-culture1.sh"
-             "Culture1-Side2|C1S2|decode-city-culture1.sh")
+             "Culture1-Side2|C1S2|decode-city-culture1.sh"
+             "Culture2-Side1|C2S1|decode-city-culture2.sh")
 
 # ---------------------------------------------------------------------------
 
@@ -176,34 +163,33 @@ A City set is four discs -- Culture 1, Culture 2, Financial 1 and Financial 2 --
 all single-sided except Culture 1, which has the same content on both sides. So
 a "side" here names a disc and a side of it:
 
-  Culture2-Side1    C2S1
   Financial1-Side1  F1S1
   Financial2-Side1  F2S1
 
-Culture 1's two sides are decoded by decode-city-culture1.sh, its pack's own
-script.
+Culture 1's two sides are decoded by decode-city-culture1.sh and Culture 2 by
+decode-city-culture2.sh, each its pack's own script.
 
 A selector picks what to decode:
 
   DS2               every side of disc set 2
-  DS2:Culture2-Side1
+  DS2:Financial2-Side1
                     one side of one set
-  Culture2-Side1    that side of every set that has one
-  C2S1              same, by its short name
+  Financial2-Side1  that side of every set that has one
+  F2S1              same, by its short name
 
 Selectors add together, so "DS1 DS2:F1S1" is both of set 1's plus set 2's
-Financial 1. --side narrows whatever the selectors chose, so "--side C2S1 DS1
+Financial 1. --side narrows whatever the selectors chose, so "--side F2S1 DS1
 DS2" is the same thing written the other way round. Set and side names are
 matched regardless of case.
 
 DS1 has no Financial 1 -- that disc was missing from the set -- so
 "Financial1-Side1" selects one capture rather than two, and "DS1:F1S1" is an
-error rather than an omission. There are five captures in all.
+error rather than an omission. There are three captures in all.
 
 Options:
   -l, --library DIR     capture library root (default: $LIBRARY)
   -o, --output DIR      decode output root (default: $OUTPUT)
-      --side NAME       only this side (repeatable: C2S1 F1S1 F2S1,
+      --side NAME       only this side (repeatable: F1S1 F2S1,
                         or full names)
       --decoder NAME    decoder directory name (default: from flake.lock)
       --no-verify-decoder
@@ -257,8 +243,8 @@ Examples:
   ${0##*/} -f 2 DS1                      # quick smoke test of one set
   ${0##*/} DS1                           # set 1, first 1000 frames a side
   ${0##*/} --frames all DS2:F1S1         # one side in full
-  ${0##*/} --frames all C2S1 -j 2        # both Culture 2 captures
-  ${0##*/} --frames all -j 2             # all five captures
+  ${0##*/} --frames all F2S1 -j 2        # both Financial 2 captures
+  ${0##*/} --frames all -j 2             # all three captures
 EOF
 }
 
@@ -384,7 +370,7 @@ canonical_set() {
 # --- selecting sides -------------------------------------------------------
 #
 # Selectors are collected into a set of (set, side) pairs rather than filtering
-# the table once per selector, so naming the same side twice -- "DS2 DS2:C2S1" --
+# the table once per selector, so naming the same side twice -- "DS2 DS2:F2S1" --
 # decodes it once, and so the table's order is what the decodes come out in
 # whatever order the selectors were written.
 
@@ -424,7 +410,7 @@ else
         elif v=$(canonical_side "$want"); then
           select_pair '*' "$v" || die "no set has a $v in the table"
         else
-          die "unknown selector: $want (name a set like DS2, a side like C2S1, or DS2:C2S1)"
+          die "unknown selector: $want (name a set like DS2, a side like F2S1, or DS2:F2S1)"
         fi
         ;;
     esac

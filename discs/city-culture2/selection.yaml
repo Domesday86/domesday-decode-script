@@ -1,0 +1,43 @@
+# City Culture 2: which sets go into the video and the VFS stacks, decided
+# from the compare stage's report (orc-<rev>/compare/report.txt) as described
+# in docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
+#
+# The evidence (orc-5323ee1, 2026-11-04): one version of the disc. Both sets'
+# Disc Mappers read the same disc identity over the whole side (CAV side 2,
+# 12 inch, user code 1996, CX off, Amendment 2 present, sound stereo,
+# pictures 1-39104). Source Alignment finds one stamper group, A = both. Its
+# noise model predicts σ 4.73 for the Weighted stack of the two, against
+# 6.68 for either alone. The two EFM images hold the same bytes wherever
+# both recovered a sector.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS2 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid), with 2 padding frames; the next choice is DS1
+  # (14). Each adds the same (the predicted stack σ without it is 6.68) and
+  # takes half the weight. DS1 reads cleaner (white SNR 35.88 dB against
+  # 31.21) but has far more dropouts (424683 against 46586), so each covers
+  # what the other lacks. Both are kept.
+  sets: [DS2, DS1]
+  dropped: []
+
+vfs:
+  # By data loss after C2: DS1 0.1367%, DS2 0.2493%. The disc's data runs
+  # from about picture 31000 to the end of the side, and its ADFS filesystem
+  # ("Citycult2") is whole in the stack. Stacking both is GOOD, and gains 42
+  # sectors over DS1 alone, all from DS2, 34 of them needed by the
+  # filesystem. Both are kept.
+  sets: [DS1, DS2]
+  dropped: []
+  # 102 of the sectors the filesystem needs rest on one capture: 68 only DS1
+  # recovered, 34 only DS2. So the image cannot pass the bit-perfect test,
+  # which wants every needed sector from two, and with two captures there is
+  # no third to supply one. Each passed the EFM decoder's own error
+  # correction, and the sets agree wherever both recovered a sector; only a
+  # second capture is missing. single-source accepts that, and nothing else:
+  # a needed sector still bad, or a split vote, still fails.
+  accept: single-source
