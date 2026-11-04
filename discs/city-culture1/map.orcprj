@@ -1,0 +1,259 @@
+# ORC Project File
+# Version: 2.0
+#
+# City Culture 1, every capture of both sides: each decode through a Disc
+# Mapper frame map, then all of them into one Source Align, for the selection
+# report (phase 4). Nothing is stacked or written; the project has no sink.
+# build-pack.sh's map stage copies this beside its outputs, points each
+# source at its set's decode with orc-cli nodes set, and runs orc-cli tools
+# refresh, which maps every set and then aligns them. A set here is one
+# capture: DS1S2 is set DS1's capture of the second side.
+#
+# Each source is labelled with its set id, as in
+# decode-city-culture1.sh's SETS table, and its frame map "<set> map". A
+# set that cannot be mapped is dropped from the map stage by deleting its
+# source and frame map here. The refresh tools are recorded under
+# tool_refresh: field_mapping on every frame map (lead-in and lead-out kept),
+# source_alignment on Align (pad_for_alignment),
+# and fm_beat_calibration on each "<set> beat".
+#
+# Each "<set> beat" is an FM Beat Cancel on a branch off its frame map,
+# feeding nothing: the refresh's FM Beat Calibration measures the master's
+# carrier on it (300 frames, about 30 s a set), and the map stage commits the
+# value as framemaps/<set>.carrier, for the stack's FM Beat Cancel on that set
+# (decode-orc#354). The captures of one master measure within 1-3 kHz of each
+# other.
+
+project:
+  name: City Culture 1 map
+  version: 2.0
+  video_format: PAL
+  source_format: Composite
+  amplitude_unit: 10bit
+dag:
+  nodes:
+    - id: 1
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS1S1
+      x: 50
+      y: 50
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 2
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS1S2
+      x: 50
+      y: 175
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 3
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS2S1
+      x: 50
+      y: 300
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 4
+      stage: PAL_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS2S2
+      x: 50
+      y: 425
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 5
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS1S1 map
+      x: 275
+      y: 50
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 6
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS1S2 map
+      x: 275
+      y: 175
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 7
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS2S1 map
+      x: 275
+      y: 300
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 8
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS2S2 map
+      x: 275
+      y: 425
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 9
+      stage: source_align
+      node_type: COMPLEX
+      display_name: Source Align
+      user_label: Align
+      x: 500
+      y: 50
+      tool_refresh:
+        tool: source_alignment
+      parameters:
+        alignmentMap:
+          type: string
+          value: ""
+        alignmentMode:
+          type: string
+          value: pad_for_alignment
+    - id: 10
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS1S1 beat
+      x: 387
+      y: 50
+      tool_refresh:
+        tool: fm_beat_calibration
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 11
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS1S2 beat
+      x: 387
+      y: 175
+      tool_refresh:
+        tool: fm_beat_calibration
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 12
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS2S1 beat
+      x: 387
+      y: 300
+      tool_refresh:
+        tool: fm_beat_calibration
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+    - id: 13
+      stage: fm_beat_cancel
+      node_type: TRANSFORM
+      display_name: FM Beat Cancel
+      user_label: DS2S2 beat
+      x: 387
+      y: 425
+      tool_refresh:
+        tool: fm_beat_calibration
+      parameters:
+        carrier_black_mhz:
+          type: double
+          value: 7.1
+  edges:
+    - from: 1
+      to: 5
+    - from: 2
+      to: 6
+    - from: 3
+      to: 7
+    - from: 4
+      to: 8
+    - from: 5
+      to: 9
+    - from: 5
+      to: 10
+    - from: 6
+      to: 9
+    - from: 6
+      to: 11
+    - from: 7
+      to: 9
+    - from: 7
+      to: 12
+    - from: 8
+      to: 9
+    - from: 8
+      to: 13

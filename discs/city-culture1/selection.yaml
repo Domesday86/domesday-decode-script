@@ -1,0 +1,41 @@
+# City Culture 1: which sets go into the video and the VFS stacks, decided
+# from the compare stage's report (orc-<rev>/compare/report.txt) as described
+# in docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason. A set is one capture: DS1S2
+# is disc set DS1's capture of the disc's second side.
+#
+# The evidence (orc-5323ee1, 2026-11-04): one version of the disc, on both
+# of its sides. Every set's Disc Mapper reads the same disc identity over the
+# whole side (CAV side 1, 12 inch, user code 1995, CX off, Amendment 2
+# present, sound stereo, pictures 1-44003): the second side reads side 1 as
+# the first does. Source Alignment finds one stamper group, A = all four, and
+# none is soft (5-6 MHz response 0.95-1.11). Its noise model is trusted, and
+# predicts σ 2.5 for the Weighted stack of all four, against 3.64 for the
+# best single set. Every pair of EFM images holds the same bytes wherever
+# both recovered a sector.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS1S1 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid), with 6 padding frames; the next choice is DS2S2
+  # (0). The rest by what each adds, the predicted stack σ without it, and
+  # its share of the weight: DS1S1 3.45 (47%), DS1S2 3.0 (30%), DS2S2 2.66
+  # (12%), DS2S1 2.65 (11%). Every set adds, so none is left out. DS1S2's
+  # capture opens with the player scanning back from picture 185 to 1; the
+  # Disc Mapper places it, and it pads 13 frames in 5 gaps.
+  sets: [DS1S1, DS1S2, DS2S2, DS2S1]
+  dropped: []
+
+vfs:
+  # By data loss after C2: DS2S2 0.0000%, DS1S2 0.0111%, DS2S1 0.0770%,
+  # DS1S1 1.8953%. The disc's data runs from 00:01:67 to 00:05:11, then jumps
+  # to 24:01:72, and its ADFS filesystem is addressed across the jump (its
+  # files from sector 115190). Since decode-orc#359 (5323ee1) every set's
+  # EFM sink fills the gap, so the images line up with offset == address.
+  # Stacking all four is GOOD, and gains 4 sectors over DS2S2 alone (all
+  # from DS1S2, none needed by the filesystem). Every set is kept.
+  sets: [DS2S2, DS1S2, DS2S1, DS1S1]
+  dropped: []

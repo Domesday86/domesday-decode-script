@@ -1,0 +1,11 @@
+# City Culture 1: the reference SHA-256 of the stacked VFS image and its bad
+# sector map, recorded once the image passed the bit-perfect test
+# (docs/emulator-pack-plan.md, phase 6). Every later vfs stage must match.
+#
+# Recorded 2026-11-04 from vfs-41ab10c: DS2S2 DS1S2 DS2S1 DS1S1 at decode-orc
+# 5323ee1, ld-decode 1e8f04a. 270657536 bytes, 132157 EFM sectors; 107902
+# listed bad, all before the filesystem (140) or in free space (107762). The
+# data jumps from 00:05:11 to 24:01:72; since decode-orc#359 every set fills
+# the gap, so the images line up with offset == address.
+f5751dc6ec8d70feedd17fa832494a85f5f56c2324feb629bd7c8772baaef0f6  city_culture1.dat
+50844e5ae93bf3b0803ae1156f91c7e0d44e9e2be52aa3e84ac0e72ad9778089  city_culture1.dat.bsm

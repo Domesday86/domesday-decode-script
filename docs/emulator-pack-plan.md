@@ -4,7 +4,7 @@ Status: **phases 0–7 are built, and `selection.yaml` is decided.** The
 Volcanoes pack passed its hand check on the player on 2026-10-29, the last of
 phase 7's exit criteria. Phase 8 is under way: Domesday Community South and
 National A and the two EcoDisc and two Countryside sides are complete, each
-checked on the player, and National B is built. Since 2026-11-01 that check
+checked on the player, and National B and City Culture 1 are built. Since 2026-11-01 that check
 is no longer part of the build: the repo covers only the automation, and `install-pack.sh` is how a
 pack gets to the player.
 Volcanoes is the pilot disc; the other discs follow once the process is
@@ -1790,6 +1790,48 @@ its 12 captures, one per Domesday set.
   with no undecoded frames (the baseline has two runs and one undecoded).
   Its sample measures white SNR 39.08 dB, black PSNR 40.71 dB (in Mean
   38.55 and 40.24). The video stage took 408 min.
+
+**Under way: City Culture 1** (`discs/city-culture1`, stem
+`city_culture1`), from four captures: each of the library's two City sets
+has one of each of the disc's two sides.
+
+- The City Disc is four discs. Culture 1 is the one with two sides, and both
+  carry the same content, so it is one pack built from the captures of both
+  sides. A set is one capture, named for the disc set and the side (`DS1S2`
+  is set DS1's second side). Culture 2 and the two Financial discs stay in
+  `decode-city.sh` until each gets a pack.
+- `decode-city-culture1.sh` is `decode-countryside-side1.sh` with this
+  disc's set table. Its EFM data runs from about picture 36000 to the end,
+  on both sides, so the EFM check runs from picture 36100. That was found
+  with `efm_score` probes of DS1's two sides: every 1,000 file frames, then
+  every 100 around the edge.
+- Its projects are Countryside Side 1's, with four sets and the names
+  changed. The stack is Volcanoes', since there is one stamper group:
+  Weighted, without `pressing_repair`. The video sink decodes with
+  `transform2d` throughout, as the phase 5 table has it. There is no
+  hand-built stack to compare with.
+- The compare evidence (orc-5323ee1, 2026-11-04): one version.
+  - All four sets read CAV side 1, user code 1995, pictures 1-44003; the
+    second side reads side 1 as the first does.
+  - Source Alignment finds one stamper group, and no set is soft.
+  - The predicted stack σ is 2.5, against 3.64 for the best single set.
+  - The video stacks all four, DS1S1 DS1S2 DS2S2 DS2S1.
+- The VFS took a decode-orc fix (decode-orc#359). The disc's EFM timecode
+  jumps from 00:05:11 to 24:01:72, and its ADFS filesystem is addressed
+  across the jump. On 2f60470 the EFM sink filled the gap on DS1S1 only
+  (POOR, 1.9% loss). On the other three it packed the data after the jump
+  about 107758 sectors early, so those images lined up with DS1S1's only
+  before the jump, and the stack lacked 415 sectors in DATA. On 5323ee1
+  every set fills the gap: the images are 132151-132157 sectors with
+  offset == address, and every pair agrees wherever both recovered a sector.
+- Built 2026-11-04 on decode-orc 5323ee1: pack `c092b29aa325fb6e`. The
+  stack reads one run over pictures 1-44003, with no undecoded frames. Its
+  sample measures white SNR 34.59 dB, black PSNR 33.25 dB (in Mean 34.51
+  and 33.19). The VFS image is bit-perfect: GOOD, all 16 objects free of
+  bad sectors, the 107902 bad sectors all before the filesystem (140) or in
+  free space (107762); stacking gains 4 sectors over DS2S2 alone. Its hash
+  is recorded in `discs/city-culture1/pack.sha256`. The video stage took
+  60 min.
 
 ## Decisions
 
