@@ -10,9 +10,9 @@
 # the library has one capture of it, set DS2's: the disc was missing from set
 # DS1 when that set was captured. Each pack has its own decode script: this
 # is Financial 1's, the only list of its capture, and it checks and stamps
-# its decode for build-pack.sh. Culture 1 and Culture 2 have their own,
-# decode-city-culture1.sh and decode-city-culture2.sh; Financial 2 is still
-# decoded by decode-city.sh.
+# its decode for build-pack.sh. The other three discs have theirs,
+# decode-city-culture1.sh, decode-city-culture2.sh and
+# decode-city-financial2.sh.
 #
 # Each side is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
 # configurable number of lead-in frames before its first picture, so the

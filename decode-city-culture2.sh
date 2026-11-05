@@ -10,9 +10,9 @@
 # library has two sets, each with one capture of it. Each is decoded in its
 # own right, so they can be compared against each other or combined. Each
 # pack has its own decode script: this is Culture 2's, the only list of its
-# captures, and it checks and stamps its decodes for build-pack.sh. Culture 1
-# has its own, decode-city-culture1.sh; the two Financial discs are still
-# decoded by decode-city.sh.
+# captures, and it checks and stamps its decodes for build-pack.sh. The other
+# three discs have theirs, decode-city-culture1.sh, decode-city-financial1.sh
+# and decode-city-financial2.sh.
 #
 # Each side is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
 # configurable number of lead-in frames before its first picture, so the

@@ -1899,6 +1899,57 @@ built from one set.
   padding); all 29 objects are free of bad sectors. Its hash is recorded
   in `discs/city-financial1/pack.sha256`. The video stage took 27 min.
 
+**Under way: City Financial 2** (`discs/city-financial2`, stem
+`city_financial2`), from two captures, one in each of the library's two City
+sets. The disc is single-sided. It is the last City disc, so
+`decode-city.sh`, which decoded the discs that had no pack yet, is gone.
+
+- `decode-city-financial2.sh` is `decode-city-culture2.sh` with this disc's
+  set table. Its EFM data lies in two bands, about pictures 30800-33000 and
+  from about 49000 to the end of the side, so the EFM check runs over a list
+  of ranges, `EFM_PICTURES`, 30900-32900 and 49200-52200. That was found
+  with `efm_score` probes of both captures: every 2,000 file frames, then
+  every 100 or 200 around each edge.
+- DS2's capture reads in step only to picture 43872, though its name says
+  44611. From there the player sticks and hunts for about 1900 frames, then
+  scans on and holds 44611. `LAST_PICTURE` gives 43872, as on National B,
+  so the frame count check counts to it and notes the 1990 frames after.
+  DS2's first decode failed that check and was adopted once
+  `LAST_PICTURE` was in.
+- Its projects are Culture 2's, with DS1 first in the stack, the report's
+  suggested reference.
+- The compare evidence (orc-5323ee1, 2026-11-05): one version.
+  - Both sets read CAV **side 2**, user code 1994, though the library names
+    the captures `Side1`. `DISC_SIDE` is 2. DS1 reads pictures 1-52522, the
+    whole side, though its name says 52523; `DISC_PICTURES` is 1-52522.
+  - Source Alignment finds one stamper group. The predicted stack σ is
+    11.04, against 15.62 for either set alone.
+  - The video stacks DS1 DS2, and so does the VFS.
+- The Disc Mapper misplaces 9 of DS2's frames (decode-orc#364). At the end
+  of DS2's hunting the player jumps from picture 44217 to 44514 and scans on
+  to 44805. The Mapper takes the jump for a corrupted number and maps the
+  frames after it 296 pictures early, at 44218-44509, so the stack mixes
+  each with DS1's true picture there and those 9 frames come out
+  undecoded. The pack is built without waiting for a fix.
+- Neither capture reaches the lead-out, and the metadata check wanted one.
+  `disc.conf` now says `DISC_LEAD_OUT=absent`, which build-pack.sh reads:
+  the check then wants the lead-in marked and no lead-out, and notes why.
+  It is done in build-pack.sh, not in `lib/check-disc-metadata.py`, which
+  is a stamp input of every video stage. A side that says nothing is
+  checked as before, and its stamp is unchanged.
+- The VFS is GOOD and whole, but not bit-perfect: 465 of the sectors the
+  filesystem ("Cityfin2") needs rest on DS1 alone: DS2 never reaches the
+  second band, and adds 1 sector.
+  `vfs.accept: single-source` accepts that.
+- Built 2026-11-05 on decode-orc 5323ee1 and vfs-verifier 1e0d35b: pack
+  `5cedc01c7bedb103`. The stack reads one run over pictures 1-52522. 9
+  frames are undecoded, those of decode-orc#364, and every picture still
+  resolves. Its sample measures white SNR 35.90 dB, black PSNR 33.63 dB (in
+  Mean the same). The VFS image has 140423 bad sectors, all before the
+  filesystem (141) or in free space (140282); all 29 objects are free of
+  bad sectors. Its hash is recorded in `discs/city-financial2/pack.sha256`.
+  The video stage took 36 min.
+
 ## Decisions
 
 | Question | Decision |

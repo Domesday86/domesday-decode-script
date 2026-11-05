@@ -1,0 +1,44 @@
+# City Financial 2: which sets go into the video and the VFS stacks, decided
+# from the compare stage's report (orc-<rev>/compare/report.txt) as described
+# in docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
+#
+# The evidence (orc-5323ee1, 2026-11-05): one version of the disc. Both sets'
+# Disc Mappers read the same disc identity (CAV side 2, 12 inch, user code
+# 1994, CX off, Amendment 2 present, sound stereo). DS1 reads pictures
+# 1-52522, the whole side; DS2 stops short of it. Source Alignment finds one
+# stamper group, A = both. Its noise model predicts σ 11.04 for the Weighted
+# stack of the two, against 15.62 for either alone. The two EFM images hold
+# the same bytes wherever both recovered a sector.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS1 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid), with 2 padding frames; the next choice is DS2.
+  # Each adds the same (the predicted stack σ without it is 15.62) and takes
+  # half the weight. DS2 covers pictures 1-44510 only: its capture reads in
+  # step to about 43870, then the player sticks and hunts, and the Disc
+  # Mapper takes what it read there out of order (396 frames that mix two
+  # pictures dropped, 1568 duplicates removed), with padding where nothing
+  # was read. Past 44510, DS1 stands alone. Both are kept.
+  sets: [DS1, DS2]
+  dropped: []
+
+vfs:
+  # By data loss after C2, both 0.0001%; DS1 first, as it covers the whole
+  # side. The disc's data lies in two bands, about pictures 30800-33000 and
+  # 49000 to the end, and its ADFS filesystem ("Cityfin2") is whole in the
+  # stack: GOOD. DS2 never reaches the second band, and adds 1 sector over
+  # DS1 alone. Both are kept.
+  sets: [DS1, DS2]
+  dropped: []
+  # 465 of the sectors the filesystem needs rest on DS1 alone, so the image
+  # cannot pass the bit-perfect test, which wants every needed sector from
+  # two, and with two captures there is no third to supply one. Each passed
+  # the EFM decoder's own error correction, and the sets agree wherever both
+  # recovered a sector. single-source accepts that, and nothing else: a
+  # needed sector still bad, or a split vote, still fails.
+  accept: single-source

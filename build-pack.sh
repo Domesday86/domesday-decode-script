@@ -118,6 +118,14 @@ DISC_EFM="${DISC_EFM:-yes}"
 case "$DISC_EFM" in yes|no) ;; *) die "DISC_EFM is $DISC_EFM in ${DISC_DIR#"$SELF_DIR"/}/disc.conf: yes or no" ;; esac
 has_efm() { [ "$DISC_EFM" = yes ]; }
 
+# Whether the side's captures reach its lead-out (DISC_LEAD_OUT in disc.conf,
+# seen unless it says absent). The metadata check wants the lead-out marked;
+# a side none of whose captures reaches it, such as City Financial 2, says
+# absent, and the check then wants it unmarked and notes why, rather than
+# failing. It is part of the video stage's disc input.
+DISC_LEAD_OUT="${DISC_LEAD_OUT:-seen}"
+case "$DISC_LEAD_OUT" in seen|absent) ;; *) die "DISC_LEAD_OUT is $DISC_LEAD_OUT in ${DISC_DIR#"$SELF_DIR"/}/disc.conf: seen or absent" ;; esac
+
 # The video system (DISC_SYSTEM in disc.conf, PAL unless it says NTSC): what
 # the video stage expects of the mkv, as the video sink writes it (720x576
 # at 25/1, or 720x484 at 30000/1001), and of its disc metadata. The projects
@@ -504,7 +512,7 @@ describe_video() {
   stage_input_tool decode-orc
   stage_input "decoder" "$VIDEO_DECODER${VIDEO_DECODER_SCHEDULE:+, schedule $VIDEO_DECODER_SCHEDULE}"
   stage_input "noise reduction" "$(video_noise_reduction) dB still_only"
-  stage_input "disc" "$DISC_SYSTEM $DISC_FORMAT side $DISC_SIDE, pictures $DISC_PICTURES, user code and Amendment 2 $VIDEO_EXPECT"
+  stage_input "disc" "$DISC_SYSTEM $DISC_FORMAT side $DISC_SIDE, pictures $DISC_PICTURES, user code and Amendment 2 $VIDEO_EXPECT$([ "$DISC_LEAD_OUT" = seen ] || echo ", no lead-out")"
   stage_input_file "metadata check" "$SELF_DIR/lib/check-disc-metadata.py"
   stage_input_file "address map check" "$SELF_DIR/lib/check-address-map.py"
   stage_input "baseline" "${VIDEO_BASELINE:-none}"
@@ -1890,8 +1898,18 @@ check_mkv() {
         --format "$DISC_FORMAT" --side "$DISC_SIDE" --pictures "$DISC_PICTURES" --system "$DISC_SYSTEM" \
         --tag-version "$tagv" "${expect[@]}" \
         > "$work/metadata-check.json" || true
+      # With DISC_LEAD_OUT=absent, the lead-out check turns round: the
+      # lead-in must be marked and the lead-out must not be.
       while IFS=$'\t' read -r level text; do "$level" "metadata: $text"; done < <(
-        jq -r '.checks[] | "\(.level)\t\(.text)"' "$work/metadata-check.json" 2>/dev/null || printf 'fail\tthe metadata check did not run\n')
+        jq -r --arg leadout "$DISC_LEAD_OUT" '.summary.events as $e | .checks[]
+          | if $leadout == "absent" and (.text | test("^lead-in .* and lead-out .*(are marked|both must be marked)$")) then
+              (if ($e.lead_in | length) > 0 and ($e.lead_out | length) == 0 then
+                 {level: "note", text: "lead-in \($e.lead_in) is marked, and no lead-out: none of the captures reaches it (DISC_LEAD_OUT=absent in disc.conf)"}
+               else
+                 {level: "fail", text: "lead-in \($e.lead_in // "not marked") and lead-out \($e.lead_out // "not marked"): DISC_LEAD_OUT=absent wants the lead-in marked and no lead-out"}
+               end)
+            else . end
+          | "\(.level)\t\(.text)"' "$work/metadata-check.json" 2>/dev/null || printf 'fail\tthe metadata check did not run\n')
     else
       fail "the disc metadata could not be extracted"
     fi

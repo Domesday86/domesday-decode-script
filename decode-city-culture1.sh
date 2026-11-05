@@ -12,8 +12,9 @@
 # 2020, four captures in all. Each is decoded in its own right, so they can be
 # compared against each other or combined. Each pack has its own decode
 # script: this is Culture 1's, the only list of its captures, and it checks
-# and stamps its decodes for build-pack.sh. The other three discs are still
-# decoded by decode-city.sh.
+# and stamps its decodes for build-pack.sh. The other three discs have
+# theirs, decode-city-culture2.sh, decode-city-financial1.sh and
+# decode-city-financial2.sh.
 #
 # Each side is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
 # configurable number of lead-in frames before its first picture, so the
