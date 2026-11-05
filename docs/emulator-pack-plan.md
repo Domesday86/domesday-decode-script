@@ -2005,6 +2005,17 @@ sets. The disc is single-sided. It is the last City disc, so
   valid one (47358, 50440, 21030). One of the #364 frames, 44317, which was
   undecoded, now reads 26108. So 4 addresses are claimed twice and 4
   pictures resolve to no frame (decode-orc#365).
+- Rebuilt 2026-11-05 on decode-orc 30d9506 (#366, which closes #364 and
+  #365): pack `e8bebfb676cff5b6`, now the current pack. #365 is fixed: no
+  address is claimed twice and every picture 1-52522 resolves. #364 is
+  not: the frame maps are byte for byte those of 5323ee1, and the same 9
+  frames (44218-44509) are undecoded. In capture order DS2 reads 44217 at
+  frame 45777, 44514 at 45778, then 44805 at 45780, and only then scans
+  back to 44611 at 45802. The second jump, 291 pictures in 2 frames, is
+  what the fix's test case lacks, so the run after it is still placed 296
+  pictures early. The sample measures white SNR 35.90 dB, black PSNR
+  33.63 dB, as before; the VFS image is unchanged. The video stage took
+  47 min.
 
 **Under way: North Polar** (`discs/north-polar`, stem `north_polar`), from
 its two captures, of two copies of the disc. It is single-sided, not a BBC
