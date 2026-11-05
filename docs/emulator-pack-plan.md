@@ -1066,6 +1066,7 @@ programme.
 | EcoDisc side 2 | A TV programme (motion) | `transform3d` |
 | City (all four discs) | Likely mostly stills | `palstill, held:transform3d`, until ranges are given |
 | North Polar | Mostly motion | `transform3d` |
+| Apple Visual Almanac (both sides, NTSC) | Stills, video and film | `ntsc2d, held:ntsc3d`, until ranges are given |
 | Countryside side 1 | Motion, with a still section | By picture: `transform3d` 1–5999 and 11500–54085, `palstill` 6000–11499 |
 | Countryside side 2 | Stills, with motion at each end | By picture: `transform3d` 1–850 and 31001–51000, `palstill` 851–31000 |
 
@@ -1994,13 +1995,76 @@ sets. The disc is single-sided. It is the last City disc, so
   filesystem (141) or in free space (140282); all 29 objects are free of
   bad sectors. Its hash is recorded in `discs/city-financial2/pack.sha256`.
   The video stage took 36 min.
+- Rebuilt 2026-11-05 on decode-orc 7995d1f (palstill, Channel Equalise):
+  the video stage fails, and the 5323ee1 pack stays the current one. The
+  frame maps are unchanged, and Channel Calibration reads a smear of 0.096
+  with a time constant of 4.83 samples. Since decode-orc#361 the two-input
+  Weighted stack averages where the inputs disagree rather than marking
+  dropout. At three frames of DS2's hunting, 43844, 43911 and 43968, both
+  inputs read the right picture, but the stacked frame decodes as another
+  valid one (47358, 50440, 21030). One of the #364 frames, 44317, which was
+  undecoded, now reads 26108. So 4 addresses are claimed twice and 4
+  pictures resolve to no frame (decode-orc#365).
+
+**Under way: North Polar** (`discs/north-polar`, stem `north_polar`), from
+its two captures, of two copies of the disc. It is single-sided, not a BBC
+title, and carries no EFM, so it is built as EcoDisc side 2 is: the mkv
+alone.
+
+- `decode-north-polar.sh` was the last script from before the per-pack
+  framework: it had no stamp, no `--adopt` and no `DECODE_FLAGS`, and offered
+  `--efm`. It is now `decode-ecodisc-side2.sh` with this disc's set table,
+  `--noEFM` asserted, and the frame count check of EcoDisc side 1, which
+  counts to the last picture the capture's file name gives.
+- Neither capture reaches the lead-out. DS2's runs to picture 54348, past
+  the 54000 a CAV side usually holds; DS1's stops on 51438, while the disc
+  goes on (probes of both captures' ends, 2026-11-05). So `disc.conf` says
+  `DISC_PICTURES=1-54348` and `DISC_LEAD_OUT=absent`, and DS2 alone covers
+  the last 2910 pictures.
+- The Disc Mapper, run on 20-frame probe decodes, reads CAV side 1, 12 inch,
+  Amendment 2 present, sound mode bilingual, on both captures; `DISC_SIDE`
+  is 1.
+- Its projects are City Financial 2's, which also has DS1 and DS2, with the
+  names changed and the video sink on `transform3d` throughout, as the
+  phase 5 table says. The stack keeps Channel Equalise: the guide measures
+  the Domesday sides, not this disc, so the calibration decides, and
+  passes every frame unchanged if it finds no smear. `pressing_repair` is
+  off until the compare report says whether the two copies are of different
+  stamper groups. `selection.yaml` follows the compare report. There is no
+  hand-built stack to compare with.
+
+**Under way: Apple Visual Almanac** (`discs/apple-almanac-side-a` and
+`discs/apple-almanac-side-b`, stems `apple_almanac_side_a` and
+`apple_almanac_side_b`), each side from its three captures, of three copies
+of the disc. Like Dragon's Lair it is NTSC and not a VP415e title, and it
+carries no EFM, so each side is built as a video-only pack, the mkv alone.
+
+- Each side has its own decode script and `discs/` folder (one script per
+  pack). Their projects are Dragon's Lair's, cut to DS1-DS3: no FM Beat
+  Cancel or Channel Equalise (both PAL only), no Audio Channel Map, and
+  `pressing_repair` off, as decode-orc#354 leaves it unmeasured on real
+  NTSC. The stack lists the sets in set order until `selection.yaml` gives
+  its order.
+- The disc is stills, video and film in 3:2 pulldown, and which pictures are
+  which isn't known yet. So the sink decodes with `ntsc2d, held:ntsc3d`, as
+  the City discs take `palstill, held:transform3d` until their ranges are
+  given.
+- The Disc Mapper, run on DS1 of each side (2026-11-05), reads side A as CAV
+  side 1, user code 1315, and side B as CAV side 2, user code 2315, both
+  Amendment 2 present, CX off, sound mode bilingual, with the lead-in and
+  lead-out seen. So `DISC_SIDE` is 1 and 2, `DISC_PICTURES` 1-50683 and
+  1-53361, and `DISC_LEAD_OUT` is left at `seen`. It keeps 3318 pulldown
+  frames on side A and 640 on side B.
+- The six decodes on the share are from ld-decode 6148260, so the decode
+  stage will decode them again on 1e8f04a. `selection.yaml` follows the
+  compare report. There is no hand-built stack to compare with.
 
 ## Decisions
 
 | Question | Decision |
 | --- | --- |
 | Display aspect | 4:3 |
-| Chroma decoder | Per side (phase 5 table): `transform3d` on every frame for Domesday National B, EcoDisc side 2 and North Polar; by known picture ranges (`transform3d` on the motion, `palstill` on the stills) for Volcanoes, EcoDisc side 1, both Countryside sides, National A and Community North and South; `palstill, held:transform3d` for the City discs until their ranges are given |
+| Chroma decoder | Per side (phase 5 table): `transform3d` on every frame for Domesday National B, EcoDisc side 2 and North Polar; by known picture ranges (`transform3d` on the motion, `palstill` on the stills) for Volcanoes, EcoDisc side 1, both Countryside sides, National A and Community North and South; `palstill, held:transform3d` for the City discs until their ranges are given; on NTSC, `ntsc3d` for Dragon's Lair and `ntsc2d, held:ntsc3d` for both Apple Visual Almanac sides |
 | Library access | Read-only, never written; all output and r/w goes to the decodes share |
 | Choosing sets and removing outliers | Decided by a person from the phase 4 results, then committed; the scripts are not dynamic |
 | Outputs per title | One emulation output per AIV title (one stem per side); outlier sets are dropped, never made into a second output |

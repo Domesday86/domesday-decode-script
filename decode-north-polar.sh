@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Decode the PAL North Polar Expedition LaserDisc through ld-decode.
+# Decode the PAL North Polar Expedition LaserDisc through ld-decode, for its
+# VP415e pack (build-pack.sh north-polar).
 #
 # North Polar Expedition (Virgin Publishing, 1989) is a single-sided CAV
 # interactive videodisc, a team-building exercise in which a group plays the
@@ -10,9 +11,11 @@
 # set holds. The library has two sets -- two independent captures of two
 # different copies of the disc, both made in January 2021 -- and each is decoded
 # in its own right, so they can be compared against each other or combined.
+# Each pack has its own decode script: this is North Polar's, the only list of
+# its captures, and it checks and stamps its decodes for build-pack.sh.
 #
 # The disc carries no EFM digital audio -- its sound is analogue only -- so the
-# EFM front end is switched off; see the note above FORCE_EFM.
+# EFM front end is switched off; see the note above DECODE_FLAGS.
 #
 # Each side is decoded to CVBS (<name>.cvbs + <name>.meta) starting a
 # configurable number of lead-in frames before its first picture, so the
@@ -41,6 +44,14 @@
 # top of it: only a re-run of the same commit can overwrite, and only then with
 # --force.
 #
+# Each finished decode is checked and then stamped (lib/decode.sh): the stamp
+# records the capture's fingerprint, the ld-decode revision, the start, the
+# frames and the flags. A decode whose stamp matches is skipped, so a re-run
+# with nothing changed does nothing. One with no stamp or a different one is
+# stale, and is reported as such rather than overwritten: replacing it still
+# takes --force. The captures are verified against sources.sha256 before any
+# of this, so a changed or missing capture is caught before hours of decoding.
+#
 set -euo pipefail
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,6 +60,8 @@ FIND_START="$SELF_DIR/find-disc-start.sh"
 . "$SELF_DIR/lib/shares.sh"
 # shellcheck source=lib/stage.sh
 . "$SELF_DIR/lib/stage.sh"
+# shellcheck source=lib/decode.sh
+. "$SELF_DIR/lib/decode.sh"
 shares_load || exit 1
 
 # ---------------------------------------------------------------------------
@@ -59,7 +72,8 @@ shares_load || exit 1
 LIBRARY="$DD_LIBRARY"
 
 # Root of the decode output tree. Decodes are filed under
-# <root>/<set>/<decoder>/, where <decoder> names the ld-decode build.
+# <root>/<set>/<decoder>-<date>/, where <decoder> names the ld-decode build
+# and <date> (YYYYMMDD-HHMMSS) is when the run that first made it started.
 OUTPUT="${DD_OUTPUT:-$DD_DECODES/decode-script/north-polar}"
 
 # Name of the decoder directory. Empty means work it out from flake.lock (see
@@ -99,17 +113,38 @@ DECODE_THREADS_TARGET="${DD_THREADS_TARGET:-4}"
 # Write .tbc instead of CVBS.
 USE_CVBS="${DD_CVBS:-1}"
 
-# Run ld-decode's EFM front end anyway. North Polar Expedition carries no EFM
-# digital audio, so by default the front end is off: run on a disc that has none
-# it spends its time demodulating noise into an .efm file no one can use. That
-# was measured rather than assumed -- probes every 500 pictures across DS1 and
-# every 1000 across DS2, scored for frame sync with lddecode.efm_score, found no
-# T11-T11 sync pairs anywhere on either capture, where the AIV discs that do
-# carry EFM frame up at a sync rate of 1.000 with near-full demodulator
-# confidence. 1 forces it back on, for checking that claim.
-FORCE_EFM="${DD_EFM:-0}"
+# The ld-decode flags every set is decoded with, besides the start, length,
+# threads and --cvbs/--tbc. They are part of each decode's stamp, and
+# build-pack.sh reads this line too, so it stays a single line.
+#
+# Both captures came off an LD-V4300D, whose ~8.5MHz digital-audio clock
+# spur sits in the RF band, so the coherent subtraction is asked for
+# unconditionally. It estimates the tone and subtracts it in the time domain,
+# which -- unlike the old FFT-bin notch -- takes the spectral-leakage skirts
+# with it. On the pinned build it costs no concurrency: its no-video guard
+# makes it safe from the first block, so it neither defers to sync acquisition
+# nor forces demodulation serial.
+#
+# The disc carries no EFM, which was measured rather than assumed: probes
+# every 500 pictures across DS1 and every 1000 across DS2, scored for frame
+# sync with lddecode.efm_score, found no T11-T11 sync pairs anywhere on either
+# capture, where the AIV discs that do carry EFM frame up at a sync rate of
+# 1.000 with near-full demodulator confidence. So the front end is switched
+# off, as on the Domesday National B sides, rather than left to write an .efm
+# of noise. With --noEFM the decode has no .efm or .efm.meta, and its stamp
+# (lib/decode.sh) does not expect them.
+DECODE_FLAGS=(--pal --noEFM --V4300D_coherent_subtract)
+
+# What a finished decode is checked against before it is stamped: the
+# capture's last picture, which its file name gives (_PAL_a-b), or SIDE_FRAMES
+# for one whose name does not. Neither capture reaches the lead-out. DS2's
+# runs to picture 54348, past the 54000 a CAV side usually holds, and DS1's
+# stops on picture 51438, one past its name, while the disc goes on (probes
+# of both captures' ends).
+SIDE_FRAMES=54348
 
 FORCE=0
+ADOPT=0
 DRY_RUN=0
 REFRESH_START=0
 START_OVERRIDE=""
@@ -118,12 +153,14 @@ START_OVERRIDE=""
 # Set table: set | first picture | source path relative to LIBRARY
 #
 # Every capture is PAL CAV and covers the disc's one content-bearing side.
+# DS1 is from the RCM's copy of the disc, DS2 from DMoore's (NPE_Notes.txt in
+# the library).
 #
 # "first picture" is the picture number the start search converges on -- the
 # first frame of the side's content. It is 1 for every capture here, each of
 # which begins at the head of the side; the column exists for a side the player
 # lost and had to be captured in more than one pass, whose later part picks up
-# mid-disc (the Domesday library has one such side).
+# mid-disc (neither North Polar capture is one).
 # ---------------------------------------------------------------------------
 
 SETS=(
@@ -139,8 +176,8 @@ Usage: ${0##*/} [options] [set ...]
 
 Decode the North Polar Expedition LaserDisc through ld-decode. With no set
 named, every set in the table is decoded. North Polar Expedition is
-single-sided, so a set is one capture.
-Set names are matched regardless of case.
+single-sided, so a set is one capture. Set names are matched regardless of
+case.
 
 Options:
   -l, --library DIR     capture library root (default: $LIBRARY)
@@ -157,8 +194,9 @@ Options:
   -t, --threads N       ld-decode worker threads per decode, 0 = auto
                         (default: $THREADS; auto aims for $DECODE_THREADS_TARGET each, shared between --jobs)
       --tbc             write .tbc output instead of CVBS
-      --efm             decode EFM anyway (off: the disc has none)
-      --force           overwrite an existing decode
+      --force           decode again, replacing an existing decode
+      --adopt           check an existing decode that has no stamp (or a
+                        stale one) and stamp it as it is, without decoding
   -n, --dry-run         resolve starts and print the commands, decode nothing
       --list            list the sets in the table and exit
   -h, --help            this message
@@ -166,21 +204,31 @@ Options:
 Environment: DD_LIBRARY DD_DECODES DD_NO_MOUNT DD_OUTPUT DD_DECODER
              DD_VERIFY_DECODER DD_FRAMES
              DD_LEAD_IN DD_PROBE DD_JOBS DD_THREADS DD_THREADS_TARGET DD_CVBS
-             DD_EFM
 
-Decodes go to <output>/<set>/<decoder>/<capture basename>.*, where <decoder> is
-the ld-decode commit flake.lock pins. Decoding a set again after updating
-ld-decode therefore writes a new directory rather than overwriting the earlier
-decode; re-running the same commit still needs --force.
+Decodes go to <output>/<set>/<decoder>-<date>/<capture basename>.*, where
+<decoder> is the ld-decode commit flake.lock pins and <date> (YYYYMMDD-HHMMSS)
+is when the run that first made the directory started; one run dates all of
+its directories the same. Decoding a set again after updating ld-decode
+therefore writes a new directory rather than overwriting the earlier decode;
+the newest two such directories are kept for each set.
 
-Every set is decoded with --V4300D_coherent_subtract: both captures were made
-on an LD-V4300D, so its ~8.5MHz clock spur is in their RF, and subtracting
+The captures are verified against sources.sha256 first. Each finished decode
+is then checked -- every file present, a signal state decode-orc accepts, the
+frame count -- and stamped, with the
+results in check.txt beside it. A set whose stamp matches (same capture,
+ld-decode, start, frames and flags) is skipped as up to date. A set whose
+decode is stale or unstamped is refused: --force decodes it again, and --adopt
+checks the decode that is there and stamps it if it passes. Only a decode made
+by the build flake.lock pins, in CVBS, is stamped.
+
+Every set is decoded with --V4300D_coherent_subtract: both captures were
+made on an LD-V4300D, so its ~8.5MHz clock spur is in their RF, and subtracting
 the tone coherently removes its leakage skirts as well as the tone.
 
-EFM is not decoded. North Polar Expedition carries no digital audio -- probes
-right across both captures found no EFM frame sync at all -- so the front end
-would only demodulate noise. --efm (DD_EFM=1) turns it back on, for checking
-that claim.
+EFM is decoded on no set (--noEFM). North Polar Expedition carries no digital
+audio: frame-sync probes right across both captures found none. It is asserted
+here rather than offered as a flag, for the same reason the PAL and CAV of
+these captures are: it is a fact about the disc.
 
 A single decode uses only about a third of a 16-core machine, because
 ld-decode's decode loop is serial and its demodulation workers wait on it.
@@ -253,9 +301,9 @@ while [ $# -gt 0 ]; do
     -j|--jobs)       JOBS="${2:?--jobs needs a count}"; shift 2 ;;
     -t|--threads)    THREADS="${2:?--threads needs a value}"; shift 2 ;;
     --tbc)           USE_CVBS=0; shift ;;
-    --efm)           FORCE_EFM=1; shift ;;
     --cvbs)          USE_CVBS=1; shift ;;
     --force)         FORCE=1; shift ;;
+    --adopt)         ADOPT=1; shift ;;
     -n|--dry-run)    DRY_RUN=1; shift ;;
     --list)          LIST=1; shift ;;
     -h|--help)       usage; exit 0 ;;
@@ -272,11 +320,11 @@ case "$LEAD_IN" in *[!0-9]*|"") die "--lead-in must be a number" ;; esac
 case "$PROBE" in *[!0-9]*|"") die "--probe must be a number" ;; esac
 case "$THREADS" in *[!0-9]*|"") die "--threads must be a number" ;; esac
 case "$JOBS" in *[!0-9]*|"") die "--jobs must be a number" ;; esac
-case "$FORCE_EFM" in 0|1) ;; *) die "DD_EFM must be 0 or 1 (got \"$FORCE_EFM\")" ;; esac
 [ "$JOBS" -ge 1 ] || die "--jobs must be at least 1"
 if [ -n "$START_OVERRIDE" ]; then
   case "$START_OVERRIDE" in *[!0-9]*) die "--start must be a frame number" ;; esac
 fi
+[ "$ADOPT" = 0 ] || [ "$FORCE" = 0 ] || die "--adopt keeps a decode and --force replaces it: pick one"
 
 # Both shares are checked (and mounted if need be) before anything else, and
 # the output must lie on the decodes share: the library is never written to.
@@ -424,6 +472,7 @@ esac
 
 # Only the lock-derived name makes a claim that can be wrong: the other two are
 # read from the binary itself, or asserted deliberately.
+DECODER_VERIFIED=0
 if [ "$DECODER_SOURCE" = flake.lock ] && [ "$VERIFY_DECODER" = 1 ]; then
   if ! command -v nix >/dev/null 2>&1; then
     printf 'warning: nix not on PATH; not checking ld-decode against flake.lock\n' >&2
@@ -447,7 +496,31 @@ $stale
     flake.lock:    $expected
 Leave and re-enter the dev shell (exit; nix develop) to pick up the pinned
 build, or pass --no-verify-decoder to decode with the one you have."
+    DECODER_VERIFIED=1
   fi
+fi
+
+# --- stamping --------------------------------------------------------------
+#
+# A stamp says a decode was made by the ld-decode revision flake.lock pins, so
+# it is written only when that has been checked. A decode labelled by hand, or
+# made without the check, or as .tbc (which nothing downstream reads), is left
+# unstamped, and an existing one is refused without --force as before.
+
+STAMPING=1
+NO_STAMP_WHY=""
+if [ "$DECODER_VERIFIED" != 1 ]; then
+  STAMPING=0; NO_STAMP_WHY="the decoder is not the verified flake.lock build"
+elif [ "$USE_CVBS" != 1 ]; then
+  STAMPING=0; NO_STAMP_WHY="only CVBS decodes are stamped"
+fi
+[ "$STAMPING" = 1 ] || [ "$ADOPT" = 0 ] || die "--adopt stamps a decode, and $NO_STAMP_WHY"
+FLAGS_LABEL="${DECODE_FLAGS[*]} --cvbs --cvbs-spec-origin"
+
+if [ "$STAMPING" = 1 ] && [ "$DRY_RUN" != 1 ]; then
+  for tool in orc-cli sqlite3 jq; do
+    command -v "$tool" >/dev/null 2>&1 || die "$tool not on PATH, and a decode is checked with it before it is stamped (run: nix develop)"
+  done
 fi
 
 # --- worker threads --------------------------------------------------------
@@ -502,6 +575,7 @@ fi
 # before any decode is launched.
 
 R_ID=(); R_SRC=(); R_DEST=(); R_BASE=(); R_START=()
+R_REL=(); R_TARGET=(); R_ACTION=(); R_REPORT=()
 
 # The decoded video file, if one is there. CVBS output is .cvbs on the pinned
 # build and was .composite on earlier ones.
@@ -520,22 +594,26 @@ existing_product() {
 
 # resolve_one <index> <id> <target> <relative path> <prefix>
 #
-# Prints its own banner and writes the resolved start to $WORK/start.<index>, so
-# it can be run in a subshell: the caller reads the starts back afterwards
-# rather than relying on assignments that a subshell could not export.
+# Prints its own banner and writes what it resolved -- the start, and what is
+# to be done with the set -- to $WORK/start.<index>, so it can be run in a
+# subshell: the caller reads the results back afterwards rather than relying
+# on assignments that a subshell could not export.
+#
+# What is to be done is one of:
+#   skip    the decode is up to date
+#   decode  there is no decode, or --force replaces the one there
+#   adopt   --adopt checks the decode that is there and stamps it
 resolve_one() {
   local i="$1" id="$2" target="$3" rel="$4" prefix="$5"
   local src="$LIBRARY/$rel"
-  local dest="$OUTPUT/$id/$DECODER"
-  local base name content start opens cache product report kv
+  local dest base content start opens cache product report action state
+  dest="$OUTPUT/$id/$(stage_version_name "$OUTPUT/$id" "$DECODER")"
 
   # The decode is named after the capture, minus its extension and with spaces
   # turned into dashes: a capture name with a space in it would otherwise need
   # quoting by hand in every command that touched the .cvbs, the sidecars or the
   # progress log afterwards.
-  name="${rel##*/}"
-  base="${name%.ldf}"
-  base="${base// /-}"
+  base=$(decode_base "$rel")
 
   {
     printf '\n== %s (CAV)\n' "$id"
@@ -551,36 +629,22 @@ resolve_one() {
   # whichever build made it, and a finished decode must not be called a failure
   # because the extension moved under us.
   product=$(existing_product "$dest" "$base") || product=""
-  if [ -n "$product" ] && [ "$FORCE" != 1 ] && [ "$DRY_RUN" != 1 ]; then
+  if [ -n "$product" ] && [ "$STAMPING" != 1 ] && [ "$FORCE" != 1 ] && [ "$DRY_RUN" != 1 ]; then
     die "$product already exists; pass --force to overwrite"
   fi
 
-  mkdir -p "$dest"
-  # What the directory name is short for, for anyone who finds the decode later.
-  if [ "$DRY_RUN" != 1 ]; then
-    { printf 'decoder:  %s (from %s)\n' "$DECODER" "$DECODER_SOURCE"
-      printf 'binary:   %s\n' "$LD_DECODE_BIN"
-      printf 'version:  %s\n' "$(ld-decode --version 2>/dev/null || echo unknown)"
-      printf 'recorded: %s\n' "$(date -Is)"
-    } > "$dest/decoder.txt"
-  fi
   cache="$dest/$base.start"
+  report=""
 
   if [ -n "$START_OVERRIDE" ]; then
     start="$START_OVERRIDE"
     printf '   start: %s (forced by --start)\n' "$start" | prefixed "$prefix"
   else
-    report=""
-    if [ "$REFRESH_START" != 1 ] && [ -s "$cache" ]; then
-      report=$(cat "$cache")
-      case "$report" in
-        # the cached start is only valid for the lead-in it was resolved for
-        *"content="*"leadin=$LEAD_IN "*)
-          printf '   %s (cached in %s)\n' "$report" "$cache" | prefixed "$prefix" ;;
-        *) report="" ;;
-      esac
-    fi
-    if [ -z "$report" ]; then
+    # The cached start is only valid for the lead-in and the picture it was
+    # resolved for.
+    if [ "$REFRESH_START" != 1 ] && report=$(decode_cached_start "$cache" "$LEAD_IN" "$target"); then
+      printf '   %s (cached in %s)\n' "$report" "$cache" | prefixed "$prefix"
+    else
       printf '   locating picture #%s and a start that keeps the lead-in...\n' \
         "$target" | prefixed "$prefix"
       # The trace is indented and labelled through prefixed(), not sed: the
@@ -589,29 +653,25 @@ resolve_one() {
       report=$("$FIND_START" --pal --probe "$PROBE" --target "$target" \
                  --lead-in "$LEAD_IN" --report --verbose "$src" \
                  2> >(prefixed "     $prefix" >&2))
+      report="$report target=$target"
       printf '   %s\n' "$report" | prefixed "$prefix"
-      [ "$DRY_RUN" = 1 ] || printf '%s\n' "$report" > "$cache"
+      if [ "$DRY_RUN" != 1 ]; then
+        stage_mkdir "$dest" || exit 1
+        printf '%s\n' "$report" > "$cache"
+      fi
     fi
 
-    content=""; start=""; opens=""
-    for kv in $report; do
-      case "$kv" in
-        content=*) content="${kv#content=}" ;;
-        start=*)   start="${kv#start=}" ;;
-        opens=*)   opens="${kv#opens=}" ;;
-      esac
-    done
+    content=$(decode_report_field "$report" content) || content=""
+    start=$(decode_report_field "$report" start) || start=""
+    opens=$(decode_report_field "$report" opens) || opens=""
     [ -n "$content" ] && [ -n "$start" ] \
       || die "could not parse the start report: $report"
 
     # opens is the file frame the output really begins on, which is what says
     # how much lead-in was kept -- the start is only what ld-decode was told, and
-    # how far the writer then moved on from it is not a fixed distance. A cache
-    # written before that field existed does not carry it, and it cannot be
-    # worked out from the other two, so that case says nothing rather than
-    # guessing.
+    # how far the writer then moved on from it is not a fixed distance.
     if [ -z "$opens" ]; then
-      printf '   start: %s (cached before the opening frame was recorded; %s lead-in frame(s) requested, --refresh-start to measure)\n' \
+      printf '   start: %s (%s lead-in frame(s) requested; the report does not say where the output opens)\n' \
         "$start" "$LEAD_IN" | prefixed "$prefix"
     elif [ "$opens" -le "$content" ]; then
       printf '   start: %s (output opens at file frame %s, %s frame(s) before picture #%s; %s requested)\n' \
@@ -622,8 +682,193 @@ resolve_one() {
     fi
   fi
 
-  printf 'id=%s\nsrc=%s\ndest=%s\nbase=%s\nstart=%s\n' \
-    "$id" "$src" "$dest" "$base" "$start" > "$WORK/start.$i"
+  # What is there already, against what this run would make.
+  action=decode
+  state=""
+  if [ "$STAMPING" = 1 ]; then
+    decode_describe "$id" "$dest" "$base" "$rel" "$start" "$FRAMES" "$FLAGS_LABEL"
+    if state=$(stage_state); then
+      action=skip
+      [ "$FORCE" != 1 ] || { action=decode; state="up to date, but --force decodes it again"; }
+    fi
+    printf '   state: %s\n' "$state" | prefixed "$prefix"
+  fi
+  if [ "$ADOPT" = 1 ] && [ "$action" != skip ]; then
+    [ -n "$product" ] || die "$id: --adopt: there is no decode at $dest/$base to check and stamp"
+    action=adopt
+  elif [ "$action" = decode ] && [ -n "$product" ] && [ "$FORCE" != 1 ] && [ "$DRY_RUN" != 1 ]; then
+    # Never overwritten silently: a stale or unstamped decode may be hours of
+    # work that only needs checking.
+    die "$id: $state
+A decode is there ($product), and is not replaced without --force. Pass
+--force to decode it again, or --adopt to check the decode that is there and
+stamp it if it passes."
+  fi
+
+  {
+    printf 'id=%s\nsrc=%s\ndest=%s\nbase=%s\nstart=%s\n' "$id" "$src" "$dest" "$base" "$start"
+    printf 'rel=%s\ntarget=%s\naction=%s\nreport=%s\n' "$rel" "$target" "$action" "$report"
+  } > "$WORK/start.$i"
+}
+
+# --- checking --------------------------------------------------------------
+#
+# A decode is stamped only once it has been checked, and check.txt beside it
+# says what was found. Every check runs, so one report shows everything that is
+# wrong; any failure leaves the decode unstamped, and the report is kept as
+# check.failed.txt.
+
+# The ld-decode log names the picture on every frame it writes:
+#   "… Frame <n>/<total>: File Frame <file frame>: CAV Frame #<picture>"
+# printed here as "<frame index from 0> <file frame> <picture>". Lead-in
+# frames ("CAV Lead In") have no picture, and are left out.
+log_pictures() {
+  sed -n 's/.* Frame \([0-9][0-9]*\)\/[0-9][0-9]*: File Frame \([0-9][0-9]*\): CAV Frame #\([0-9][0-9]*\).*/\1 \2 \3/p' "$1" \
+    | awk '{ print $1 - 1, $2, $3 }'
+}
+
+# sql <db> <query>: read a decode's SQLite metadata without locking it.
+sql() { sqlite3 -readonly -separator ' ' "file:$1?immutable=1" "$2"; }
+
+# check_decode <id> <dest> <base> <target> <start> <report>: run the checks,
+# write check.txt to its stage_tmp name, and return non-zero if any failed.
+check_decode() {
+  local id="$1" dest="$2" base="$3" target="$4" start="$5" report="$6"
+  local out fails=0 ext f frames want tol lo hi tol_text kept content opens state cont last
+  local prj orc status sstate scont pics first_file first_pic last_pic irregular
+  local wav desc
+
+  out=$(stage_tmp check.txt) || return 1
+  ok()   { printf 'ok    %s\n' "$*"; }
+  bad()  { printf 'FAIL  %s\n' "$*"; fails=$(( fails + 1 )); }
+  note() { printf 'note  %s\n' "$*"; }
+
+  {
+    printf 'decode:  %s/%s\nchecked: %s\n\n' "$dest" "$base" "$(date '+%F %T')"
+
+    # Every file the later stages read.
+    for ext in cvbs meta dropouts.meta; do
+      f="$dest/$base.$ext"
+      if [ -s "$f" ]; then ok "$base.$ext is there ($(file_size "$f") bytes)"
+      else bad "$base.$ext is missing or empty"; fi
+    done
+
+    # What ld-decode says it wrote.
+    frames=""; state=""; cont=""
+    if [ -s "$dest/$base.meta" ]; then
+      read -r frames state cont < <(sql "$dest/$base.meta" \
+        'select number_of_sequential_frames, signal_state_preset, sequence_continuous from cvbs_file limit 1') || true
+      note "ld-decode recorded $state, sequence continuous $([ "$cont" = 1 ] && echo yes || echo no)"
+    fi
+
+    # And what decode-orc makes of it: a one-source project, listed. decode-orc
+    # refuses a CVBS source in any state but these two.
+    prj="$WORK/check-$id.orcprj"
+    if orc-cli --log-level warn -i "PAL_CVBS_Source=input_path=$dest/$base.cvbs" --export-project "$prj" >/dev/null 2>&1 \
+       && orc=$(orc-cli nodes list "$prj" --json 2>/dev/null); then
+      read -r status sstate scont < <(jq -r '.[0] | "\(.status) \(.signal_state) \(.sequence_continuous)"' <<< "$orc") || true
+      case "$sstate" in
+        STANDARD_STABLE_LOCKED|STANDARD_STABLE_UNLOCKED)
+          ok "decode-orc accepts the source: $sstate, status $status, sequence continuous $scont" ;;
+        *) bad "decode-orc does not accept the source: signal state ${sstate:-none}, status ${status:-none}" ;;
+      esac
+    else
+      bad "decode-orc could not read $base.cvbs"
+    fi
+
+    # The frame count: the whole side and the lead-in kept before it, or the
+    # frames asked for. A player skip or a repeated picture moves the count a
+    # little, so a whole side is allowed 1% either way. --length counts from
+    # the start ld-decode was given, not from the frame its writer opens on, so
+    # a short decode may come out short by that gap, and one frame more.
+    content=$(decode_report_field "$report" content) || content=""
+    opens=$(decode_report_field "$report" opens) || opens=""
+    if [ -n "$content" ] && [ -n "$opens" ] && [ "$opens" -le "$content" ]; then
+      kept=$(( content - opens ))
+    else
+      kept="$LEAD_IN"
+    fi
+    if [ "$FRAMES" = all ]; then
+      # To the capture's last picture, which its file name gives (_PAL_a-b).
+      last=$(sed -n 's/.*_PAL_[0-9]*-\([0-9]*\)$/\1/p' <<< "$base")
+      want=$(( ${last:-$SIDE_FRAMES} - target + 1 + kept )); tol=$(( want / 100 ))
+      lo=$(( want - tol )); hi=$(( want + tol )); tol_text=", give or take $tol"
+    else
+      want="$FRAMES"; hi="$FRAMES"; lo="$FRAMES"; tol_text=""
+      if [ -n "$opens" ] && [ "$opens" -gt "$start" ]; then
+        lo=$(( FRAMES - (opens - start) - 1 ))
+        tol_text=", or down to $lo as the output opens $(( opens - start )) after the start"
+      fi
+    fi
+    if [ -z "$frames" ]; then
+      bad "the frame count is not in $base.meta"
+    elif [ "$frames" -ge "$lo" ] && [ "$frames" -le "$hi" ]; then
+      ok "$frames frames written (expected $want$tol_text)"
+    else
+      bad "$frames frames written (expected $want$tol_text)"
+    fi
+
+    # Which picture each frame holds, from the log. A log without them (some
+    # other ld-decode) falls back to counting on from the first picture.
+    pics="$WORK/pictures-$id"
+    if [ -s "$dest/$base.log" ]; then log_pictures "$dest/$base.log" > "$pics"; else : > "$pics"; fi
+    if [ -s "$pics" ]; then
+      # The first and last frames' pictures, not the smallest and largest: a
+      # VBI misread on a single frame can name any picture at all.
+      read -r _ _ first_pic < "$pics"
+      last_pic=$(tail -1 "$pics" | awk '{ print $3 }')
+      irregular=$(awk 'NR > 1 && $3 != p + 1 { n++ } { p = $3 } END { print n + 0 }' "$pics")
+      # The frame the output opens on, lead-in or not.
+      first_file=$(sed -n 's/.* Frame 1\/[0-9][0-9]*: File Frame \([0-9][0-9]*\).*/\1/p' "$dest/$base.log" | head -1)
+      ok "pictures #$first_pic to #$last_pic, by the log; the output opens at file frame $first_file"
+      [ "$irregular" = 0 ] || note "$irregular frame(s) do not hold the picture after the one before: VBI misreads, player skips or repeats, which the Disc Mapper sorts out (phase 3)"
+      if [ -n "$opens" ] && [ "$first_file" != "$opens" ]; then
+        note "the start search expected the output to open at file frame $opens"
+      fi
+    else
+      note "the log names no pictures; picture numbers are counted from #$target"
+      first_pic=$(( target - kept ))
+      if [ -n "$frames" ]; then
+        awk -v n="$frames" -v p="$first_pic" 'BEGIN { for (i = 0; i < n; i++) print i, "-", p + i }' > "$pics"
+      fi
+    fi
+
+    # Where the analogue audio went: rev8 writes it beside the decode as WAV
+    # files, one per channel pair, rather than inside the .cvbs or .meta.
+    for wav in "$dest/${base}"_audio_*.wav; do
+      [ -e "$wav" ] || continue
+      ok "analogue audio in ${wav##*/} ($(file_size "$wav") bytes)"
+    done
+    [ -e "$wav" ] || note "no analogue audio sidecar (${base}_audio_*.wav)"
+    if [ -s "$dest/$base.meta" ]; then
+      desc=$(sql "$dest/$base.meta" 'select channel_pair || ": " || coalesce(description, "") from audio_channel_pair' | paste -sd, - | sed 's/,/, /g')
+      [ -z "$desc" ] || note "audio channel pairs in $base.meta: $desc"
+    fi
+
+    printf '\nresult: %s\n' "$([ "$fails" = 0 ] && echo pass || echo "FAIL ($fails)")"
+  } > "$out"
+
+  if [ "$fails" != 0 ]; then
+    mv -- "$out" "$dest/check.failed.txt"
+    return 1
+  fi
+  rm -f -- "$dest/check.failed.txt"
+}
+
+# finish_decode <index> <prefix>: check a decode and, if it passes, stamp it
+# and drop all but the newest two decodes of the set.
+finish_decode() {
+  local i="$1" prefix="$2"
+  local id="${R_ID[$i]}" dest="${R_DEST[$i]}" base="${R_BASE[$i]}"
+  decode_describe "$id" "$dest" "$base" "${R_REL[$i]}" "${R_START[$i]}" "$FRAMES" "$FLAGS_LABEL"
+  if ! check_decode "$id" "$dest" "$base" "${R_TARGET[$i]}" "${R_START[$i]}" "${R_REPORT[$i]}"; then
+    prefixed "$prefix" < "$dest/check.failed.txt" >&2
+    die "$id: the decode failed its checks and is not stamped (see $dest/check.failed.txt)"
+  fi
+  prefixed "$prefix   " < "$dest/check.txt.partial"
+  stage_commit || die "$id: could not stamp the decode"
+  printf '%s: checked and stamped\n' "$id" | prefixed "$prefix"
+  stage_prune "$OUTPUT/$id" ld-decode stage.stamp | prefixed "$prefix"
 }
 
 # --- decoding --------------------------------------------------------------
@@ -633,16 +878,15 @@ decode_one() {
   local id="${R_ID[$i]}" src="${R_SRC[$i]}"
   local dest="${R_DEST[$i]}" base="${R_BASE[$i]}"
   local start="${R_START[$i]}"
-  local product
+  local product f
   local -a cmd
 
-  # Every North Polar Expedition capture is PAL. The disc format is not flagged: ld-decode
-  # reads CAV or CLV out of the VBI itself, and every capture here is CAV.
+  # Every North Polar capture is PAL. The disc format is not flagged:
+  # ld-decode reads CAV or CLV out of the VBI itself, and every capture here is
+  # CAV.
   #
-  # EFM is off unless --efm asked for it: the disc carries none, so the front
-  # end would only demodulate noise (see the note above FORCE_EFM).
-  cmd=(ld-decode --pal)
-  [ "$FORCE_EFM" = 1 ] || cmd+=(--noEFM)
+  # EFM is off (--noEFM, in DECODE_FLAGS): the disc carries none.
+  cmd=(ld-decode "${DECODE_FLAGS[@]}")
   # Ask for the format wanted either way rather than leaning on the default:
   # CVBS is the default on the pinned build but was not on earlier ones, and the
   # extension `existing_product` then looks for follows the flag, so a silently
@@ -652,14 +896,6 @@ decode_one() {
   # specification requires; the pinned build still defaults to its legacy
   # origin, and its author recommends the spec origin.
   if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs --cvbs-spec-origin); else cmd+=(--tbc); fi
-  # Both captures came off an LD-V4300D, whose ~8.5MHz digital-audio clock
-  # spur sits in the RF band, so the coherent subtraction is asked for
-  # unconditionally. It estimates the tone and subtracts it in the time domain,
-  # which -- unlike the old FFT-bin notch -- takes the spectral-leakage skirts
-  # with it. On the pinned build it costs no concurrency: its no-video guard
-  # makes it safe from the first block, so it neither defers to sync acquisition
-  # nor forces demodulation serial.
-  cmd+=(--V4300D_coherent_subtract)
   cmd+=(--start "$start")
   [ "$FRAMES" = all ] || cmd+=(--length "$FRAMES")
   cmd+=(--threads "$DECODE_THREADS" "$src" "$dest/$base")
@@ -675,6 +911,28 @@ decode_one() {
     return 0
   fi
 
+  stage_mkdir "$dest" || exit 1
+  # The stamp goes before anything is rewritten, so an interrupted decode is
+  # stale. So does the last decode, so that nothing it wrote -- a sidecar this
+  # run might not write again, a SQLite file ld-decode would add to -- is
+  # mistaken for part of this one. Only the cached start is kept.
+  if [ "$STAMPING" = 1 ]; then
+    decode_describe "$id" "$dest" "$base" "${R_REL[$i]}" "$start" "$FRAMES" "$FLAGS_LABEL"
+    stage_unstamp || exit 1
+  fi
+  for f in "$dest/$base".* "$dest/${base}"_* "$dest/check.txt" "$dest/check.failed.txt"; do
+    [ -e "$f" ] || continue
+    [ "$f" != "$dest/$base.start" ] || continue
+    rm -f -- "$f"
+  done
+
+  # What the directory name is short for, for anyone who finds the decode later.
+  { printf 'decoder:  %s (from %s)\n' "$DECODER" "$DECODER_SOURCE"
+    printf 'binary:   %s\n' "$LD_DECODE_BIN"
+    printf 'version:  %s\n' "$(ld-decode --version 2>/dev/null || echo unknown)"
+    printf 'recorded: %s\n' "$(date -Is)"
+  } > "$dest/decoder.txt"
+
   run_ld_decode "$prefix" "${cmd[@]}"
 
   # An empty video file is a failed decode, not a finished one: ld-decode exits
@@ -687,6 +945,12 @@ decode_one() {
     || die "ld-decode wrote an empty $product: its writer never reached a frame \
 it could open the file on. This capture's output opens later than --frames \
 $FRAMES reaches; decode more frames."
+
+  if [ "$STAMPING" = 1 ]; then
+    finish_decode "$i" "$prefix"
+  else
+    printf '%s: not stamped: %s\n' "$id" "$NO_STAMP_WHY" | prefixed "$prefix"
+  fi
 }
 
 # --- main ------------------------------------------------------------------
@@ -698,16 +962,22 @@ printf 'library: %s\noutput:  %s\ndecoder: %s (%s)\nframes:  %s\nsets:    %s\njo
   "$LIBRARY" "$OUTPUT" "$DECODER" "$DECODER_SOURCE" "$FRAMES" "${#selected[@]}" "$JOBS" \
   "$([ "$DECODE_THREADS" = 0 ] && echo "auto (ld-decode)" || echo "$DECODE_THREADS per decode")"
 
-# Resolve the starts. Each resolve records its own exit status in a file, seeded
-# as failed, so a resolve that dies is still attributed to its set -- and so
-# every set's result is kept, rather than only the last one reaped.
-log "resolving starts for ${#selected[@]} set(s)"
-
 ids=(); targets=(); rels=()
 for d in "${selected[@]}"; do
   IFS='|' read -r id target rel <<< "$d"
   ids+=("$id"); targets+=("$target"); rels+=("$rel")
 done
+
+# The captures are checked before anything reads them: a changed or missing
+# capture is caught in seconds, not after hours of decoding it.
+log "verifying ${#selected[@]} capture(s) against sources.sha256"
+"$SELF_DIR/verify-sources.sh" --library "$LIBRARY" "${rels[@]}" \
+  || die "the captures do not match sources.sha256; nothing was decoded"
+
+# Resolve the starts. Each resolve records its own exit status in a file, seeded
+# as failed, so a resolve that dies is still attributed to its set -- and so
+# every set's result is kept, rather than only the last one reaped.
+log "resolving starts for ${#selected[@]} set(s)"
 
 resolve_prefix() { [ "$JOBS" -gt 1 ] && printf '[%s] ' "${ids[$1]}"; }
 
@@ -726,27 +996,44 @@ failed=()
 for i in "${!ids[@]}"; do
   [ "$(cat "$WORK/rc.$i" 2>/dev/null || echo 1)" = 0 ] || failed+=("${ids[$i]}")
 done
-[ "${#failed[@]}" -eq 0 ] || die "could not resolve a start for: ${failed[*]}"
+[ "${#failed[@]}" -eq 0 ] || die "stopped before decoding anything, because of: ${failed[*]} (see above)"
 
 # Read the resolved values back. Each record is parsed rather than sourced: it
 # holds paths from the table, and sourcing would run whatever they contained.
+field() { sed -n "s/^$1=//p" "$WORK/start.$2"; }
 for i in "${!ids[@]}"; do
-  R_ID+=(   "$(sed -n 's/^id=//p'    "$WORK/start.$i")")
-  R_SRC+=(  "$(sed -n 's/^src=//p'   "$WORK/start.$i")")
-  R_DEST+=( "$(sed -n 's/^dest=//p'  "$WORK/start.$i")")
-  R_BASE+=( "$(sed -n 's/^base=//p'  "$WORK/start.$i")")
-  R_START+=("$(sed -n 's/^start=//p' "$WORK/start.$i")")
+  R_ID+=(    "$(field id "$i")")
+  R_SRC+=(   "$(field src "$i")")
+  R_DEST+=(  "$(field dest "$i")")
+  R_BASE+=(  "$(field base "$i")")
+  R_START+=( "$(field start "$i")")
+  R_REL+=(   "$(field rel "$i")")
+  R_TARGET+=("$(field target "$i")")
+  R_ACTION+=("$(field action "$i")")
+  R_REPORT+=("$(field report "$i")")
 done
 
-if [ "$JOBS" -le 1 ]; then
-  for i in "${!R_ID[@]}"; do
+todo=(); skipped=()
+for i in "${!R_ID[@]}"; do
+  case "${R_ACTION[$i]}" in
+    skip)   skipped+=("${R_ID[$i]}") ;;
+    adopt)  [ "$DRY_RUN" = 1 ] || { log "${R_ID[$i]}: checking the decode that is there"; finish_decode "$i" ""; } ;;
+    decode) todo+=("$i") ;;
+  esac
+done
+[ "${#skipped[@]}" = 0 ] || log "up to date, not decoded: ${skipped[*]}"
+
+if [ "${#todo[@]}" = 0 ]; then
+  :
+elif [ "$JOBS" -le 1 ]; then
+  for i in "${todo[@]}"; do
     printf '\n'
     decode_one "$i" ""
   done
 else
-  log "decoding ${#R_ID[@]} set(s), $JOBS at a time"
+  log "decoding ${#todo[@]} set(s), $JOBS at a time"
 
-  for i in "${!R_ID[@]}"; do
+  for i in "${todo[@]}"; do
     while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n || true; done
     (
       echo 1 > "$WORK/rc.$i"
@@ -757,11 +1044,11 @@ else
   wait
 
   failed=()
-  for i in "${!R_ID[@]}"; do
+  for i in "${todo[@]}"; do
     [ "$(cat "$WORK/rc.$i" 2>/dev/null || echo 1)" = 0 ] || failed+=("${R_ID[$i]}")
   done
   if [ "${#failed[@]}" -gt 0 ]; then
-    die "decode failed for: ${failed[*]} (see each set's .log)"
+    die "decode failed for: ${failed[*]} (see each set's .log, and check.failed.txt if it was checked)"
   fi
 fi
 

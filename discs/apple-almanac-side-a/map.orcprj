@@ -1,0 +1,160 @@
+# ORC Project File
+# Version: 2.0
+#
+# Apple Visual Almanac side A, every set: each decode through a Disc Mapper
+# frame map, then all of them into one Source Align, for the selection report
+# (phase 4). Nothing is stacked or written; the project has no sink.
+# build-pack.sh's map stage copies this beside its outputs, points each source
+# at its set's decode with orc-cli nodes set, and runs orc-cli tools refresh,
+# which maps every set and then aligns them.
+#
+# Each source is labelled with its set id, as in
+# decode-apple-almanac-side-a.sh's SETS table, and its frame map "<set> map". A
+# set that cannot be mapped is dropped from the map stage by deleting its
+# source and frame map here. The refresh tools are recorded under tool_refresh:
+# field_mapping on every frame map (lead-in and lead-out kept),
+# source_alignment on Align (pad_for_alignment).
+#
+# The disc is NTSC CAV, video with stretches of film in 3:2 pulldown, where
+# every fifth frame carries no picture number. The Disc Mapper keeps those
+# frames in place and pads the missing ones (pulldownFrames and
+# pulldownFramesPadded in its report), and Source Alignment places the sets
+# by the frames at which they read the same pictures. There is no FM Beat
+# Cancel: the stage is PAL only.
+
+project:
+  name: Apple Visual Almanac side A map
+  version: 2.0
+  video_format: NTSC
+  source_format: Composite
+  amplitude_unit: 10bit
+dag:
+  nodes:
+    - id: 1
+      stage: NTSC_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS1
+      x: 50
+      y: 50
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 2
+      stage: NTSC_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS2
+      x: 50
+      y: 175
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 3
+      stage: NTSC_CVBS_Source
+      node_type: SOURCE
+      display_name: CVBS Source
+      user_label: DS3
+      x: 50
+      y: 300
+      parameters:
+        c_path:
+          type: string
+          value: ""
+        input_path:
+          type: string
+          value: ""
+        sample_encoding:
+          type: string
+          value: From metadata
+        y_path:
+          type: string
+          value: ""
+    - id: 4
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS1 map
+      x: 275
+      y: 50
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 5
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS2 map
+      x: 275
+      y: 175
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 6
+      stage: frame_map
+      node_type: TRANSFORM
+      display_name: Frame Map
+      user_label: DS3 map
+      x: 275
+      y: 300
+      tool_refresh:
+        tool: field_mapping
+      parameters:
+        ranges:
+          type: string
+          value: ""
+    - id: 7
+      stage: source_align
+      node_type: COMPLEX
+      display_name: Source Align
+      user_label: Align
+      x: 500
+      y: 50
+      tool_refresh:
+        tool: source_alignment
+      parameters:
+        alignmentMap:
+          type: string
+          value: ""
+        alignmentMode:
+          type: string
+          value: pad_for_alignment
+  edges:
+    - from: 1
+      to: 4
+    - from: 2
+      to: 5
+    - from: 3
+      to: 6
+    - from: 4
+      to: 7
+    - from: 5
+      to: 7
+    - from: 6
+      to: 7

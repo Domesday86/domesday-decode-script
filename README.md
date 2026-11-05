@@ -94,13 +94,14 @@ Every script takes the same core flags and environment variables:
 | `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
 | `--force` | | refuse | overwrite an existing decode |
-| `--adopt` | | | the pack scripts only (Volcanoes, Community South, National A, National B, Community North, EcoDisc, Countryside, City Culture 1, City Culture 2, City Financial 1, City Financial 2): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
+| `--adopt` | | | the pack scripts only (Volcanoes, Community South, National A, National B, Community North, EcoDisc, Countryside, City Culture 1, City Culture 2, City Financial 1, City Financial 2, North Polar): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
 | `-n, --dry-run` | | | resolve starts and print the commands, decode nothing |
 | `--list` | | | list what the selectors chose and exit |
 
-The scripts for multi-sided discs add `--side`. The ones that switch the EFM
-front end off anywhere add `--efm` (`DD_EFM=1`) to force it back on; each
-disc's section below says which. `--help` on any script gives its full usage.
+Each script decodes one side, so none offers `--side`, and none offers
+`--efm`: a side that carries no EFM is decoded with `--noEFM`, asserted in
+its script's `DECODE_FLAGS`, and each disc's section below says which.
+`--help` on any script gives its full usage.
 
 Source paths in the tables are relative to the library root, so decoding from
 another copy of the library takes only pointing at it. Because the library is
@@ -1065,31 +1066,35 @@ rather than a decode. `--frames 30` clears it on every capture.
 `decode-north-polar.sh` decodes the PAL **North Polar Expedition** disc (Virgin
 Publishing, 1989), an interactive videodisc in which a group takes on the roles
 of the members of an expedition to the North Pole. It is not a BBC title, but it
-is an AIV-era disc captured the same way as the rest of the library.
+is an AIV-era disc captured the same way as the rest of the library. The disc is
+a VP415e pack of its own (`north-polar`, stem `north_polar`), and its script
+checks and stamps its decodes for `build-pack.sh` as
+[Volcanoes'](#checked-and-stamped-decodes) does.
 
 North Polar Expedition is **single-sided**, so a disc set here is one capture.
-The library has two sets — two different copies of the disc, both captured in
-January 2021 — and each is decoded in its own right.
+The library has two sets — two different copies of the disc, DS1 from the RCM's
+and DS2 from DMoore's, both captured in January 2021 — and each is decoded in
+its own right.
 
 ```sh
 nix develop
-./decode-north-polar.sh                   # both sets, first 1000 frames each
+./decode-north-polar.sh --list
 ./decode-north-polar.sh --frames 30 DS1   # quick smoke test
 ./decode-north-polar.sh --frames all DS2  # one set in full
 ./decode-north-polar.sh --frames all -j 2 # both sets at once
-./decode-north-polar.sh --list
+./build-pack.sh north-polar               # or decode them for the pack
 ```
 
 Sets are named `DS1` and `DS2`, matched regardless of case. Output goes to
-`<output root>/<set>/<decoder>/<capture basename>.*`, with the output root
-defaulting to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/north-polar`.
+`<output root>/<set>/<decoder>-<date>/<capture basename>.*`, with the output
+root `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/north-polar`.
 
 ### What the script asserts
 
 Every capture is PAL CAV, was made on an LD-V4300D, and carries **no EFM**:
 
 ```sh
-ld-decode --pal --noEFM --cvbs --cvbs-spec-origin --V4300D_coherent_subtract ...
+ld-decode --pal --noEFM --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
 ```
 
 **No EFM** is the one that differs from the BBC AIV discs, and it was measured.
@@ -1099,8 +1104,10 @@ found a single T11–T11 frame-sync pair: sync rate 0.000 throughout, demodulato
 confidence 29–41, the signature of a section with no EFM. The BBC discs' EFM is
 localised, but every block found on them spans a thousand pictures or more,
 which probes 500 apart cannot step over. So the front end is switched off, as
-it is on the Domesday National B sides, rather than left to write an `.efm` of
-noise. `--efm` (`DD_EFM=1`) turns it back on, for checking that claim.
+it is on the Domesday National B sides and EcoDisc's second side, rather than
+left to write an `.efm` of noise. Like those, it is asserted rather than offered
+as a flag: the decode has no `.efm` or `.efm.meta`, and its check and stamp do
+not ask for them.
 
 The other two were checked too. The same probes read back exactly the CAV
 picture number aimed at, end to end on both captures. Both carry the
@@ -1108,13 +1115,25 @@ LD-V4300D's 8.4672MHz clock spur, 41 and 33 dB above the local noise floor, so
 the coherent subtraction has something to remove — see [Player spur
 removal](#player-spur-removal).
 
+### How far the captures reach
+
+Neither capture reaches the lead-out: each is still reading pictures on its
+last frame. **DS2 runs to picture 54348**, as its file name says, past the
+54,000 a CAV side usually holds. **DS1 stops on picture 51438**, one past its
+name, while the disc goes on, so DS2 alone covers the last 2,910 pictures. A
+finished decode's frame count is checked against the last picture its file
+name gives, as on EcoDisc's first side. The VBI reads CAV side 1, 12 inch,
+Amendment 2 present, sound mode bilingual, on both captures, which is what
+`discs/north-polar/disc.conf` asks the pack's metadata to say, with no
+lead-out (`DISC_LEAD_OUT=absent`).
+
 ### Everything else
 
-The roots, the frame limit, lead-in, probe, jobs and threads work exactly as
-they do for the other scripts — see [Configuration](#configuration). Both
-captures begin at the head of the side, so the "first picture" column is `1`.
-The `--start` values in the library's `NPE_Notes.txt` are not used, but agree
-with what this build resolves:
+The roots, the frame limit, lead-in, probe, jobs and threads, `--adopt` — work
+exactly as they do for Volcanoes, by the same flags and the same `DD_*`
+environment variables. Both captures begin at the head of the side, so the
+"first picture" column is `1`. The `--start` values in the library's
+`NPE_Notes.txt` are not used, but agree with what this build resolves:
 
 | Capture | notes | picture #1 at | `--start` | output opens at |
 | --- | --- | --- | --- | --- |
@@ -1208,7 +1227,7 @@ Mapper to sort out. Its decode writes 43,565 frames, which the script's
 `decode-apple-almanac-side-a.sh` and `decode-apple-almanac-side-b.sh` decode
 the two sides of the **NTSC** **Apple Visual Almanac** (Apple, 1989), a CAV
 disc of stills, video and sound that a Macintosh drives over a serial link to
-the player. Like Dragon's Lair it has no VP415e pack, and is decoded as an
+the player. Like Dragon's Lair it is not a VP415e title, and is decoded as an
 **NTSC stacking reference for testing decode-orc**. The library has three
 copies, `DS1` to `DS3`, each side captured once
 (`Interactive_Video/Apple_Visual_Almanac`).
@@ -1223,6 +1242,24 @@ nix develop
 Output goes to `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/apple-almanac-side-a`
 and `…/apple-almanac-side-b`. The decodes are checked and stamped as the pack
 scripts' are.
+
+`build-pack.sh apple-almanac-side-a` and `build-pack.sh apple-almanac-side-b`
+build each side a **video-only pack**, `apple_almanac_side_a.mkv` and
+`apple_almanac_side_b.mkv`, as for Dragon's Lair: the disc has no EFM, so
+there is no VFS stack. `discs/apple-almanac-side-a/` and `-side-b/` have the
+following:
+- `disc.conf`: `DISC_SYSTEM=NTSC`, `DISC_EFM=no`, CAV, pictures 1–50683
+  (side A) or 1–53361 (side B), and the decoder `ntsc2d, held:ntsc3d`;
+- `map.orcprj`, `set-quality.orcprj` and `stack.orcprj`, Dragon's Lair's
+  with three sets;
+- `selection.yaml`, which is written once the compare report is in.
+
+The stack is Dragon's Lair's, with no FM Beat Cancel or Channel Equalise
+(both are PAL only) and `pressing_repair` off. The disc is stills, video and
+film, and which pictures are which isn't known yet. So the sink decodes with
+`ntsc2d` and gives `ntsc3d` only the frames the Stacker finds held, as the
+City discs do with `palstill, held:transform3d` until their ranges are
+given.
 
 ### What the scripts assert
 
@@ -1695,6 +1732,16 @@ inputs, so a re-run with nothing changed does nothing.
     side must have both. Of the sectors its filesystem needs, 465 rest on
     DS1 alone, so the VFS is accepted as complete rather than bit-perfect
     (`vfs.accept: single-source`).
+  - **North Polar Expedition** (`north-polar`, stem `north_polar`): the two
+    captures of the disc, decoded by `decode-north-polar.sh`, which is
+    `decode-ecodisc-side2.sh` with this disc's set table and checks. See
+    [Decoding the North Polar Expedition
+    disc](#decoding-the-north-polar-expedition-disc). It has no EFM, so the
+    pack is the mkv alone, as on EcoDisc side 2, decoded with `transform3d`
+    throughout. Neither capture reaches the lead-out
+    (`DISC_LEAD_OUT=absent`), and DS2's alone reaches the disc's last
+    pictures, to 54348. Its `selection.yaml` is written once the compare
+    report is in.
 
 ```sh
 ./build-pack.sh volcanoes status                 # each stage: up to date, or stale and why
