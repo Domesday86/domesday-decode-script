@@ -1864,6 +1864,41 @@ sets. The disc is single-sided.
   recorded in `discs/city-culture2/pack.sha256`. The video stage took
   28 min.
 
+**Under way: City Financial 1** (`discs/city-financial1`, stem
+`city_financial1`), from one capture, set DS2's: set DS1 was missing the
+disc when it was captured. The disc is single-sided. It is the first pack
+built from one set.
+
+- `decode-city-financial1.sh` is `decode-city-culture2.sh` with this disc's
+  set table, and Financial 1 leaves `decode-city.sh`. Its EFM data lies in a
+  band, from about picture 29700 to about 36000, not to the end of the
+  side, so the EFM check runs over pictures 29800-35900. That was found
+  with `efm_score` probes: every 1,000 file frames, then every 100 around
+  each edge.
+- Its projects are Culture 2's with one set. The map keeps Source Align so
+  the map stage reads it as every other; with one source it measures no
+  stamper groups and no picture band, so the stack's Picture Band Limit
+  keeps its 5.4 MHz default. The stack drops `pressing_repair`, having no
+  other stamper group to repair from; the Stacker gains only from repeats
+  of held pictures (`still_frame_stacking`).
+- A one-set pack took a vfs-verifier change (Domesday86/vfs-verifier#1):
+  vfs-stacker wanted two or more images. From 1e0d35b it takes one, and
+  pads, checks and gives a RESULT as usual.
+- The compare evidence (orc-5323ee1, 2026-11-05): DS2 reads CAV side 1,
+  user code 1993, pictures 1-53981. `DISC_SIDE` is 1.
+- The VFS is GOOD and whole, but not bit-perfect: all 7176 sectors the
+  filesystem needs rest on DS2 alone. `vfs.accept: single-source` accepts
+  that. The capture's image reaches 108141 sectors, and the stack pads it
+  to the 162114 its filesystem ("Cityfin") describes.
+- Built 2026-11-05 on decode-orc 5323ee1 and vfs-verifier 1e0d35b: pack
+  `61b9ed6ab9392037`. The stack reads one run over pictures 1-53981. 12
+  frames are undecoded (numbered on the disc, not recovered), and every
+  picture still resolves. Its sample measures white SNR 32.87 dB, black
+  PSNR 30.23 dB (in Mean the same). The VFS image has 142977 bad sectors,
+  all before the filesystem (141) or in free space (142836, 53973 of them
+  padding); all 29 objects are free of bad sectors. Its hash is recorded
+  in `discs/city-financial1/pack.sha256`. The video stage took 27 min.
+
 ## Decisions
 
 | Question | Decision |

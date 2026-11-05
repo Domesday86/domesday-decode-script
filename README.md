@@ -94,7 +94,7 @@ Every script takes the same core flags and environment variables:
 | `-t, --threads` | `DD_THREADS` | `0` (auto) | ld-decode worker threads per decode; auto aims for 4 each |
 | `--tbc` | `DD_CVBS=0` | CVBS | write `.tbc` instead of CVBS |
 | `--force` | | refuse | overwrite an existing decode |
-| `--adopt` | | | the pack scripts only (Volcanoes, Community South, National A, National B, Community North, EcoDisc, Countryside, City Culture 1, City Culture 2): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
+| `--adopt` | | | the pack scripts only (Volcanoes, Community South, National A, National B, Community North, EcoDisc, Countryside, City Culture 1, City Culture 2, City Financial 1): check an existing decode and stamp it ([Checked and stamped decodes](#checked-and-stamped-decodes)) |
 | `-n, --dry-run` | | | resolve starts and print the commands, decode nothing |
 | `--list` | | | list what the selectors chose and exit |
 
@@ -111,7 +111,7 @@ than with `--library` alone.
 Every script's output root sits under one folder,
 `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/`, in a subfolder named after the
 script's disc or pack: `volcanoes`, `community-south`, `national-a`,
-`national-b`, `community-north`, `ecodisc-side1`, `ecodisc-side2`, `city`, `city-culture1`, `city-culture2`, `countryside-side1`,
+`national-b`, `community-north`, `ecodisc-side1`, `ecodisc-side2`, `city`, `city-culture1`, `city-culture2`, `city-financial1`, `countryside-side1`,
 `countryside-side2`, `north-polar`, `dragons-lair`, `apple-almanac-side-a` and
 `apple-almanac-side-b`.
 
@@ -641,10 +641,11 @@ interactive videodisc set about the City of London — the "square mile" —
 covering its history, its customs and its role as a modern financial market
 place.
 
-Culture 1 and Culture 2 have packs of their own, and their own scripts,
-`decode-city-culture1.sh` and `decode-city-culture2.sh` (see [City Culture
-1](#city-culture-1) and [City Culture 2](#city-culture-2)); `decode-city.sh`
-decodes the two Financial discs until each gets one.
+Culture 1, Culture 2 and Financial 1 have packs of their own, and their own
+scripts, `decode-city-culture1.sh`, `decode-city-culture2.sh` and
+`decode-city-financial1.sh` (see [City Culture 1](#city-culture-1), [City
+Culture 2](#city-culture-2) and [City Financial 1](#city-financial-1));
+`decode-city.sh` decodes Financial 2 until it gets one.
 
 Unlike the other AIV titles here, a City "set" is **four discs**: Culture 1,
 Culture 2, Financial 1 and Financial 2. All four are single-sided except
@@ -653,26 +654,24 @@ in this script names a disc *and* a side of it:
 
 | Side | Short name |
 | --- | --- |
-| `Financial1-Side1` | `F1S1` |
 | `Financial2-Side1` | `F2S1` |
 
 Naming `Culture1-Side1` or `Culture1-Side2` (`C1S1`, `C1S2`) says the side is
-decoded by `decode-city-culture1.sh`, and `Culture2-Side1` (`C2S1`) by
-`decode-city-culture2.sh`.
+decoded by `decode-city-culture1.sh`, `Culture2-Side1` (`C2S1`) by
+`decode-city-culture2.sh`, and `Financial1-Side1` (`F1S1`) by
+`decode-city-financial1.sh`.
 
 The library holds two sets, and they are not equally complete: **DS2 has all
 five captures, DS1 has no Financial 1** — that disc was missing when the set was
-captured. That leaves **three captures here across the two sets, not four**,
-so `Financial1-Side1` selects one capture rather than two and `DS1:F1S1` is an
-error rather than an omission.
+captured, so Financial 1's pack is built from one capture. That leaves **two
+captures here**, one Financial 2 in each set.
 
 ```sh
 nix develop
-./decode-city.sh                        # all three captures, first 1000 frames each
+./decode-city.sh                        # both captures, first 1000 frames each
 ./decode-city.sh --frames 30            # quick smoke test
-./decode-city.sh --frames all DS2:F1S1  # one side in full
-./decode-city.sh --frames all F2S1 -j 2 # both Financial 2 captures
-./decode-city.sh --frames all -j 2      # both discs, two at a time
+./decode-city.sh --frames all DS2:F2S1  # one side in full
+./decode-city.sh --frames all -j 2      # both, two at a time
 ./decode-city.sh --list
 ```
 
@@ -756,7 +755,6 @@ a useful sanity check:
 | Capture | notes | resolved |
 | --- | --- | --- |
 | DS1 `Financial2-Side1` | 303 | 303 |
-| DS2 `Financial1-Side1` | 338 | 338 |
 | DS2 `Financial2-Side1` | 368 | 368 |
 
 ## City Culture 1
@@ -883,6 +881,57 @@ The starts resolve within a few frames of the ones noted by hand in
 
 `DS2`'s start opens the output at file frame 379, three frames before
 picture 1 at 382.
+
+## City Financial 1
+
+`decode-city-financial1.sh` decodes the City Disc's **Financial 1** for its
+VP415e pack (`build-pack.sh city-financial1`). It is
+`decode-city-culture2.sh` with this disc's set table and checks, and the only
+list of its captures. The disc is single-sided, and the library has **one
+capture** of it, set DS2's: set DS1 was missing the disc when it was
+captured.
+
+| Set | Capture |
+| --- | --- |
+| `DS2` | DS2 `Financial1-Side1` |
+
+```sh
+nix develop
+./decode-city-financial1.sh --list
+./decode-city-financial1.sh -f 30 DS2             # quick smoke test
+./decode-city-financial1.sh --frames all          # the one capture
+./build-pack.sh city-financial1                   # or build the pack
+```
+
+### What the script asserts
+
+The same as `decode-city.sh`: the capture is PAL, is CAV, was made on an
+LD-V4300D, and carries EFM, so it decodes with
+`--pal --V4300D_coherent_subtract` and the EFM front end on.
+
+- **EFM in a band, pictures 29700–36000.** Unlike Culture 1 and 2, the data
+  does not run to the end of the side. `lddecode.efm_score` probes, every
+  1,000 file frames and then every 100 around each edge, find it from file
+  frame 30100 to 36300, and none at 30000 or from 36400 on: about pictures
+  29700 to 36000. So the decode check asks for EFM t-values on pictures
+  29800–35900, inside the band.
+- **53981 pictures.** The capture is named `..._00001-53981`, and the frame
+  count is checked against that.
+- **Side 1.** The VBI reads CAV side 1, user code 1993 (Culture 2, also
+  single-sided, reads side 2). The video stage checks the metadata against
+  that.
+
+The start resolves to the one noted by hand in `City_Disc_Notes.txt`:
+
+| Capture | notes | resolved |
+| --- | --- | --- |
+| `DS2` | 338 | 338 |
+
+With one capture, the pack has nothing to stack across: the video Stacker
+gains only from repeats of held pictures, and the VFS image is DS2's own,
+padded to the disc length its filesystem describes. Every sector the
+filesystem needs rests on that one capture, so the selection accepts the
+image as complete rather than bit-perfect (`vfs.accept: single-source`).
 
 ## Decoding the Countryside disc
 
@@ -1576,6 +1625,15 @@ inputs, so a re-run with nothing changed does nothing.
     filesystem needs, 102 were recovered by one capture alone, so the VFS
     is accepted as complete rather than bit-perfect
     (`vfs.accept: single-source`, as on Countryside Side 2).
+  - **City Financial 1** (`city-financial1`, stem `city_financial1`): the
+    one capture of the City Disc's Financial 1, set DS2's, decoded by
+    `decode-city-financial1.sh`, which is `decode-city-culture2.sh` with this
+    disc's set table and checks. See [City Financial 1](#city-financial-1).
+    With one source, the stack is Culture 2's without `pressing_repair`, and
+    gains only from repeats of held pictures; `transform2d` throughout. Every
+    sector its filesystem needs rests on the one capture, so the VFS is
+    accepted as complete rather than bit-perfect
+    (`vfs.accept: single-source`).
 
 ```sh
 ./build-pack.sh volcanoes status                 # each stage: up to date, or stale and why

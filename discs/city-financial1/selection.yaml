@@ -1,0 +1,35 @@
+# City Financial 1: which sets go into the video and the VFS stacks, decided
+# from the compare stage's report (orc-<rev>/compare/report.txt) as described
+# in docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds; the VFS lists its sets best first. Every mapped set a stack
+# leaves out goes under dropped, with a reason.
+#
+# The evidence (orc-5323ee1, 2026-11-05): the library has one capture of the
+# disc, set DS2's; set DS1 was missing the disc when it was captured. DS2's
+# Disc Mapper reads CAV side 1, 12 inch, user code 1993, CX off, Amendment 2
+# present, sound stereo, pictures 1-53981, over the whole side. With one
+# capture there is no Source Alignment comparison and no stamper group.
+
+pressing: A    # the content version: the one set
+
+video:
+  # DS2 alone: there is no other capture. The Stacker gains only from repeats
+  # of held pictures. DS2 reads white SNR 33.05 dB, black PSNR 30.74 dB, with
+  # 95292 dropouts; 3 padding frames, in 2 gaps.
+  sets: [DS2]
+  dropped: []
+
+vfs:
+  # DS2 alone, data loss after C2 0.0093%. The disc's data lies in a band,
+  # from about picture 29700 to about 36000, and its ADFS filesystem
+  # ("Cityfin") is whole: the stack is GOOD, padded to the 162114 sectors
+  # the filesystem describes.
+  sets: [DS2]
+  dropped: []
+  # Every one of the 7176 sectors the filesystem needs rests on DS2 alone,
+  # so the image cannot pass the bit-perfect test, which wants every needed
+  # sector from two, and there is no second capture. Each passed the EFM
+  # decoder's own error correction. single-source accepts that, and nothing
+  # else: a needed sector still bad still fails.
+  accept: single-source

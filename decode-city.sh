@@ -10,14 +10,13 @@
 #
 # The library holds two sets of the four discs. They are not equally complete:
 # DS2 has all five captures, while DS1 has no Financial 1 -- that disc was
-# missing when the set was captured. So "Financial1-Side1" selects one capture
-# rather than two.
+# missing when the set was captured.
 #
 # Each VP415e pack has its own decode script, which stamps its decodes for
 # build-pack.sh. Culture 1 has one, decode-city-culture1.sh, which lists the
-# four captures of both its sides, and Culture 2 has one,
-# decode-city-culture2.sh, so neither is listed here; the two Financial discs
-# stay until each gets its own.
+# four captures of both its sides; Culture 2 has decode-city-culture2.sh and
+# Financial 1 decode-city-financial1.sh, so none of them is listed here;
+# Financial 2 stays until it gets its own.
 #
 # Every capture is CAV. Each is decoded to CVBS (<name>.cvbs + <name>.meta)
 # starting a configurable number of lead-in frames before its first picture, so
@@ -113,9 +112,9 @@ START_OVERRIDE=""
 # Side table: set | side | format | first picture | path relative to LIBRARY
 #
 # A "side" here names a disc and a side of it, because a City set is four discs
-# rather than one: Financial1-Side1 and Financial2-Side1 here, Culture1-Side1
-# and Culture1-Side2 in decode-city-culture1.sh, and Culture2-Side1 in
-# decode-city-culture2.sh.
+# rather than one: Financial2-Side1 here, Culture1-Side1 and Culture1-Side2 in
+# decode-city-culture1.sh, Culture2-Side1 in decode-city-culture2.sh, and
+# Financial1-Side1 in decode-city-financial1.sh.
 #
 # Every capture is PAL and, as the format column records, CAV. The format is not
 # passed to ld-decode, which reads it from the VBI itself; it is here because it
@@ -128,27 +127,24 @@ START_OVERRIDE=""
 # which carry none. See the note above the ld-decode command in decode_one.
 #
 # "first picture" is the picture number the start search converges on. It is 1
-# for all three captures, each of which begins at the head of its side.
-#
-# DS1 has no Financial 1 capture: that disc was missing from the set. That is a
-# fact about the set, not a gap in the library.
+# for both captures, each of which begins at the head of its side.
 # ---------------------------------------------------------------------------
 
 SIDES=(
   "DS1|Financial2-Side1|CAV|1|BBC_AIV/City_Disc/City_Disc_DS1/City-Disc_DD86-DS1_Financial2-Side1_20210101_CAV_PAL_00001-52523.ldf"
 
-  "DS2|Financial1-Side1|CAV|1|BBC_AIV/City_Disc/City_Disc_DS2/City-Disc_DD86-DS2_Financial1-Side1_20200126_CAV_PAL_00001-53981.ldf"
   "DS2|Financial2-Side1|CAV|1|BBC_AIV/City_Disc/City_Disc_DS2/City-Disc_DD86-DS2_Financial2-Side1_20210101_CAV_PAL_00001-44611.ldf"
 )
 
 # Short names for the sides, so a side can be named without typing it out.
-SIDE_NAMES=(Financial1-Side1 Financial2-Side1)
-SIDE_ALIASES=(F1S1 F2S1)
+SIDE_NAMES=(Financial2-Side1)
+SIDE_ALIASES=(F2S1)
 
 # Sides that have a pack script of their own, and that script.
 MOVED_SIDES=("Culture1-Side1|C1S1|decode-city-culture1.sh"
              "Culture1-Side2|C1S2|decode-city-culture1.sh"
-             "Culture2-Side1|C2S1|decode-city-culture2.sh")
+             "Culture2-Side1|C2S1|decode-city-culture2.sh"
+             "Financial1-Side1|F1S1|decode-city-financial1.sh")
 
 # ---------------------------------------------------------------------------
 
@@ -163,11 +159,11 @@ A City set is four discs -- Culture 1, Culture 2, Financial 1 and Financial 2 --
 all single-sided except Culture 1, which has the same content on both sides. So
 a "side" here names a disc and a side of it:
 
-  Financial1-Side1  F1S1
   Financial2-Side1  F2S1
 
-Culture 1's two sides are decoded by decode-city-culture1.sh and Culture 2 by
-decode-city-culture2.sh, each its pack's own script.
+Culture 1's two sides are decoded by decode-city-culture1.sh, Culture 2 by
+decode-city-culture2.sh and Financial 1 by decode-city-financial1.sh, each its
+pack's own script.
 
 A selector picks what to decode:
 
@@ -177,20 +173,18 @@ A selector picks what to decode:
   Financial2-Side1  that side of every set that has one
   F2S1              same, by its short name
 
-Selectors add together, so "DS1 DS2:F1S1" is both of set 1's plus set 2's
-Financial 1. --side narrows whatever the selectors chose, so "--side F2S1 DS1
+Selectors add together, so "DS1 DS2:F2S1" is set 1's side plus set 2's.
+--side narrows whatever the selectors chose, so "--side F2S1 DS1
 DS2" is the same thing written the other way round. Set and side names are
 matched regardless of case.
 
-DS1 has no Financial 1 -- that disc was missing from the set -- so
-"Financial1-Side1" selects one capture rather than two, and "DS1:F1S1" is an
-error rather than an omission. There are three captures in all.
+There are two captures in all, one in each set.
 
 Options:
   -l, --library DIR     capture library root (default: $LIBRARY)
   -o, --output DIR      decode output root (default: $OUTPUT)
-      --side NAME       only this side (repeatable: F1S1 F2S1,
-                        or full names)
+      --side NAME       only this side (repeatable: F2S1, or the full
+                        name)
       --decoder NAME    decoder directory name (default: from flake.lock)
       --no-verify-decoder
                         skip the check that ld-decode matches flake.lock
@@ -242,9 +236,8 @@ Examples:
   ${0##*/} --list                        # what would be decoded
   ${0##*/} -f 2 DS1                      # quick smoke test of one set
   ${0##*/} DS1                           # set 1, first 1000 frames a side
-  ${0##*/} --frames all DS2:F1S1         # one side in full
-  ${0##*/} --frames all F2S1 -j 2        # both Financial 2 captures
-  ${0##*/} --frames all -j 2             # all three captures
+  ${0##*/} --frames all DS2:F2S1         # one side in full
+  ${0##*/} --frames all -j 2             # both captures
 EOF
 }
 
@@ -399,8 +392,6 @@ else
           || die "unknown disc set: ${want%%:*} (try --list)"
         v=$(canonical_side "${want#*:}") \
           || die "unknown side: ${want#*:} (try: ${SIDE_NAMES[*]})"
-        # DS1 has no Financial 1, so this is the one selector that can name a
-        # real set and a real side and still match nothing.
         select_pair "$s" "$v" \
           || die "$s has no $v in the table (try --list)"
         ;;

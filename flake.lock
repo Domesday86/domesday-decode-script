@@ -184,11 +184,11 @@
         "nixpkgs": "nixpkgs_3"
       },
       "locked": {
-        "lastModified": 1789050143,
-        "narHash": "sha256-0En1pYhHmeKKKMF+Py5sNt8de7RFuPBUem9lYuzwkoU=",
+        "lastModified": 1793856748,
+        "narHash": "sha256-x0nfgROBskSnN7i/PRA6QD6P4w+/h3BJROQVjkJLCig=",
         "owner": "Domesday86",
         "repo": "vfs-verifier",
-        "rev": "41ab10c4eec1f52f3c70b69b33d053c6c3aeb8a3",
+        "rev": "1e0d35b3b9295bd5de80b1b8148f8ae131ff3bae",
         "type": "github"
       },
       "original": {
