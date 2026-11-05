@@ -12,11 +12,11 @@
         "videosynth": "videosynth"
       },
       "locked": {
-        "lastModified": 1793799713,
-        "narHash": "sha256-Yrk3oEq7TyWomrDBYRWPq4KjKzrqmpcRxLwL785Eqzk=",
+        "lastModified": 1793886257,
+        "narHash": "sha256-Ci/vETaRzU74y/VuGO5FNYzzc24eYiP8zNf7wpWNHGs=",
         "owner": "decode-orc",
         "repo": "decode-orc",
-        "rev": "5323ee1bb31b9bdbd3a554c6912fd1a56b632a4e",
+        "rev": "7995d1f95428a490221008498f583d54224d3590",
         "type": "github"
       },
       "original": {
@@ -209,17 +209,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1793359502,
-        "narHash": "sha256-U/jsKcG+WzwlWc+tm7sL2YWagOx4d0JbMQtNwcQiAFw=",
+        "lastModified": 1793803728,
+        "narHash": "sha256-KiO0s4NgB1MEoqzkoAHSbsgnYDRkvHXMaBIjRQ3G3h8=",
         "owner": "decode-orc",
         "repo": "videosynth",
-        "rev": "139b31e50f7b955001daf2901af7175b8e094552",
+        "rev": "049c712cd61c3255a5eae6c445666002073c6aba",
         "type": "github"
       },
       "original": {
         "owner": "decode-orc",
         "repo": "videosynth",
-        "rev": "139b31e50f7b955001daf2901af7175b8e094552",
+        "rev": "049c712cd61c3255a5eae6c445666002073c6aba",
         "type": "github"
       }
     }

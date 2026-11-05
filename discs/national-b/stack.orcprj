@@ -37,6 +37,8 @@
 #   (framemaps/picture-band), measured between captures of different stamper
 #   families. The video stage sets cutoff_mhz from it; rolloff_mhz stays 0.4.
 #   Chroma is untouched.
+# - No Channel Equalise: the decode-orc guide's Channel Calibration reads no
+#   edge smear on National B (CLV), and the guide leaves the stage out there.
 # - The video sink decodes every frame with transform3d: the side is motion
 #   throughout. build-pack.sh sets the decoder from disc.conf, so the two are
 #   the same.

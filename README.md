@@ -475,8 +475,10 @@ scripts follow once the process is proven here.
   the decode that is there and stamps it if it passes, which is the way to
   keep a decode made before stamps, or one whose check needed fixing.
 - **Two versions are kept.** After a new ld-decode revision's decode is
-  stamped, all but the newest two `ld-decode-<rev>` directories of that set
-  are removed.
+  stamped, the set keeps it and the newest complete `ld-decode-<rev>`
+  directory before it. Every other one is removed, including a failed or
+  interrupted decode that was never stamped. `build-pack.sh` applies the same
+  rule to every set at the end of each run that succeeds.
 - **Each directory is dated.** A decode directory is named
   `ld-decode-<rev>-<date>`, where `<date>` (`YYYYMMDD-HHMMSS`) is when the
   run that first made it started. One run gives every directory it makes the
@@ -1417,18 +1419,37 @@ inputs, so a re-run with nothing changed does nothing.
   - **`Band`**: Picture Band Limit after Dropout Correction. Its `cutoff_mhz`
     comes from `framemaps/picture-band`; when no band was measured, it takes
     the stage's default for the system (5.4 MHz PAL, 5.0 MHz NTSC).
+  - **`Equalise`**: Channel Equalise after Band, on the CAV PAL sides, where
+    decode-orc's guide (Decoding the Domesday discs) puts it. It removes the
+    edge smear the CAV masters carry and brings each frame's chroma to the
+    level its burst says. The video stage measures the smear with Channel
+    Calibration on the stack itself (field 1 line 19 at the stage's input),
+    applies it just before processing, and notes it in `check.txt` and
+    `video.json`. Where it finds no smear, `smear_fraction` 0 passes every
+    frame unchanged. Volcanoes and National B have no Equalise: the guide's
+    calibration reads no smear on either. Neither does Dragon's Lair, since
+    the stage is PAL only.
 
   The Stacker stacks repeats (`still_frame_stacking`): a picture held over
   several frames is stacked across them as well as across the sets, which is
   most of what stacking gains on held pictures. It leaves `still_frame_search`
   (24), `luma_level_match` and `chroma_gain_match` (on) at decode-orc's
-  defaults. The video sink decodes by picture range, from the side's
-  `disc.conf`: `decoder_type` `multiple`, 3D on the motion sequences and 2D
-  on the stills, the ranges given by a person from the side's known content
-  (3D is about 1 dB better on held pictures and 2.7 dB worse on single-frame
-  stills). The schedule counts frames 0-based, and on these sides picture p
-  is frame p. A side that is motion throughout (National B, EcoDisc side 2,
-  Dragon's Lair) takes one 3D decoder on every frame. It writes:
+  defaults. The video sink's decoder comes from the side's `disc.conf`:
+  `decoder_type` `multiple`, 3D on the motion sequences and `palstill` on
+  the stills. `palstill` is decode-orc's PAL Still decoder, made for
+  single-frame stills: each frame is decoded from its own two fields as one
+  picture.
+  - **With manual ranges:** a person gives the ranges from the side's known
+    content. 3D is about 1 dB better on held pictures and 2.7 dB worse on
+    single-frame stills.
+  - **No ranges yet (the City discs):** the schedule is
+    `palstill, held:transform3d` for now. `held:` gives 3D the pictures the
+    Stacker finds held for at least 4 frames either side, and `palstill`
+    takes the rest.
+
+  The schedule counts frames 0-based, and on these sides picture p is frame
+  p. A side that is motion throughout (National B, EcoDisc side 2, Dragon's
+  Lair) takes one 3D decoder on every frame. It writes:
   - `<stem>.mkv`;
   - `metadata.yaml`, the disc metadata document taken from the mkv;
   - `video.json`: the container's figures, the metadata summary, each set's
@@ -1641,14 +1662,15 @@ inputs, so a re-run with nothing changed does nothing.
     the captures of both: a set is one capture, `DS1S2` being set DS1's
     capture of the second side. See [City Culture 1](#city-culture-1).
     The four are one stamper group, so the stacker runs without
-    `pressing_repair`, as on Volcanoes, and the video sink decodes every
-    frame with `transform2d`. There is no hand-built stack to compare with.
+    `pressing_repair`, as on Volcanoes, and the video sink decodes with
+    `palstill, held:transform3d`. There is no hand-built stack to compare
+    with.
   - **City Culture 2** (`city-culture2`, stem `city_culture2`): the two
     captures of the City Disc's Culture 2, decoded by
     `decode-city-culture2.sh`, which is `decode-city-culture1.sh` with this
     disc's set table and checks. The disc reads CAV side 2. See [City
     Culture 2](#city-culture-2). The two are one stamper group, so the
-    stack is Culture 1's, with `transform2d` throughout. Of the sectors its
+    stack is Culture 1's, with `palstill, held:transform3d`. Of the sectors its
     filesystem needs, 102 were recovered by one capture alone, so the VFS
     is accepted as complete rather than bit-perfect
     (`vfs.accept: single-source`, as on Countryside Side 2).
@@ -1657,7 +1679,7 @@ inputs, so a re-run with nothing changed does nothing.
     `decode-city-financial1.sh`, which is `decode-city-culture2.sh` with this
     disc's set table and checks. See [City Financial 1](#city-financial-1).
     With one source, the stack is Culture 2's without `pressing_repair`, and
-    gains only from repeats of held pictures; `transform2d` throughout. Every
+    gains only from repeats of held pictures; `palstill, held:transform3d`. Every
     sector its filesystem needs rests on the one capture, so the VFS is
     accepted as complete rather than bit-perfect
     (`vfs.accept: single-source`).
@@ -1666,7 +1688,7 @@ inputs, so a re-run with nothing changed does nothing.
     `decode-city-financial2.sh`, which is `decode-city-culture2.sh` with this
     disc's set table and checks. See [City Financial 2](#city-financial-2).
     The disc reads CAV side 2. The two are one stamper group, so the stack is
-    Culture 2's, with `transform2d` throughout. DS2's capture stops short of
+    Culture 2's, with `palstill, held:transform3d`. DS2's capture stops short of
     the end of the side, and neither reaches the lead-out, so its
     `disc.conf` says `DISC_LEAD_OUT=absent`: the video and pack checks then
     want the lead-in marked and no lead-out, and note why, where every other

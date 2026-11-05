@@ -164,8 +164,8 @@ The stages have changed in ways that matter here:
     4:3**, and the project sets it explicitly rather than relying on the
     default.
   - **Chroma decoder:** chosen per side, by content.
-    - `transform2d` for discs that are mostly still frames.
-    - `transform3d` for discs that are mostly motion.
+    - `palstill` (since 7995d1f; `transform2d` before) for still frames.
+    - `transform3d` for motion.
 
     A 3D decoder separates chroma using the frames on either side. On a disc
     of stills those neighbours are unrelated pictures, so it gains nothing
@@ -390,11 +390,16 @@ for every stage:
 
 **Two versions kept.** Each rev-named output (`ld-decode-<rev>`,
 `orc-<rev>`, `vfs-<rev>`, and the pack) keeps **the current version and the
-one before it**, and no more. When a stage finishes a new version, the
-oldest is deleted, leaving the new one and its predecessor. Deletion happens
-only after the new version has completed and been stamped. A failed or
-interrupted run never removes anything. `status` lists the versions held for
-each stage.
+one before it**, and no more. This covers the intermediate stages too:
+`set`, `map`, `compare`, `video` and `quality` all write into `orc-<rev>`.
+The current version is the one the run uses (for the pack, the one `pack`
+links to), and the previous one is the newest complete version before it.
+Every other version is deleted, complete or not, so a failed or interrupted
+attempt is cleared out as well. Pruning happens when a stage stamps a new
+version, and again over every output at the end of each `build-pack.sh` run
+that succeeds, even one that built nothing. A failed run never removes
+anything: its attempt stays for a person to look at until the next run that
+succeeds. `status` lists the versions held for each stage.
 
 Stamps chain, so no stage rehashes a multi-gigabyte output: a downstream stage
 sees a new key because an upstream stamp changed. `--force <stage>` reruns a
@@ -974,6 +979,9 @@ The stack template is filled in with the selected video sets. Its stages are:
 - Stack: `Weighted`, `reject_sigma` 5, `sample_align` on, audio `Mean`, EFM
   `Disabled`, `still_frame_stacking` on;
 - DOC: `match_chroma_phase` on;
+- Band: Picture Band Limit;
+- Equalise: Channel Equalise (since 7995d1f), on the CAV PAL sides with the
+  edge smear;
 - Video Out: `mkv-ffv1-bt601`, `display_aspect_ratio` `4:3`, the disc's
   chroma decoder, audio, chapters, disc metadata at `map` detail,
   `noise_reduction` 0, output `volcanoes_stack.mkv`.
@@ -989,15 +997,52 @@ The stack template is filled in with the selected video sets. Its stages are:
   defaults, so the projects do not store them.
 - **The decoder schedule.** Video Out takes the disc's `VIDEO_DECODER` and
   `VIDEO_DECODER_SCHEDULE`. A side with both motion and stills uses
-  `decoder_type` `multiple` with a schedule of picture ranges, 3D on the
-  motion sequences and 2D on the stills. The ranges are the side's known
-  content, given by a person, and replace the earlier
+  `decoder_type` `multiple`, with a schedule of picture ranges for the
+  motion sequences. The ranges are the side's known content, given by a
+  person, for the stills as well as the motion. They replace the earlier
   `transform2d, held:transform3d`, which let the stacker guess where a
-  picture was held. 3D is about 1 dB better on held pictures and 2.7 dB
-  worse on single-frame stills. The schedule counts the sink's frames
-  0-based; on a CAV side whose address map is one run with picture p on
-  frame p, the picture ranges are the frame ranges. The table below gives
-  each side's decoder.
+  picture was held: 3D is about 1 dB better on held pictures and 2.7 dB
+  worse on single-frame stills. Since decode-orc 7995d1f the stills ranges
+  and the default take `palstill` instead of `transform2d`. A side with no
+  ranges yet (the City discs) takes `palstill, held:transform3d` until a
+  person gives them. The schedule counts the
+  sink's frames 0-based; on a CAV side whose address map is one run with
+  picture p on frame p, the picture ranges are the frame ranges. The table
+  below gives each side's decoder.
+- **Since decode-orc 7995d1f (2026-11-05)**, the schedules follow
+  decode-orc's guide, Decoding the Domesday discs:
+  - **`palstill`** takes the stills, where `transform2d` did. It is the PAL
+    Still decoder, made for single-frame stills: it decodes each frame from
+    its own two fields as one picture. On videosynth's test stills its ΔE
+    is 3.48 on a town map, against 4.83 for `transform2d`. It is about 2.6
+    times slower than `transform2d`.
+  - The manual ranges stay as they were, with `palstill` in place of
+    `transform2d`.
+  - The City discs, which have no ranges yet, take
+    `palstill, held:transform3d`. `held:` is stricter than the guess the
+    old schedule made: it gives a frame to `transform3d` only where the
+    Stacker found the picture held for at least 4 frames either side, the
+    reach of the 3D filter.
+  - The guide's caveat: on a low-noise stack of many captures, `transform2d`
+    can be about 0.2 ΔE better on dense maps and fine-detail photographs.
+    That applies to Community North and South and National A. The guide
+    suggests comparing the two on a few dense map frames there.
+- **Channel Equalise (since 7995d1f).** The CAV PAL masters carry an edge
+  smear: a trail after each sharp edge, about a quarter of the step,
+  decaying over a third of a microsecond.
+  - "Equalise" goes after Band, where the guide puts it: after the Stacker
+    and Dropout Correction, beside Picture Band Limit.
+  - The video stage runs Channel Calibration on the stack just before
+    processing it, which reads field 1 line 19 at the stage's input. It
+    applies the result and notes it in `check.txt` and `video.json`.
+  - Where it finds no smear, `smear_fraction` 0 passes every frame
+    unchanged.
+  - Volcanoes and National B have no Equalise: the guide's calibration
+    reads no smear on either. Dragon's Lair has none either: the stage is
+    PAL only.
+  - A trial on City Financial 2's stack read 0.096 with a time constant of
+    4.83 samples, in one of its three windows. The guide gives about 0.24
+    and 6.1 for the Domesday sides.
 - **Noise reduction** stays off by default. The selection's owner may set
   `video.noise_reduction` (dB) in `selection.yaml`; it is applied in
   `still_only` mode, which averages only across held frames and has no
@@ -1012,17 +1057,17 @@ programme.
 
 | Disc / side | Content | Decoder |
 | --- | --- | --- |
-| Volcanoes | Motion, then stills (AIV still-frame sets) | By picture: `transform3d` 1–46750 and 47601–49200, `transform2d` 46751–47600 and 49201–54000 |
-| Domesday National A | Stills (photos, maps, surrogate walks), with motion at each end | By picture: `transform3d` 1–801 and 40841–54000, `transform2d` 802–40840 |
-| Domesday Community North | The same | By picture: `transform3d` 1–3200 and 44381–54000, `transform2d` 3201–44380 |
-| Domesday Community South | The same | By picture: `transform3d` 1–3200 and 44981–54000, `transform2d` 3201–44980 |
+| Volcanoes | Motion, then stills (AIV still-frame sets) | By picture: `transform3d` 1–46750 and 47601–49200, `palstill` 46751–47600 and 49201–54000 |
+| Domesday National A | Stills (photos, maps, surrogate walks), with motion at each end | By picture: `transform3d` 1–801 and 40841–54000, `palstill` 802–40840 |
+| Domesday Community North | The same | By picture: `transform3d` 1–3200 and 44381–54000, `palstill` 3201–44380 |
+| Domesday Community South | The same | By picture: `transform3d` 1–3200 and 44981–54000, `palstill` 3201–44980 |
 | Domesday National B | Motion (the CLV side) | `transform3d` on every frame |
-| EcoDisc side 1 | Motion, with still sections | By picture: `transform3d` 1–4750, 6649–53520 and 53551–53800, `transform2d` 4751–6648, 53521–53550 and 53801–54000 |
+| EcoDisc side 1 | Motion, with still sections | By picture: `transform3d` 1–4750, 6649–53520 and 53551–53800, `palstill` 4751–6648, 53521–53550 and 53801–54000 |
 | EcoDisc side 2 | A TV programme (motion) | `transform3d` |
-| City (both sides) | Likely mostly stills | `transform2d` |
+| City (all four discs) | Likely mostly stills | `palstill, held:transform3d`, until ranges are given |
 | North Polar | Mostly motion | `transform3d` |
-| Countryside side 1 | Motion, with a still section | By picture: `transform3d` 1–5999 and 11500–54085, `transform2d` 6000–11499 |
-| Countryside side 2 | Stills, with motion at each end | By picture: `transform3d` 1–850 and 31001–51000, `transform2d` 851–31000 |
+| Countryside side 1 | Motion, with a still section | By picture: `transform3d` 1–5999 and 11500–54085, `palstill` 6000–11499 |
+| Countryside side 2 | Stills, with motion at each end | By picture: `transform3d` 1–850 and 31001–51000, `palstill` 851–31000 |
 
 This is a content decision, not a measurement. It is confirmed by a person
 when a disc is added, and recorded in its configuration.
@@ -1955,7 +2000,7 @@ sets. The disc is single-sided. It is the last City disc, so
 | Question | Decision |
 | --- | --- |
 | Display aspect | 4:3 |
-| Chroma decoder | Per side (phase 5 table): `transform3d` on every frame for Domesday National B, EcoDisc side 2 and North Polar; by known picture ranges for Volcanoes, EcoDisc side 1, both Countryside sides, National A and Community North and South; `transform2d` for every other side |
+| Chroma decoder | Per side (phase 5 table): `transform3d` on every frame for Domesday National B, EcoDisc side 2 and North Polar; by known picture ranges (`transform3d` on the motion, `palstill` on the stills) for Volcanoes, EcoDisc side 1, both Countryside sides, National A and Community North and South; `palstill, held:transform3d` for the City discs until their ranges are given |
 | Library access | Read-only, never written; all output and r/w goes to the decodes share |
 | Choosing sets and removing outliers | Decided by a person from the phase 4 results, then committed; the scripts are not dynamic |
 | Outputs per title | One emulation output per AIV title (one stem per side); outlier sets are dropped, never made into a second output |

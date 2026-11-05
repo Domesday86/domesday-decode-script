@@ -2,13 +2,14 @@
 # Version: 2.0
 #
 # Community North, the video stack: the sets selection.yaml chooses for the
-# video, in its order, each through a Frame Map and an FM Beat Cancel, all
-# into one Source Align, then the Stacker, Dropout Correction, Picture Band
-# Limit and the video sink that writes the pack's mkv. build-pack.sh's video
-# stage copies this beside its outputs, points each source at its set's
-# decode, sets each frame map and the alignment from the committed
-# discs/community-north/framemaps/ (made by the map stage), and processes it.
-# Nothing here is refreshed, so the stack is built from the reviewed maps.
+# video, in its order, each through a Frame Map and an FM Beat Cancel, all into
+# one Source Align, then the Stacker, Dropout Correction, Picture Band Limit,
+# Channel Equalise and the video sink that writes the pack's mkv.
+# build-pack.sh's video stage copies this beside its outputs, points each
+# source at its set's decode, sets each frame map and the alignment from the
+# committed discs/community-north/framemaps/ (made by the map stage), and
+# processes it. Nothing here is refreshed, so the stack is built from the
+# reviewed maps.
 #
 # Each source is labelled with its set id and its frame map "<set> map", as in
 # map.orcprj. The sources must be the video sets of selection.yaml, in the
@@ -38,6 +39,14 @@
 #   (framemaps/picture-band), measured between captures of different stamper
 #   families. The video stage sets cutoff_mhz from it; rolloff_mhz stays 0.4.
 #   Chroma is untouched.
+# - "Equalise", Channel Equalise, after Band, where the decode-orc guide
+#   (Decoding the Domesday discs) puts it: after the Stacker and Dropout
+#   Correction, since its inverse filter spreads each sample over the next few.
+#   It removes the edge smear the CAV masters carry and brings each frame's
+#   chroma to the level its burst says. The video stage sets smear_fraction and
+#   smear_tau_samples with Channel Calibration, run on this stack (field 1 line
+#   19 at the stage's input) just before it is processed. Where it finds no
+#   smear, smear_fraction 0 passes every frame unchanged.
 
 project:
   name: Community North stack
@@ -485,7 +494,7 @@ dag:
           value: multiple
         decoder_schedule:
           type: string
-          value: transform2d, 1-3200:transform3d, 3201-44380:transform2d, 44381-54000:transform3d
+          value: palstill, 1-3200:transform3d, 3201-44380:palstill, 44381-54000:transform3d
         display_aspect_ratio:
           type: string
           value: 4:3
@@ -654,6 +663,20 @@ dag:
         rolloff_mhz:
           type: double
           value: 0.4
+    - id: 39
+      stage: channel_equalise
+      node_type: TRANSFORM
+      display_name: Channel Equalise
+      user_label: Equalise
+      x: 1100
+      y: 150
+      parameters:
+        smear_fraction:
+          type: double
+          value: 0
+        smear_tau_samples:
+          type: double
+          value: 6.1
   edges:
     - from: 1
       to: 12
@@ -728,4 +751,6 @@ dag:
     - from: 37
       to: 23
     - from: 38
+      to: 39
+    - from: 39
       to: 26

@@ -286,18 +286,35 @@ stage_versions() {
   done | sort -rn
 }
 
-# stage_prune <parent> <prefix> <marker>: delete every complete version but the
-# newest two. Run only after a new version has been stamped, so a failed or
-# interrupted run never removes anything. Incomplete versions are left alone
-# for a person to look at; status lists them.
+# stage_prune <parent> <prefix> <marker> [<current>]: keep the current version
+# and the newest complete one before it, and delete every other version,
+# complete or not -- a failed or interrupted attempt included. <current> is
+# the version a run is using, which is kept even if it is not complete yet;
+# it defaults to the newest complete version, as it does when <current> has
+# not been made. Run only once a run has succeeded, so a failed run never
+# removes anything: its attempt stays for a person to look at until the next
+# run that succeeds. With no version to keep, nothing is removed.
 stage_prune() {
-  local parent="$1" prefix="$2" marker="$3" n=0 t d
+  local parent="$1" prefix="$2" marker="$3" current="${4:-}" previous="" t d
+  current="${current%/}"
+  [ -z "$current" ] || [ -d "$current" ] || current=""
   while read -r t d; do
-    n=$(( n + 1 ))
-    [ "$n" -gt 2 ] || continue
+    if [ -z "$current" ]; then current="$d"
+    elif [ "$d" != "$current" ]; then previous="$d"; break
+    fi
+  done < <(stage_versions "$parent" "$prefix" "$marker")
+  [ -n "$current" ] || return 0
+  for d in "$parent/$prefix"-*/; do
+    d="${d%/}"
+    [ -d "$d" ] && [ ! -L "$d" ] || continue
+    [ "$d" != "$current" ] && [ "$d" != "$previous" ] || continue
     stage_guard "$d" || return 1
     case "${d##*/}" in "$prefix"-*) ;; *) return 1 ;; esac
-    printf 'removing old version %s (stamped %s)\n' "$d" "$(date -d "@$t" 2>/dev/null || date -r "$t")"
+    if t=$(stage_stamp_field "$(dirname -- "$d/$marker")" stamped); then
+      printf 'removing old version %s (stamped %s)\n' "$d" "$(date -d "@$t" 2>/dev/null || date -r "$t")"
+    else
+      printf 'removing incomplete version %s (never stamped)\n' "$d"
+    fi
     rm -rf -- "$d"
-  done < <(stage_versions "$parent" "$prefix" "$marker")
+  done
 }

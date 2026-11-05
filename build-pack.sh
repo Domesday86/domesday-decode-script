@@ -305,6 +305,14 @@ has_band() {
   [ -f "$1" ] && [ "$(yq -r '[.dag.nodes[] | select(.stage == "picture_band_limit" and .user_label == "Band")] | length' "$1")" = 1 ]
 }
 
+# has_equalise <project>: whether the project has a Channel Equalise,
+# "Equalise", which the video stage sets with Channel Calibration on the stack
+# itself, just before processing it. A CAV PAL side whose masters carry the
+# edge smear has one, after Dropout Correction and beside Band.
+has_equalise() {
+  [ -f "$1" ] && [ "$(yq -r '[.dag.nodes[] | select(.stage == "channel_equalise" and .user_label == "Equalise")] | length' "$1")" = 1 ]
+}
+
 STACK_PROJECT="$DISC_DIR/stack.orcprj"
 
 # stack_problems: what is wrong with stack.orcprj for the selection, one line
@@ -1581,7 +1589,7 @@ run_video() {
   local state
   ( build_video ) || die "video: failed (above)"
   state=$(unit_state video) || die "video: still $state after building"
-  stage_prune "$OUT" orc video/stage.stamp
+  stage_prune "$OUT" orc video/stage.stamp "$OUT/$ORC_DIR"
 }
 
 # single_project <stack project> <vbi dir>: the stack project cut back to its
@@ -1685,6 +1693,22 @@ build_video() {
   fi
 
   cd -- "$dir" || return 1
+  # The edge smear, measured by Channel Calibration on the stack as it now
+  # stands: field 1 line 19 at Equalise's input, after the Stacker and Dropout
+  # Correction, over 48 frames at the inner, middle and outer radius. It sets
+  # smear_fraction and smear_tau_samples, or smear_fraction 0, which passes
+  # every frame unchanged, where it finds no smear.
+  if has_equalise stack.orcprj; then
+    t=$SECONDS
+    if ! orc-cli tools run stack.orcprj channel_calibration --node Equalise --apply --json --quiet \
+           > channel-calibration.json 2> channel-calibration.log \
+         || [ "$(jq -r '.nodes[0].status' channel-calibration.json 2>/dev/null)" != success ]; then
+      printf 'video: Channel Calibration failed (%s/channel-calibration.log)\n' "$dir" >&2
+      return 1
+    fi
+    printf 'video: Channel Calibration in %ss: %s\n' "$(( SECONDS - t ))" \
+      "$(jq -r '.nodes[0].summary | split("\n")[0]' channel-calibration.json)"
+  fi
   printf 'video: stacking %s (alignment %s), decoder %s%s, noise reduction %s dB; progress is in %s/stack.log\n' \
     "$(selected_sets video | paste -sd' ' -)" "$map" "$VIDEO_DECODER" "${VIDEO_DECODER_SCHEDULE:+ ($VIDEO_DECODER_SCHEDULE)}" \
     "$(video_noise_reduction)" "$dir"
@@ -1737,6 +1761,16 @@ check_video() {
     done
     ! has_band "$dir/stack.orcprj" \
       || note "Picture Band Limit: luma cut at $(yq -r '.dag.nodes[] | select(.user_label == "Band") | .parameters.cutoff_mhz.value' "$dir/stack.orcprj") MHz$([ "$(cat -- "$FRAMEMAPS/picture-band")" != none ] || printf ' (the default: the map stage measured no band)')"
+    if has_equalise "$dir/stack.orcprj"; then
+      # As Channel Calibration set it, with the windows it fitted.
+      jq -r --slurpfile p <(yq -o=json '.dag.nodes[] | select(.user_label == "Equalise") | .parameters' "$dir/stack.orcprj") '
+        .nodes[0] as $n | $p[0] as $p
+        | ([ $n.items[]? | select(.type == "window") ] | "\([ .[] | select(.message | startswith("smear")) ] | length) of \(length) windows read a smear") as $w
+        | if $p.smear_fraction.value == 0
+          then "Channel Equalise: no edge smear (\($w)); smear_fraction 0 passes every frame unchanged"
+          else "Channel Equalise: edge smear \($p.smear_fraction.value), time constant \($p.smear_tau_samples.value) samples (\($w), \($n.statistics.framesUsed) frames)" end' \
+        "$dir/channel-calibration.json" 2>/dev/null | while IFS= read -r line; do note "$line"; done
+    fi
 
     if [ "$rc" = 0 ] && grep -q 'VideoSink: Successfully wrote' "$dir/stack.log" 2>/dev/null; then
       ok "the stack was processed: $(sed -n 's/.*VideoSink: Successfully wrote \([0-9]*\) frames.*/\1/p' "$dir/stack.log" | tail -1) frames written"
@@ -1821,12 +1855,16 @@ check_video() {
 
     # Everything the pack's provenance (phase 7) takes from this stage.
     jq -n --args --slurpfile probe "$dir/probe.json" --slurpfile weights "$dir/weights.json" \
+          --argjson equalise "$(if has_equalise "$dir/stack.orcprj"; then
+              yq -o=json '.dag.nodes[] | select(.user_label == "Equalise") | .parameters | map_values(.value)' "$dir/stack.orcprj"
+            else echo null; fi)" \
           --rawfile meta "$dir/metadata-check.json" --rawfile base "${base:-/dev/null}" \
           --arg decoder "$VIDEO_DECODER" --arg schedule "${VIDEO_DECODER_SCHEDULE:-}" \
           --argjson nr "$(video_noise_reduction)" --argjson frames "$frames" --argjson keys "$keys" \
           --arg baseline "${VIDEO_BASELINE:-}" '
       { sets: $ARGS.positional, decoder: $decoder, decoder_schedule: (if $schedule == "" then null else $schedule end),
         noise_reduction: { db: $nr, mode: "still_only" },
+        channel_equalise: $equalise,
         container: ($probe[0] | { format: .format.format_name, tags: .format.tags,
                                   streams: [ .streams[] | del(.tags.filename, .tags.mimetype) ] })
                    + { packets: $frames, keyframes: $keys },
@@ -2001,7 +2039,7 @@ run_vfs() {
   has_efm || die "vfs: the side has no EFM (DISC_EFM=no), so there is no image to stack"
   ( build_vfs ) || die "vfs: failed (above)"
   state=$(unit_state vfs) || die "vfs: still $state after building"
-  stage_prune "$OUT" vfs stage.stamp
+  stage_prune "$OUT" vfs stage.stamp "$OUT/$VFS_DIR"
 }
 
 build_vfs() {
@@ -2929,6 +2967,24 @@ pack_link() {
     && printf 'pack -> %s, the current pack\n' "${STAGE_DIR##*/}"
 }
 
+# prune_versions: once a run has succeeded, take every versioned output of the
+# disc -- each set's decodes, the orc-<rev> and vfs-<rev> versions (sets, map,
+# compare, video and quality live in orc-<rev>) and the packs -- down to the
+# version this run uses and the one before it (stage_prune). A stage prunes
+# its own outputs when it stamps a new version; this catches the rest, so a
+# run that built nothing still clears out an earlier failed attempt.
+prune_versions() {
+  local id current=""
+  for id in $(set_ids); do
+    [ -d "$OUT/$id" ] || continue
+    stage_prune "$OUT/$id" ld-decode stage.stamp "$OUT/$(set_decode "$id")" || return 1
+  done
+  stage_prune "$OUT" orc video/stage.stamp "$OUT/$ORC_DIR" || return 1
+  ! has_efm || stage_prune "$OUT" vfs stage.stamp "$OUT/$VFS_DIR" || return 1
+  [ ! -L "$OUT/pack" ] || current="$OUT/$(readlink -- "$OUT/pack")"
+  stage_prune "$OUT" pack stage.stamp "$current"
+}
+
 verify_tool() {
   local t input pkg cmd problem
   t=$(stage_tool "$1") || return 0
@@ -2973,3 +3029,6 @@ done
 
 # The current pack, once the run has reached it and it is up to date.
 [ "$UNTIL_I" -lt "$(stage_index pack)" ] || pack_link
+
+# The run has succeeded: keep only the current and previous versions.
+prune_versions || die "could not prune the old versions"

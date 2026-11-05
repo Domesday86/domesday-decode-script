@@ -33,15 +33,18 @@
 #   (framemaps/picture-band), measured between captures of different stamper
 #   families. The video stage sets cutoff_mhz from it; rolloff_mhz stays 0.4.
 #   Chroma is untouched.
+# - No Channel Equalise: the decode-orc guide's Channel Calibration reads no
+#   edge smear on Volcanoes, and the guide leaves the stage out there.
 #
 # The Stacker stacks repeats (still_frame_stacking): a picture held over
 # several frames is stacked across them as well as across the sets, which is
 # most of what stacking gains on held pictures. still_frame_search,
 # luma_level_match and chroma_gain_match are left to decode-orc's defaults (24
 # frames, on, on). The video sink decodes by picture range, 3D on the side's
-# motion sequences and 2D on its stills (decoder_type multiple, the
-# decoder_schedule below; disc.conf gives the ranges). build-pack.sh sets the
-# decoder from disc.conf, so the two are the same.
+# motion sequences and palstill, the PAL Still decoder, on its stills
+# (decoder_type multiple, the decoder_schedule below; disc.conf gives the
+# ranges). build-pack.sh sets the decoder from disc.conf, so the two are the
+# same.
 
 project:
   name: Volcanoes stack
@@ -303,7 +306,7 @@ dag:
           value: multiple
         decoder_schedule:
           type: string
-          value: transform2d, 1-46750:transform3d, 46751-47600:transform2d, 47601-49200:transform3d, 49201-54000:transform2d
+          value: palstill, 1-46750:transform3d, 46751-47600:palstill, 47601-49200:transform3d, 49201-54000:palstill
         display_aspect_ratio:
           type: string
           value: 4:3

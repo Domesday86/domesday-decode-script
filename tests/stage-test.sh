@@ -106,9 +106,19 @@ mkdir -p "$P/tool-0"   # incomplete: no stamp
 stage_prune "$P" tool stage.stamp >/dev/null
 check "pruning keeps the newest two complete versions" [ -d "$P/tool-3" ] && [ -d "$P/tool-2" ]
 check "and removes the oldest" [ ! -e "$P/tool-1" ]
-check "and leaves an incomplete one alone" [ -d "$P/tool-0" ]
+check "and removes an incomplete one" [ ! -e "$P/tool-0" ]
 stage_prune "$P" tool stage.stamp >/dev/null
 check "pruning again removes nothing more" [ -d "$P/tool-3" ] && [ -d "$P/tool-2" ]
+mkdir -p "$P/tool-4"   # the run's current version, not complete yet
+stage_prune "$P" tool stage.stamp "$P/tool-4" >/dev/null
+check "a current version is kept, incomplete, with the newest complete one" [ -d "$P/tool-4" ] && [ -d "$P/tool-3" ]
+check "and the one before that goes" [ ! -e "$P/tool-2" ]
+stage_prune "$P" tool stage.stamp "$P/tool-9" >/dev/null
+check "a current version not made yet counts as none: the newest complete one stays" [ -d "$P/tool-3" ]
+check "and the incomplete one, no longer current, goes" [ ! -e "$P/tool-4" ]
+E="$T/none"; mkdir -p "$E/tool-0"
+stage_prune "$E" tool stage.stamp >/dev/null
+check "with nothing complete and no current version, nothing is removed" [ -d "$E/tool-0" ]
 
 # --- dated versions --------------------------------------------------------
 
