@@ -18,13 +18,8 @@
     # are built and tested against those, and nothing here links against
     # them, so sharing one would save closure size at the cost of building
     # them against a nixpkgs neither project has tried.
-    #
-    # decode-orc follows the branch 20261105-002 for now, which has the fix
-    # for decode-orc#368, rather than main; `nix flake update decode-orc`
-    # takes the branch's latest commit. Go back to main once the fix is
-    # merged.
     decode-orc = {
-      url = "github:decode-orc/decode-orc/20261105-002";
+      url = "github:decode-orc/decode-orc";
       inputs.flake-utils.follows = "ld-decode/flake-utils";
     };
     vfs-verifier = {
