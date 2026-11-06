@@ -12,15 +12,16 @@
         "videosynth": "videosynth"
       },
       "locked": {
-        "lastModified": 1793900852,
-        "narHash": "sha256-E3fCGJvkLxAoDbnl+KIqYep7bkTeuqxF+08r3Lnbugw=",
+        "lastModified": 1793913078,
+        "narHash": "sha256-reSHsLJlhlZ5gYliTts/xH7x5Z/wFFFvG3F65i2AOrM=",
         "owner": "decode-orc",
         "repo": "decode-orc",
-        "rev": "30d9506caf3a405dd6b3f4ec341d09d8a23894f0",
+        "rev": "9d7b88309852052a6a7f07a040077ca372b217fb",
         "type": "github"
       },
       "original": {
         "owner": "decode-orc",
+        "ref": "20261105-002",
         "repo": "decode-orc",
         "type": "github"
       }
