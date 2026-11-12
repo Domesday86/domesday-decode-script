@@ -1,0 +1,31 @@
+# North Polar Expedition: which sets go into the video stack, decided from
+# the compare stage's report (orc-<rev>/compare/report.txt) as described in
+# docs/emulator-pack-plan.md, phase 4. The video lists its sets the
+# suggested reference first (it sets the stacker's sample grid), then by
+# what each adds. Every mapped set the stack leaves out goes under dropped,
+# with a reason. The side has no EFM (disc.conf, DISC_EFM=no), so there is
+# no VFS stack and no vfs section.
+#
+# The evidence (orc-dbd9f77, 2026-11-09): one version of the disc, from two
+# copies of it. Both sets' Disc Mappers read the same disc identity (CAV side
+# 1, user code none, CX off, Amendment 2 present, sound bilingual). DS2 reads
+# pictures 1-54348 with the lead-in and lead-out; DS1 pictures 1-51438, with
+# neither. Source Alignment finds one stamper group, A = DS1 DS2, and both
+# sets' picture numbers on their content. With two sets it measures no 5-6
+# MHz response. Its noise model predicts σ 3.22 for the Weighted stack of
+# both, against 4.55 for either alone.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS2 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid), with about half DS1's dropouts (566671 against
+  # 1053750), fewer padding frames (23 against 69) and fewer disagreeing
+  # picture numbers (22 against 59), and the whole side: DS1 stops at
+  # picture 51438, so DS2 alone gives the last 2910 pictures and the
+  # lead-out. Then DS1, which brings the stack from σ 4.55 to 3.22 wherever
+  # it covers. With two sources the Stacker has no differential dropout
+  # detection, and where the two disagree on a field it keeps both and
+  # marks the field as dropout for Dropout Correction to repair.
+  sets: [DS2, DS1]
+  dropped: []

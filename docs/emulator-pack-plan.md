@@ -160,9 +160,19 @@ The stages have changed in ways that matter here:
   - `luma_nr`/`chroma_nr` have been replaced by `noise_reduction` (dB, default
     0). It stays 0 for an emulator pack, so the pack is the stacked signal
     with nothing added.
-  - The `display_aspect_ratio` default moved from `auto` to `4:3`. **Packs are
-    4:3**, and the project sets it explicitly rather than relying on the
+  - The `display_aspect_ratio` default moved from `auto` to `4:3`. Packs
+    were 4:3 until decode-orc 6e8e467 (2026-11-12): `4:3` puts the whole
+    720-wide frame, blanking margins and all, into 4:3, which leaves the
+    picture about 2.5% too narrow. **Packs now take `auto`**, as decode-orc's
+    LaserDisc Emulation Formats require: the BT.601 sample aspect ratio,
+    128:117 on 625-line and 1936:2133 on 525-line, which displays the
+    analogue active line (702 or 711 samples) at 4:3, so a circle is a
+    circle. The projects set it explicitly rather than relying on the
     default.
+  - `mkv-h264` ("H.264 for VP415e", since decode-orc 6e8e467) is the lossy
+    companion: the same grid, aspect, frames and disc metadata, in H.264
+    High 4:2:0 with a one-second closed GOP and AAC audio. Every pack carries
+    it as `<stem>-lossy.mkv`, from a second video sink, Video Out Lossy.
   - **Chroma decoder:** chosen per side, by content.
     - `palstill` (since 7995d1f; `transform2d` before) for still frames.
     - `transform3d` for motion.
@@ -175,7 +185,7 @@ I probed the hand-built `vp415e_projects/Volcanoes_output/volcanoes_stack.mkv`
 (made with `auto` aspect and `transform3d`). It is FFV1 720×576, `yuv422p`
 8-bit, 25/1 fps, with every packet a keyframe, 48 kHz 24-bit stereo FLAC, and
 the metadata attachment. That is exactly what vp415e accepts, so no re-encode
-is needed. Phase 5 also checks that the 4:3 flag is present and that the
+is needed. Phase 5 also checks the sample aspect ratio (now 128:117) and that the
 coded size is still 720×576.
 
 ### vfs-stacker and vfs-verifier
@@ -982,7 +992,8 @@ The stack template is filled in with the selected video sets. Its stages are:
 - Band: Picture Band Limit;
 - Equalise: Channel Equalise (since 7995d1f), on the CAV PAL sides with the
   edge smear;
-- Video Out: `mkv-ffv1-bt601`, `display_aspect_ratio` `4:3`, the disc's
+- Video Out: `mkv-ffv1-bt601`, `display_aspect_ratio` `auto` (`4:3` before
+  decode-orc 6e8e467), the disc's
   chroma decoder, audio, chapters, disc metadata at `map` detail,
   `noise_reduction` 0, output `volcanoes_stack.mkv`.
 
@@ -1093,7 +1104,8 @@ do not. The stamp covers:
 **Checks** (vp415e's load-time rules, plus coverage):
 - **Container:**
   - FFV1, `yuv422p`, 8-bit, 720×576, exactly 25/1;
-  - a 4:3 display aspect, with the coded size still 720×576;
+  - the BT.601 sample aspect, 128:117 (16:15 for 4:3 before decode-orc
+    6e8e467), with the coded size still 720×576;
   - every packet a keyframe, counted across the whole stream;
   - audio is 48 kHz FLAC.
 - **Metadata attachment.** `check-disc-metadata.py` implements the spec's
@@ -2074,7 +2086,7 @@ carries no EFM, so each side is built as a video-only pack, the mkv alone.
 
 | Question | Decision |
 | --- | --- |
-| Display aspect | 4:3 |
+| Display aspect | The analogue active line at 4:3: `display_aspect_ratio` `auto`, sample aspect 128:117 (PAL) or 1936:2133 (NTSC), since decode-orc 6e8e467; 4:3 over the whole frame before |
 | Chroma decoder | Per side (phase 5 table): `transform3d` on every frame for Domesday National B, EcoDisc side 2 and North Polar; by known picture ranges (`transform3d` on the motion, `palstill` on the stills) for Volcanoes, EcoDisc side 1, both Countryside sides, National A and Community North and South; `palstill, held:transform3d` for the City discs until their ranges are given; on NTSC, `ntsc3d` for Dragon's Lair and `ntsc2d, held:ntsc3d` for both Apple Visual Almanac sides |
 | Library access | Read-only, never written; all output and r/w goes to the decodes share |
 | Choosing sets and removing outliers | Decided by a person from the phase 4 results, then committed; the scripts are not dynamic |

@@ -1,0 +1,29 @@
+# Apple Visual Almanac side A: which sets go into the video stack, decided
+# from the compare stage's report (orc-<rev>/compare/report.txt) as
+# described in docs/emulator-pack-plan.md, phase 4. The video lists its sets
+# the suggested reference first (it sets the stacker's sample grid), then by
+# what each adds. Every mapped set the stack leaves out goes under dropped,
+# with a reason. The side has no EFM (disc.conf, DISC_EFM=no), so there is
+# no VFS stack and no vfs section.
+#
+# The evidence (orc-dbd9f77, 2026-11-09): one version of the disc. Every
+# set's Disc Mapper reads the same disc identity over the whole side (CAV
+# side 1, user code 1315, CX off, Amendment 2 present, sound bilingual,
+# pictures 1-50683, lead-in and lead-out seen). Source Alignment finds one
+# stamper group, A = DS1 DS2 DS3, and every set's picture numbers on its
+# content. Its noise model predicts σ 1.29 for the Weighted stack of all
+# three.
+
+pressing: A    # the content version: every set is one
+
+video:
+  # DS3 first: the compare report's suggested reference (it sets the
+  # stacker's sample grid). Then by what each adds, the predicted stack σ
+  # without it, and its share of the weight: DS1 1.78 (48%), DS2 1.31 (3%).
+  # DS2 is soft (5-6 MHz response 0.04), but the Weighted stack gives it 3%
+  # of the weight, so it barely blurs the picture. It is kept as the third
+  # source: with two, the Stacker has no differential dropout detection and
+  # no majority to leave out a field that disagrees, and DS2 has the fewest
+  # dropouts of the three (12658, against 29585 and 33277).
+  sets: [DS3, DS1, DS2]
+  dropped: []

@@ -47,6 +47,15 @@
 #   smear_tau_samples with Channel Calibration, run on this stack (field 1 line
 #   19 at the stage's input) just before it is processed. Where it finds no
 #   smear, smear_fraction 0 passes every frame unchanged.
+#
+# Two video sinks write the same stack, one after the other: Video Out the
+# pack's lossless mkv (mkv-ffv1-bt601), and Video Out Lossy its lossy
+# <stem>-lossy.mkv (mkv-h264, as decode-orc's H.264 for VP415e preset: CRF
+# 20, encoder preset slow). Everything else about the two is the same, and
+# build-pack.sh sets both from disc.conf and the selection alike. Both take
+# display_aspect_ratio auto, as decode-orc's LaserDisc Emulation Formats
+# require: the BT.601 sample aspect ratio, which displays the analogue active
+# line at 4:3 (128:117 on 625-line), so the blanking margins show as margins.
 
 project:
   name: Community North stack
@@ -497,7 +506,7 @@ dag:
           value: palstill, 1-3200:transform3d, 3201-44380:palstill, 44381-54000:transform3d
         display_aspect_ratio:
           type: string
-          value: 4:3
+          value: auto
         noise_reduction:
           type: double
           value: 0
@@ -677,6 +686,68 @@ dag:
         smear_tau_samples:
           type: double
           value: 6.1
+    - id: 40
+      stage: video_sink
+      node_type: SINK
+      display_name: Video Sink
+      user_label: Video Out Lossy
+      x: 1175
+      y: 200
+      parameters:
+        output_path:
+          type: string
+          value: ""
+        output_mode:
+          type: string
+          value: ffmpeg
+        ffmpeg_format:
+          type: string
+          value: mkv-h264
+        decoder_type:
+          type: string
+          value: multiple
+        decoder_schedule:
+          type: string
+          value: palstill, 1-3200:transform3d, 3201-44380:palstill, 44381-54000:transform3d
+        display_aspect_ratio:
+          type: string
+          value: auto
+        noise_reduction:
+          type: double
+          value: 0
+        chroma_gain:
+          type: double
+          value: 1
+        chroma_phase:
+          type: double
+          value: 0
+        embed_audio:
+          type: bool
+          value: true
+        audio_channel_pairs:
+          type: string
+          value: all
+        audio_gain_db:
+          type: double
+          value: 0
+        embed_chapter_metadata:
+          type: bool
+          value: true
+        embed_disc_metadata:
+          type: bool
+          value: true
+        disc_metadata_detail:
+          type: string
+          value: map
+        video_filter:
+          type: string
+          value: ""
+        encoder_crf:
+          type: int32
+          value: 20
+        encoder_preset:
+          type: string
+          value: slow
   edges:
     - from: 1
       to: 12
@@ -754,3 +825,5 @@ dag:
       to: 39
     - from: 39
       to: 26
+    - from: 39
+      to: 40

@@ -1061,6 +1061,24 @@ content, so the output opens eight and nine frames into the decode, and a
 two-frame run writes an empty file — which the script reports as a failure
 rather than a decode. `--frames 30` clears it on every capture.
 
+### Countryside DS3's picture numbers
+
+On both sides DS3 labels every picture one lower than the other four captures
+do: its frame labelled *n* holds the picture they label *n* + 1. It is the
+same capture chain on both — soft (5–6 MHz response 0.09) and a sample off
+the others' grid — so the offset is the capture's, not the disc's. Source
+Alignment places the sets by picture number, so it puts DS3 a frame early,
+and since decode-orc dbd9f77 its content check reports it (`labels its
+pictures 1 lower than the others (-1)`, over every output frame). Each
+side's `disc.conf` names it, `CONTENT_OFFSETS="DS3:-1"`, and
+`build-pack.sh`'s map stage gives DS3 one more frame of padding than Source
+Alignment does, so its pictures land on the others'. The map check wants the
+content check to report exactly that offset: if a later decode or decode-orc
+finds DS3 on its content, or any other set off, the stage fails until
+`CONTENT_OFFSETS` is corrected. DS3 is in neither side's video stack (it is
+soft; see each `selection.yaml`), so the correction places it correctly in
+the map and compare stages and for any stack that takes it later.
+
 ## Decoding the North Polar Expedition disc
 
 `decode-north-polar.sh` decodes the PAL **North Polar Expedition** disc (Virgin
@@ -1117,15 +1135,18 @@ removal](#player-spur-removal).
 
 ### How far the captures reach
 
-Neither capture reaches the lead-out: each is still reading pictures on its
-last frame. **DS2 runs to picture 54348**, as its file name says, past the
-54,000 a CAV side usually holds. **DS1 stops on picture 51438**, one past its
-name, while the disc goes on, so DS2 alone covers the last 2,910 pictures. A
+**DS2 runs to picture 54348**, as its file name says, past the 54,000 a CAV
+side usually holds, and reaches the lead-out: on its ld-decode 1e8f04a decode
+the two frames after picture 54348 carry the lead code, and the Disc Mapper
+reads them as the lead-out (an earlier reading of the capture's end had it
+still reading pictures on its last frame). **DS1 stops on picture 51438**, one
+past its name, while the disc goes on, so DS2 alone covers the last 2,910
+pictures and the lead-out. A
 finished decode's frame count is checked against the last picture its file
 name gives, as on EcoDisc's first side. The VBI reads CAV side 1, 12 inch,
 Amendment 2 present, sound mode bilingual, on both captures, which is what
-`discs/north-polar/disc.conf` asks the pack's metadata to say, with no
-lead-out (`DISC_LEAD_OUT=absent`).
+`discs/north-polar/disc.conf` asks the pack's metadata to say, with the
+lead-in and lead-out both marked (`DISC_LEAD_OUT=seen`).
 
 ### Everything else
 
@@ -1310,8 +1331,25 @@ Disc Mapper to sort out. Decoding the six took two hours, both sides at once.
 
 `build-pack.sh <disc>` takes a disc from its captures to the `<stem>.mkv`,
 `<stem>.dat` and `<stem>.dat.bsm` the [VP415e](https://github.com/Domesday86/vp415e)
-emulator loads. It works stage by stage, and each stage keeps a stamp of its
+emulator loads, and `<stem>-lossy.mkv`, the same video in H.264 at a fraction
+of the size, for a player that would rather have that than the lossless
+`<stem>.mkv`. It works stage by stage, and each stage keeps a stamp of its
 inputs, so a re-run with nothing changed does nothing.
+
+`build-all.sh` builds every disc's pack in one command, one disc after
+another, PAL first and NTSC last (the order is `ORDER` in the script, which
+must name every disc in `discs/`). A disc that fails does not stop the rest
+unless `--stop` is given, and a run picks up wherever the last one stopped.
+Each run logs to `build-all/<date>/` on the decodes share: `<disc>.log` per
+disc and `summary.txt`, which it also prints. On macOS it keeps the machine
+awake until it ends.
+
+```bash
+nix develop
+./build-all.sh                          # every disc, PAL first
+./build-all.sh status                   # every disc's stages; builds nothing
+./build-all.sh volcanoes north-polar    # just these, in ORDER's order
+```
 [docs/emulator-pack-plan.md](docs/emulator-pack-plan.md) has the plan.
 - **Phase 0 is in place:** the pinned tools, the share checks, the stamps
   (`lib/stage.sh`, tested by `tests/stage-test.sh`) and the driver.
@@ -1788,6 +1826,49 @@ The last line installs another version, such as the previous one.
 **Afterwards,** it checks each file's group and mode, and checks every hash
 on the player against `SHA256SUMS`. It never uses sudo, and it uses the
 system's own `ssh`, with its keys; `rsync` comes from the dev shell.
+
+### Publishing the packs
+
+`publish-packs.sh` copies every disc's current pack to the emulation-packs
+folder on the SFTP share, one folder per disc. It is never part of the build:
+
+```sh
+D=/Volumes/Domesday86_SFTP/simoninns/emulation-packs
+./publish-packs.sh --dest "$D" --dry-run              # what would be copied, all discs
+./publish-packs.sh --dest "$D"                        # copy every disc's pack
+./publish-packs.sh --dest "$D" --verify north-polar   # one disc, hashing the copies
+```
+
+**The folders:**
+- Each folder is the disc's `DISC_OUT`, without "side" and with a trailing
+  number set off by a hyphen. For example, `countryside-side1` becomes
+  `countryside-1`, `city-culture1` becomes `city-culture-1` and
+  `apple-almanac-side-a` becomes `apple-almanac-a`.
+- Each holds the pack's `.mkv`, `.dat` and `.dat.bsm`; a side with no EFM has
+  the `.mkv` alone.
+- Each also holds a `README.md` with the disc's title, the pack id, and each
+  file's size and SHA-256.
+
+**The copy:**
+- A disc folder that already holds a pack has it replaced by the current one.
+  Files the same size and time as the pack's are left, so a run after a
+  rebuild copies only what changed; any other file is copied over.
+- Anything else in the folder is removed: an older pack's files, strays, and
+  leftovers from an interrupted copy. `--dry-run` lists what would go.
+- The old README is removed before copying. The new one is written only after
+  every file is there and its size checked. A README therefore never names a
+  pack that isn't all there.
+- `--verify` also hashes each copy against the pack's `SHA256SUMS`, which
+  reads every file back.
+
+**What it never does:**
+- It never touches anything outside the disc folders.
+- It never makes the emulation-packs folder itself, so an unmounted share
+  isn't mistaken for an empty folder.
+- It can't publish through the SFTP share's NFS mount on macOS, because that
+  mount is read-only (`shares.conf`). Give it a writable mount of the share
+  with `--dest` (as above, the Finder's SMB mount), or set
+  `DD_EMULATION_PACKS`.
 
 Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read
 from its decode script's `SETS` table, so there is one list of captures.

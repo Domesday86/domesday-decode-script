@@ -565,6 +565,7 @@ def markdown(data, graphs):
       + " at the exact revision in section 2. Every step is automatic except the selection of the sets, which is a person's "
       "(section 5); section 1 lists the steps."
       + ("" if efm else " The side has no EFM, so it has no data area, and the pack is the mkv alone.")
+      + f" The mkv comes twice: {data['stem']}.mkv is lossless, and {data['stem']}-lossy.mkv the same stack in H.264."
       + " This is the PDF report's content as Markdown; the graphs are its SVGs.")
     w("")
     w("| Stacked white SNR | Stacked black PSNR | Dropouts after stacking |" + (" VFS image |" if efm else "") + " Frames |")
@@ -587,7 +588,7 @@ def markdown(data, graphs):
     sc = data.get("script") or {}
     kv([("Disc", f"{data['title']} ({data['disc']}), {data['side']}"),
         ("Pack id", f"`{data['id']}`: the first 16 hex digits of the sha256 of "
-                    + ("the three files' lines" if efm else "the mkv's line") + " of SHA256SUMS. "
+                    + ("the four files' lines" if efm else "the two mkvs' lines") + " of SHA256SUMS. "
                     "It names the files the player loads, not the directory"),
         ("Directory", f"`{data['place']}/{data['version']}/` on the decodes share; `{data['place']}/pack` points at the current pack"),
         ("Built", f"{data.get('built', '–')}, by build-pack.sh at `{sc.get('commit', '–')}`" + (" (with uncommitted changes)" if sc.get("dirty") else "")),
@@ -816,14 +817,16 @@ def markdown(data, graphs):
     w("")
     if efm:
         w(f"The pack stage makes a new pack version, `{data['version']}`, from the video and vfs stages' outputs: it links the "
-          "three files the player loads rather than copying them, checks them again as vp415e reads them (the container, every "
-          "stream, the disc metadata against the container, the image and its bad sector map against the vfs stage's), hashes "
+          "files the player loads (the lossless mkv, its lossy H.264 alternative, the image and its bad sector map) rather "
+          "than copying them, checks them again as vp415e reads them (the container, every stream, the disc metadata against "
+          "the container and the lossy mkv's against the lossless one's, the image and its bad sector map against the vfs stage's), hashes "
           "them into SHA256SUMS, and writes the provenance and this report. A pack is only built when every stage before it is "
           "up to date, and only stamped when every check passes; `pack` then points at it, and the previous version is kept.")
     else:
         w(f"The pack stage makes a new pack version, `{data['version']}`, from the video stage's output: it links the mkv, "
-          "the one file the player loads, since the side has no EFM, rather than copying it, checks it again as vp415e reads "
-          "it (the container, every stream, the disc metadata against the container), hashes it into SHA256SUMS, and writes "
+          "the one file the player loads since the side has no EFM, and its lossy H.264 alternative, rather than copying them, "
+          "checks them again as vp415e reads them (the container, every stream, the disc metadata against the container and "
+          "the lossy mkv's against the lossless one's), hashes them into SHA256SUMS, and writes "
           "the provenance and this report. A pack is only built when every stage before it is up to date, and only stamped "
           "when every check passes; `pack` then points at it, and the previous version is kept.")
     w("")
@@ -1290,13 +1293,13 @@ def main():
             ["select", "–", "the one step that is a person's: which sets go into each stack, and in which order, decided from the "
              "compare report", f"video {', '.join(video_sets)}; VFS {', '.join(vfs_sets)}", "decided"],
             ["video", orc, f"stacks the video sets, corrects dropouts, decodes chroma ({video.get('decoder', '–')}) and writes FFV1 "
-             "video, FLAC audio and the disc metadata into Matroska", f"{man["stem"]}.mkv, {fmt((video.get('metadata') or {}).get('frame_count'))} frames",
+             "video, FLAC audio and the disc metadata into Matroska, and the same stack again as H.264 and AAC", f"{man["stem"]}.mkv and {man["stem"]}-lossy.mkv, {fmt((video.get('metadata') or {}).get('frame_count'))} frames",
              outcome("video")],
             ["vfs", vfst, "stacks the VFS sets' sector images by majority and verifies the ADFS filesystem of the result",
              f"{man["stem"]}.dat and .dat.bsm, {vfs.get('verdict', '–')}", outcome("vfs")],
             ["quality", orc, "measures the stack with the set stage's analyses, on the stacker's output before dropout correction",
              f"white SNR {fmt(sq.get('mean_white_snr'))} dB" if sq else "–", outcome("quality")],
-            ["pack", "build-pack.sh", "links the three files into a new pack version, checks them again as vp415e reads them, hashes "
+            ["pack", "build-pack.sh", "links the four files into a new pack version, checks them again as vp415e reads them, hashes "
              "them, and writes the provenance and this report", f"pack {pack.get('id', '–')}", outcome("pack")],
         ]
     else:
@@ -1316,12 +1319,12 @@ def main():
             ["select", "–", "the one step that is a person's: which sets go into the video stack, and in which order, decided "
              "from the compare report", f"video {', '.join(video_sets)}", "decided"],
             ["video", orc, f"stacks the video sets, corrects dropouts, decodes chroma ({video.get('decoder', '–')}) and writes FFV1 "
-             "video, FLAC audio and the disc metadata into Matroska", f"{man["stem"]}.mkv, {fmt((video.get('metadata') or {}).get('frame_count'))} frames",
+             "video, FLAC audio and the disc metadata into Matroska, and the same stack again as H.264 and AAC", f"{man["stem"]}.mkv and {man["stem"]}-lossy.mkv, {fmt((video.get('metadata') or {}).get('frame_count'))} frames",
              outcome("video")],
             ["quality", orc, "measures the stack with the set stage's analyses, on the stacker's output before dropout correction",
              f"white SNR {fmt(sq.get('mean_white_snr'))} dB" if sq else "–", outcome("quality")],
-            ["pack", "build-pack.sh", "links the mkv, the one file, into a new pack version, checks it again as vp415e reads it, "
-             "hashes it, and writes the provenance and this report", f"pack {pack.get('id', '–')}", outcome("pack")],
+            ["pack", "build-pack.sh", "links the two mkvs into a new pack version, checks them again as vp415e reads them, "
+             "hashes them, and writes the provenance and this report", f"pack {pack.get('id', '–')}", outcome("pack")],
         ]
 
     md = video.get("metadata") or {}

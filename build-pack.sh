@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
-# Build a disc's VP415e pack -- <stem>.mkv, <stem>.dat and <stem>.dat.bsm --
-# from its captures, one stage at a time, redoing only what is out of date. A
-# side with no EFM (DISC_EFM=no in its disc.conf) has no data area: its pack
-# is the mkv alone.
+# Build a disc's VP415e pack -- <stem>.mkv, <stem>.dat and <stem>.dat.bsm,
+# and <stem>-lossy.mkv, the same video lossy, for players that would rather
+# have a few gigabytes than twenty -- from its captures, one stage at a time,
+# redoing only what is out of date. A side with no EFM (DISC_EFM=no in its
+# disc.conf) has no data area: its pack is the two mkvs alone.
 #
 # The stages, in order (docs/emulator-pack-plan.md has the detail):
 #
@@ -15,12 +16,13 @@
 #            the report the selection is decided from
 #   select   the committed selection.yaml: which sets go into the video and
 #            VFS stacks. Decided by a person; nothing here writes it
-#   video    the stacked, dropout-corrected .mkv     orc-<rev>/video/
+#   video    the stacked, dropout-corrected .mkv,    orc-<rev>/video/
+#            lossless and lossy
 #   vfs      the stacked, verified .dat and .bsm     vfs-<rev>/
 #            (none on a side with no EFM)
 #   quality  the stacked video's SNR and dropouts,   orc-<rev>/quality/
 #            measured as each set's are
-#   pack     the three files (one with no EFM),      pack-<key>/
+#   pack     the four files (two with no EFM),       pack-<key>/
 #            their provenance and
 #            the pack's report (<stem>.report.pdf,
 #            and as Markdown, <stem>.report.md)
@@ -109,11 +111,14 @@ DISC_DIR="$SELF_DIR/discs/$DISC"
 # shellcheck source=discs/volcanoes/disc.conf
 . "$DISC_DIR/disc.conf"
 
+# The lossy mkv's name: the lossless one's with -lossy after the stem.
+LOSSY_STEM="$STEM-lossy"
+
 # Whether the side carries EFM (DISC_EFM in disc.conf, yes unless it says
 # no). A side with none, such as EcoDisc's second, is decoded with --noEFM,
 # so there is no EFM image: the set stage measures its quality alone, the
 # compare stage has no VFS evidence, selection.yaml has no vfs, there is no
-# vfs stage, and the pack is the mkv alone.
+# vfs stage, and the pack is the two mkvs alone.
 DISC_EFM="${DISC_EFM:-yes}"
 case "$DISC_EFM" in yes|no) ;; *) die "DISC_EFM is $DISC_EFM in ${DISC_DIR#"$SELF_DIR"/}/disc.conf: yes or no" ;; esac
 has_efm() { [ "$DISC_EFM" = yes ]; }
@@ -127,15 +132,46 @@ DISC_LEAD_OUT="${DISC_LEAD_OUT:-seen}"
 case "$DISC_LEAD_OUT" in seen|absent) ;; *) die "DISC_LEAD_OUT is $DISC_LEAD_OUT in ${DISC_DIR#"$SELF_DIR"/}/disc.conf: seen or absent" ;; esac
 
 # The video system (DISC_SYSTEM in disc.conf, PAL unless it says NTSC): what
-# the video stage expects of the mkv, as the video sink writes it (720x576
-# at 25/1, or 720x484 at 30000/1001), and of its disc metadata. The projects
+# the video stage expects of the mkvs, as the video sinks write them (720x576
+# at 25/1, or 720x484 at 30000/1001), and of their disc metadata. The projects
 # in discs/<disc>/ give the same system.
+#
+# The sample aspect ratio is the BT.601 one decode-orc's LaserDisc Emulation
+# Formats require (display_aspect_ratio auto): 4 x height : 3 x the analogue
+# active line in pixels (702 on 625-line, 711 on 525-line), which displays
+# the active line at 4:3, so a circle on the disc is a circle, and the
+# blanking margins either side of it show as margins. The whole frame then
+# displays a little wider than 4:3.
 DISC_SYSTEM="${DISC_SYSTEM:-PAL}"
 case "$DISC_SYSTEM" in
-  PAL)  VIDEO_SIZE=720x576 VIDEO_RATE=25/1 ;;
-  NTSC) VIDEO_SIZE=720x484 VIDEO_RATE=30000/1001 ;;
+  PAL)  VIDEO_SIZE=720x576 VIDEO_RATE=25/1 VIDEO_SAR=128:117 ;;
+  NTSC) VIDEO_SIZE=720x484 VIDEO_RATE=30000/1001 VIDEO_SAR=1936:2133 ;;
   *)    die "DISC_SYSTEM is $DISC_SYSTEM in ${DISC_DIR#"$SELF_DIR"/}/disc.conf: PAL or NTSC" ;;
 esac
+
+# Sets whose picture numbers sit off their content by the same offset over
+# the whole side (CONTENT_OFFSETS in disc.conf, none unless it names some),
+# as "<set>:<offset>" separated by spaces, the offset as Source Alignment's
+# content check reports it: -1 for a set that labels its pictures 1 lower
+# than the others, whose frame at output frame k - 1 holds the picture they
+# hold at k. The map stage gives each such set <offset> frames less padding
+# than Source Alignment does (one more, for -1), so its pictures land on the
+# others', and its check wants the content check to report exactly these
+# offsets: one that has gone, or a set off that is not named, fails it. Part
+# of the map stage's inputs.
+CONTENT_OFFSETS="${CONTENT_OFFSETS:-}"
+for o in $CONTENT_OFFSETS; do
+  [[ "$o" =~ ^[A-Za-z0-9]+:-?[1-9][0-9]*$ ]] \
+    || die "CONTENT_OFFSETS has $o in ${DISC_DIR#"$SELF_DIR"/}/disc.conf: <set>:<offset>, a whole number of frames other than 0"
+done
+# content_offset <set>: the offset CONTENT_OFFSETS gives the set, 0 if none.
+content_offset() {
+  local o
+  for o in $CONTENT_OFFSETS; do
+    [ "${o%%:*}" = "$1" ] && { printf '%s\n' "${o#*:}"; return 0; }
+  done
+  printf '0\n'
+}
 
 # The frames in each block of the quality stage's sample (see the quality
 # stage); a disc.conf may set it.
@@ -318,18 +354,32 @@ STACK_PROJECT="$DISC_DIR/stack.orcprj"
 # stack_problems: what is wrong with stack.orcprj for the selection, one line
 # each, or nothing. Its CVBS sources must be the selection's video sets, in
 # its order, each with its "<set> map", and it must have the stages the video
-# stage sets: Align and Video Out.
+# stage sets: Align and the two video sinks, Video Out writing the lossless
+# mkv (mkv-ffv1-bt601) and Video Out Lossy the lossy one (mkv-h264), both fed
+# by the same stage, so that the two files are the same stack.
 stack_problems() {
   local want have id
   [ -f "$STACK_PROJECT" ] || { printf 'is not written yet\n'; return 0; }
   want=$(selected_sets video | paste -sd' ' -)
   have=$(yq -r '.dag.nodes[] | select(.stage == "*_CVBS_Source") | .user_label' "$STACK_PROJECT" | paste -sd' ' -)
   [ "$have" = "$want" ] || printf 'stacks %s, but the selection'\''s video sets are %s\n' "${have:-nothing}" "$want"
-  for id in $have "Align" "Video Out"; do
-    case "$id" in Align|"Video Out") ;; *) id="$id map" ;; esac
+  for id in $have "Align" "Video Out" "Video Out Lossy"; do
+    case "$id" in Align|"Video Out"|"Video Out Lossy") ;; *) id="$id map" ;; esac
     [ "$(yq -r "[.dag.nodes[] | select(.user_label == \"$id\")] | length" "$STACK_PROJECT")" = 1 ] \
       || printf 'has no one stage named "%s"\n' "$id"
   done
+  yq -o=json . "$STACK_PROJECT" | jq -r '
+    def sink($l): [ .dag.nodes[] | select(.user_label == $l) ] | first;
+    def feed($n): [ .dag.edges[] | select(.to == $n.id) | .from ];
+    sink("Video Out") as $a | sink("Video Out Lossy") as $b
+    | if $a == null or $b == null then empty else
+        (if $a.parameters.ffmpeg_format.value != "mkv-ffv1-bt601"
+         then "has Video Out writing \($a.parameters.ffmpeg_format.value // "nothing"), not mkv-ffv1-bt601" else empty end),
+        (if $b.parameters.ffmpeg_format.value != "mkv-h264"
+         then "has Video Out Lossy writing \($b.parameters.ffmpeg_format.value // "nothing"), not mkv-h264" else empty end),
+        (if feed($a) != feed($b) or (feed($a) | length) != 1
+         then "has Video Out and Video Out Lossy fed from \(feed($a)) and \(feed($b)), not the same one stage" else empty end)
+      end'
   # An FM Beat Cancel on a set exactly where the map stage measures its
   # carrier.
   for id in $have; do
@@ -442,6 +492,9 @@ describe_map() {
   for id in "${ups[@]}"; do stage_input_stamp "decode:${id%%|*}" "${id#*|}"; done
   stage_input_tool decode-orc
   stage_input_file "map project" "$MAP_PROJECT"
+  # Only where a disc names some, so the stamps of the discs that do not are
+  # as they were before CONTENT_OFFSETS.
+  [ -z "$CONTENT_OFFSETS" ] || stage_input "content offsets" "$CONTENT_OFFSETS"
   stage_output analysis.json
   stage_output refresh.json
   for id in "${ups[@]}"; do
@@ -525,6 +578,7 @@ describe_video() {
   stage_input_file "address map check" "$SELF_DIR/lib/check-address-map.py"
   stage_input "baseline" "${VIDEO_BASELINE:-none}"
   stage_output "$STEM.mkv"
+  stage_output "$LOSSY_STEM.mkv"
   stage_output metadata.yaml
   stage_output video.json
   stage_output check.txt
@@ -604,6 +658,7 @@ describe_pack() {
   stage_input_stamp quality "$PACK_QUALITY"
   stage_input "report" "$(for f in "$SELF_DIR"/lib/pack-report.*; do printf '%s %s ' "${f##*/}" "$(sha256_stdin < "$f" | cut -c1-12)"; done)"
   stage_output "$STEM.mkv"
+  stage_output "$LOSSY_STEM.mkv"
   if has_efm; then
     stage_output "$STEM.dat"
     stage_output "$STEM.dat.bsm"
@@ -1061,7 +1116,9 @@ build_map() {
 # non-zero if any failed.
 check_map() {
   local dir="$1" rc="$2" report out fails=0 i id node status ranges pad n
+  local mode least="" off wrong want got spans
   local -a sets=() order=()
+  local -A pads=()
 
   report="$dir/refresh.json.partial"
   out=$(stage_tmp check.txt) || return 1
@@ -1135,17 +1192,37 @@ check_map() {
       else
         fail "Align takes the sets as ${order[*]}, not ${sets[*]}"
       fi
+      # Each set's padding from Source Alignment, less its CONTENT_OFFSETS
+      # offset, all moved by the same amount so the least is 0 again.
+      mode=$(jq -r '.nodes[] | select(.tool == "source_alignment") | .parameter_changes.alignmentMode' "$report")
+      [ -z "$CONTENT_OFFSETS" ] || [ "$mode" = pad_for_alignment ] \
+        || fail "CONTENT_OFFSETS corrects padding, and the alignment is $mode, not pad_for_alignment"
+      n=0
+      for id in "${order[@]}"; do
+        n=$(( n + 1 ))
+        pad=$(jq -r --argjson i "$n" '.nodes[] | select(.tool == "source_alignment") | .parameter_changes.alignmentMap
+              | split(", ")[] | select(startswith("\($i)+")) | ltrimstr("\($i)+")' "$report")
+        if [[ "$pad" =~ ^[0-9]+$ ]]; then
+          pads[$id]=$(( pad - $(content_offset "$id") ))
+          [ -n "$least" ] && [ "$least" -le "${pads[$id]}" ] || least=${pads[$id]}
+        else
+          pads[$id]=none
+          fail "$id has no place in the alignment map"
+        fi
+      done
       {
-        printf '# %s\n' "$(jq -r '.nodes[] | select(.tool == "source_alignment") | .parameter_changes.alignmentMode' "$report")"
-        n=0
+        printf '# %s\n' "$mode"
         for id in "${order[@]}"; do
-          n=$(( n + 1 ))
-          pad=$(jq -r --argjson i "$n" '.nodes[] | select(.tool == "source_alignment") | .parameter_changes.alignmentMap
-                | split(", ")[] | select(startswith("\($i)+")) | ltrimstr("\($i)+")' "$report")
-          printf '%s %s\n' "$id" "${pad:-none}"
-          [ -n "$pad" ] || fail "$id has no place in the alignment map"
+          if [ "${pads[$id]}" = none ]; then
+            printf '%s none\n' "$id"
+          else
+            printf '%s %s\n' "$id" "$(( pads[$id] - least ))"
+          fi
         done
       } > "$(stage_tmp framemaps/alignment)"
+      if [ -n "$CONTENT_OFFSETS" ]; then
+        ok "alignment corrected for CONTENT_OFFSETS ($CONTENT_OFFSETS): $(awk '!/^#/ { printf "%s%s %s", sep, $1, $2; sep = ", " }' "$(stage_tmp framemaps/alignment)")"
+      fi
       ok "aligned: $(jq -r '.alignment | "map \(.map); output frame 1 is picture \(.statistics.globalFirstVBIFrame); \(.statistics.framesWith3PlusSources) frames have 3 or more sources, \(.statistics.framesWith2Sources) two, \(.statistics.framesWith1Source) one"' "$dir/analysis.json.partial")"
       # The capture comparison, one item per input, and its warnings, with
       # "Source N" (the Nth input of Align) given its set id; then what the
@@ -1166,13 +1243,36 @@ check_map() {
       # Picture numbers against content: a set whose pictures sit off its
       # content would blend the neighbouring picture into the stack. The
       # comparison's warnings above give where, and the map that corrects it.
+      # A set named in CONTENT_OFFSETS must be off by that offset over every
+      # frame checked (content_offset, which is 0 unless it is), and every
+      # other set on its content (no spans).
       n=$(jq -r '.nodes[] | select(.tool == "source_alignment") | .statistics.contentOffsetSources // "?"' "$report")
-      if [ "$n" = 0 ]; then
-        ok "every set's picture numbers sit on its content"
-      elif [ "$n" = "?" ]; then
+      if [ "$n" = "?" ]; then
         fail "Source Alignment did not check the picture numbers against the content"
       else
-        fail "$n set(s) hold picture numbers off their content: correct the alignment by hand or leave the set out (the warnings above)"
+        off=0 wrong=0 n=0
+        for id in "${order[@]}"; do
+          n=$(( n + 1 ))
+          want=$(content_offset "$id")
+          read -r got spans < <(jq -r --argjson i "$n" '[ .nodes[] | select(.tool == "source_alignment")
+                | .items[]? | select(.data.source? == $i) | .data ] | first // {}
+                | "\(.content_offset // "?") \(.content_offset_spans // "")"' "$report")
+          if [ "$want" = 0 ] && [ "$got" = 0 ] && [ -z "$spans" ]; then
+            continue
+          elif [ "$want" != 0 ] && [ "$got" = "$want" ]; then
+            ok "$id labels its pictures off its content by $got over every frame checked, as CONTENT_OFFSETS says; its padding is corrected"
+          elif [ "$want" != 0 ]; then
+            wrong=$(( wrong + 1 ))
+            fail "CONTENT_OFFSETS gives $id $want, and the content check finds ${got}${spans:+ ($spans)}: correct CONTENT_OFFSETS"
+          else
+            off=$(( off + 1 ))
+          fi
+        done
+        if [ "$off" = 0 ] && [ "$wrong" = 0 ]; then
+          ok "every set's picture numbers sit on its content$([ -z "$CONTENT_OFFSETS" ] || echo ", or are off by the offset CONTENT_OFFSETS gives it")"
+        elif [ "$off" != 0 ]; then
+          fail "$off set(s) hold picture numbers off their content: give a set off by one offset everywhere in CONTENT_OFFSETS, or leave the set out (the warnings above)"
+        fi
       fi
 
       # Where the picture ends, which the stack's Picture Band Limit cuts at.
@@ -1576,10 +1676,17 @@ compare_report() {
 # same ones. The stage checks instead that the committed copies are still the
 # map stage's.
 #
+# The project has two video sinks, Video Out writing the lossless mkv
+# (mkv-ffv1-bt601) and Video Out Lossy the lossy <stem>-lossy.mkv (mkv-h264),
+# set alike; orc-cli processes them one after the other, each stacking the
+# side afresh, so the stage takes about twice as long as one sink would.
+#
 # The mkv is then checked as vp415e loads it (docs/emulator-pack-plan.md,
 # phase 5): the container, every packet a keyframe, the audio, and the disc
 # metadata document, which lib/check-disc-metadata.py reads as the format
-# spec's reader does. The stacker's noise and weight for each set, and a
+# spec's reader does. The lossy mkv is checked against decode-orc's LaserDisc
+# Emulation Formats, and against the lossless one: the same frames, disc
+# metadata and stacker records. The stacker's noise and weight for each set, and a
 # comparison with the hand-built stack (VIDEO_BASELINE), go into video.json
 # and check.txt.
 #
@@ -1615,7 +1722,7 @@ single_project() {
 }
 
 build_video() {
-  local dir d id cvbs rel n=0 mode pad min map="" problems mkv rc t band spid
+  local dir d id cvbs rel n=0 mode pad min map="" problems mkv lossy rc t band spid
   describe_video
   dir="$STAGE_DIR"
   problems=$(stack_problems)
@@ -1652,7 +1759,7 @@ build_video() {
   rm -rf -- "$dir"/*.mkv* "$dir"/*.json* "$dir"/*.yaml* "$dir"/*.log "$dir"/*.orcprj \
             "$dir"/check.txt* "$dir"/check.failed.txt "$dir"/crash_bundle_*.zip "$dir"/vbi
 
-  mkv="$STEM.building.mkv"
+  mkv="$STEM.building.mkv" lossy="$LOSSY_STEM.building.mkv"
   cp -- "$STACK_PROJECT" "$dir/stack.orcprj"
   VIDEO_SINGLE=()
   for d in "${VIDEO_SETS[@]}"; do
@@ -1684,11 +1791,16 @@ build_video() {
       return 1
     fi
   fi
+  # Both sinks are given the same decoder and noise reduction: the two mkvs
+  # are one stack, differing only in the codec.
   if ! { orc-cli nodes set "$dir/stack.orcprj" Align "alignmentMode=$mode" "alignmentMap=$map" \
          && orc-cli nodes set "$dir/stack.orcprj" "Video Out" "output_path=$mkv" "decoder_type=$VIDEO_DECODER" \
               "decoder_schedule=${VIDEO_DECODER_SCHEDULE:-}" \
+              "noise_reduction=$(video_noise_reduction)" noise_reduction_mode=still_only \
+         && orc-cli nodes set "$dir/stack.orcprj" "Video Out Lossy" "output_path=$lossy" "decoder_type=$VIDEO_DECODER" \
+              "decoder_schedule=${VIDEO_DECODER_SCHEDULE:-}" \
               "noise_reduction=$(video_noise_reduction)" noise_reduction_mode=still_only; } >/dev/null; then
-    printf 'video: could not set the alignment and the video sink\n' >&2
+    printf 'video: could not set the alignment and the video sinks\n' >&2
     return 1
   fi
 
@@ -1727,22 +1839,24 @@ build_video() {
   wait "$spid" || VIDEO_SINGLE_RC=$?
   printf 'video: the single captures'\'' VBI read, orc-cli exited %s\n' "$VIDEO_SINGLE_RC"
 
-  if ! check_video "$dir" "$rc" "$mkv"; then
+  if ! check_video "$dir" "$rc" "$mkv" "$lossy"; then
     cat -- "$dir/check.failed.txt" >&2
     printf 'video: failed its checks and is not stamped (see %s/check.failed.txt)\n' "$dir" >&2
     return 1
   fi
   mv -- "$dir/$mkv" "$(stage_tmp "$STEM.mkv")"
+  mv -- "$dir/$lossy" "$(stage_tmp "$LOSSY_STEM.mkv")"
   cat -- "$dir/check.txt.partial"
   stage_commit || { printf 'video: could not stamp the stage\n' >&2; return 1; }
-  printf 'video: checked and stamped: %s/%s.mkv\n' "$dir" "$STEM"
+  printf 'video: checked and stamped: %s/%s.mkv and %s.mkv\n' "$dir" "$STEM" "$LOSSY_STEM"
 }
 
-# check_video <dir> <orc-cli exit code> <mkv>: run the checks, write check.txt,
-# metadata.yaml and video.json to their stage_tmp names, and return non-zero
-# if any failed.
+# check_video <dir> <orc-cli exit code> <mkv> <lossy mkv>: run the checks,
+# write check.txt, metadata.yaml and video.json to their stage_tmp names, and
+# return non-zero if any failed.
 check_video() {
-  local dir="$1" rc="$2" mkv="$1/$3" out fails=0 level text frames=0 keys=0 base=""
+  local dir="$1" rc="$2" mkv="$1/$3" lossy="$1/$4" out fails=0 level text frames=0 keys=0 base="" name
+  local lossy_frames=0 lossy_keys=0
   local -a sets=()
   out=$(stage_tmp check.txt) || return 1
   ok()   { printf 'ok    %s\n' "$*"; }
@@ -1772,13 +1886,25 @@ check_video() {
         "$dir/channel-calibration.json" 2>/dev/null | while IFS= read -r line; do note "$line"; done
     fi
 
-    if [ "$rc" = 0 ] && grep -q 'VideoSink: Successfully wrote' "$dir/stack.log" 2>/dev/null; then
-      ok "the stack was processed: $(sed -n 's/.*VideoSink: Successfully wrote \([0-9]*\) frames.*/\1/p' "$dir/stack.log" | tail -1) frames written"
+    # Each sink says what it wrote, by its path.
+    for name in "${mkv##*/}" "${lossy##*/}"; do
+      if [ "$rc" = 0 ] && grep -q "VideoSink: Successfully wrote [0-9]* frames to: .*/$name\$" "$dir/stack.log" 2>/dev/null; then
+        ok "the stack was processed into ${name/.building/}: $(sed -n "s|.*VideoSink: Successfully wrote \([0-9]*\) frames to: .*/$name\$|\1|p" "$dir/stack.log" | tail -1) frames written"
+      else
+        fail "${name/.building/} was not written: orc-cli exited $rc ($(grep -v '\[\(info\|debug\)\]' "$dir/stack.log" 2>/dev/null | tail -3 | tr '\n' ' '))"
+      fi
+    done
+    # The sinks are processed one after the other, each stacking the side
+    # afresh; the stacker's records for the two must be the same, so that
+    # the two files are one stack.
+    if [ "$(sink_logs "$dir/stack.log" | sort -u | wc -l)" = 1 ] && [ "$(sink_logs "$dir/stack.log" | wc -l)" = 2 ]; then
+      ok "the stacker logged the same records for both sinks: the two mkvs are one stack"
     else
-      fail "orc-cli exited $rc ($(grep -v '\[\(info\|debug\)\]' "$dir/stack.log" 2>/dev/null | tail -3 | tr '\n' ' '))"
+      fail "the stacker did not log the same records for both sinks"
     fi
 
     check_mkv "$mkv" "$dir" "$(stage_tmp metadata.yaml)"
+    check_lossy "$lossy" "$dir" "$(stage_tmp metadata.yaml)" "$dir/probe.json" "$frames"
 
     # The address map against the single captures: every frame most of the
     # video sets read one picture number on must carry that picture in the
@@ -1861,13 +1987,16 @@ check_video() {
           --rawfile meta "$dir/metadata-check.json" --rawfile base "${base:-/dev/null}" \
           --arg decoder "$VIDEO_DECODER" --arg schedule "${VIDEO_DECODER_SCHEDULE:-}" \
           --argjson nr "$(video_noise_reduction)" --argjson frames "$frames" --argjson keys "$keys" \
+          --slurpfile lprobe "$dir/probe-lossy.json" --argjson lframes "$lossy_frames" --argjson lkeys "$lossy_keys" \
           --arg baseline "${VIDEO_BASELINE:-}" '
+      def container($p; $f; $k): ($p | { format: .format.format_name, tags: .format.tags,
+                                         streams: [ .streams[] | del(.tags.filename, .tags.mimetype) ] })
+                                  + { packets: $f, keyframes: $k };
       { sets: $ARGS.positional, decoder: $decoder, decoder_schedule: (if $schedule == "" then null else $schedule end),
         noise_reduction: { db: $nr, mode: "still_only" },
         channel_equalise: $equalise,
-        container: ($probe[0] | { format: .format.format_name, tags: .format.tags,
-                                  streams: [ .streams[] | del(.tags.filename, .tags.mimetype) ] })
-                   + { packets: $frames, keyframes: $keys },
+        container: container($probe[0]; $frames; $keys),
+        lossy_container: container($lprobe[0] // {}; $lframes; $lkeys),
         metadata: ($meta | fromjson? // {} | .summary),
         stacker: $weights[0],
         baseline: (if $baseline == "" then null else { path: $baseline, metadata: ($base | fromjson? // {} | .summary) } end) }' \
@@ -1906,7 +2035,8 @@ check_mkv() {
           check("\(.width)x\(.height)" == $size and "\(.coded_width)x\(.coded_height)" == $size; "video is \($size), coded \($size)";
                 "video is \(.width)x\(.height), coded \(.coded_width)x\(.coded_height), not \($size)"),
           check(.r_frame_rate == $rate; "video is exactly \($rate)"; "video is \(.r_frame_rate), not \($rate)"),
-          check(.display_aspect_ratio == "4:3"; "display aspect 4:3 (sample aspect \(.sample_aspect_ratio))"; "display aspect \(.display_aspect_ratio), not 4:3") end),
+          check(.sample_aspect_ratio == $sar; "sample aspect \($sar), the active line at 4:3 (display aspect \(.display_aspect_ratio))";
+                "sample aspect \(.sample_aspect_ratio), not \($sar) (display_aspect_ratio must be auto)") end),
         (if ($a | length) == 0 then "fail\tno audio stream" else $a[] |
           check(.codec_name == "flac" and .sample_rate == "48000";
                 "audio stream \(.index) (\(.tags.title // "untitled")) is FLAC at 48 kHz, \(.channels) channels";
@@ -1914,7 +2044,7 @@ check_mkv() {
         ([ .streams[] | select(.codec_type == "attachment" and .tags.filename == "orc-disc-metadata.yaml"
                                and .tags.mimetype == "application/vnd.decode-orc.disc-metadata+yaml") ] | length
          | check(. == 1; "the disc metadata is attached, by its filename and MIME type"; "\(.) attachments named orc-disc-metadata.yaml with its MIME type, not one"))' \
-      --arg size "$VIDEO_SIZE" --arg rate "$VIDEO_RATE" "$work/probe.json")
+      --arg size "$VIDEO_SIZE" --arg rate "$VIDEO_RATE" --arg sar "$VIDEO_SAR" "$work/probe.json")
 
     # Every packet a keyframe, counted over the whole stream.
     read -r frames keys < <(ffprobe -v error -select_streams v:0 -show_entries packet=flags -of csv=p=0 "$mkv" \
@@ -1956,6 +2086,85 @@ check_mkv() {
   fi
 }
 
+# check_lossy <lossy mkv> <work dir> <lossless metadata> <lossless probe>
+# <lossless frames>: the checks of the lossy mkv as vp415e loads it, against
+# decode-orc's LaserDisc Emulation Formats: the container, H.264 High 8-bit
+# 4:2:0 interlaced with its field order signalled, a closed GOP of exactly
+# one second (a keyframe at every 25th packet on PAL, 30th on NTSC, from the
+# first, and nowhere else), AAC audio, and the lossless file's frame count,
+# disc metadata document and disc tags, each the same. Reports with the
+# caller's ok and fail, leaves probe-lossy.json in <work dir>, and sets the
+# caller's lossy_frames and lossy_keys.
+check_lossy() {
+  local mkv="$1" work="$2" meta="$3" lprobe="$4" want="$5" level text gop
+  case "$DISC_SYSTEM" in PAL) gop=25 ;; NTSC) gop=30 ;; esac
+  printf '{}\n' > "$work/probe-lossy.json"
+  if [ ! -s "$mkv" ]; then
+    fail "${mkv##*/} is missing or empty"
+    return 0
+  fi
+  ffprobe -v error -show_entries format=format_name:format_tags:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,coded_width,coded_height,r_frame_rate,sample_aspect_ratio,display_aspect_ratio,bits_per_raw_sample,field_order,sample_rate,channels:stream_tags=filename,mimetype,title \
+    -of json "$mkv" > "$work/probe-lossy.json" 2>> "$work/console.log" || fail "ffprobe could not read the lossy mkv"
+  while IFS=$'\t' read -r level text; do "$level" "lossy: $text"; done < <(jq -r --slurpfile l "$lprobe" '
+    def check(c; good; bad): if c then "ok\t\(good)" else "fail\t\(bad)" end;
+    def disc_tags: .format.tags // {} | with_entries(select(.key | ascii_upcase | startswith("ORC_")));
+    [ .streams[] | select(.codec_type == "video") ] as $v | [ .streams[] | select(.codec_type == "audio") ] as $a
+    | check(.format.format_name | startswith("matroska"); "the container is Matroska"; "the container is \(.format.format_name), not Matroska"),
+      (if ($v | length) != 1 then "fail\t\($v | length) video streams, not one" else $v[0] |
+        check(.codec_name == "h264" and .profile == "High"; "video is H.264 High"; "video is \(.codec_name) \(.profile // ""), not H.264 High"),
+        check(.pix_fmt == "yuv420p" and (.bits_per_raw_sample // "8") == "8"; "video is yuv420p, 8-bit"; "video is \(.pix_fmt), \(.bits_per_raw_sample)-bit, not yuv420p 8-bit"),
+        check("\(.width)x\(.height)" == $size; "video is \($size)"; "video is \(.width)x\(.height), not \($size)"),
+        check(.r_frame_rate == $rate; "video is exactly \($rate)"; "video is \(.r_frame_rate), not \($rate)"),
+        check(.sample_aspect_ratio == $sar; "sample aspect \($sar), the active line at 4:3 (display aspect \(.display_aspect_ratio))";
+              "sample aspect \(.sample_aspect_ratio), not \($sar) (display_aspect_ratio must be auto)"),
+        check(.field_order | IN("tt", "bb", "tb", "bt"); "video is interlaced, field order \(.field_order) signalled"; "video field order is \(.field_order // "unsignalled"), not interlaced") end),
+      (if ($a | length) == 0 then "fail\tno audio stream" else $a[] |
+        check(.codec_name == "aac" and .sample_rate == "48000";
+              "audio stream \(.index) (\(.tags.title // "untitled")) is AAC at 48 kHz, \(.channels) channels";
+              "audio stream \(.index) is \(.codec_name) at \(.sample_rate) Hz, not AAC at 48 kHz") end),
+      check(([ .streams[] | select(.codec_type == "audio") ] | length) == ([ $l[0].streams[] | select(.codec_type == "audio") ] | length);
+            "as many audio streams as the lossless mkv"; "not as many audio streams as the lossless mkv"),
+      ([ .streams[] | select(.codec_type == "attachment" and .tags.filename == "orc-disc-metadata.yaml"
+                             and .tags.mimetype == "application/vnd.decode-orc.disc-metadata+yaml") ] | length
+       | check(. == 1; "the disc metadata is attached, by its filename and MIME type"; "\(.) attachments named orc-disc-metadata.yaml with its MIME type, not one")),
+      check(disc_tags == ($l[0] | disc_tags) and (disc_tags | length) > 0; "the disc tags are the lossless mkv'"'"'s";
+            "the disc tags differ from the lossless mkv'"'"'s")' \
+    --arg size "$VIDEO_SIZE" --arg rate "$VIDEO_RATE" --arg sar "$VIDEO_SAR" "$work/probe-lossy.json")
+
+  # The keyframes, counted over the whole stream: exactly one at the start
+  # of every GOP, in the file's (decode) order.
+  read -r lossy_frames lossy_keys text < <(ffprobe -v error -select_streams v:0 -show_entries packet=flags -of csv=p=0 "$mkv" \
+    | awk -v g="$gop" '{ k = /^K/; if (k) keys++; if (k != ((n % g) == 0)) bad++; n++ } END { print n + 0, keys + 0, bad + 0 }')
+  if [ "$lossy_frames" -gt 0 ] && [ "$text" = 0 ]; then
+    ok "lossy: $lossy_keys keyframes in $lossy_frames video packets, one every $gop from the first and no others"
+  else
+    fail "lossy: $text of $lossy_frames video packets break the $gop-frame GOP ($lossy_keys keyframes)"
+  fi
+  if [ "$lossy_frames" = "$want" ]; then
+    ok "lossy: $lossy_frames frames, as the lossless mkv"
+  else
+    fail "lossy: $lossy_frames frames, against $want in the lossless mkv"
+  fi
+
+  # The disc metadata: the very document the lossless mkv carries.
+  if ffmpeg -v error -y -dump_attachment:m:filename:orc-disc-metadata.yaml "$work/metadata-lossy.yaml" \
+            -i "$mkv" -frames:v 1 -f null - >> "$work/console.log" 2>&1 \
+     && [ -s "$meta" ] && cmp -s -- "$work/metadata-lossy.yaml" "$meta"; then
+    ok "lossy: the disc metadata is the lossless mkv's, byte for byte"
+  else
+    fail "lossy: the disc metadata could not be extracted, or is not the lossless mkv's"
+  fi
+}
+
+# sink_logs <stack.log>: the stacker's report records for each sink, one
+# line per sink processed. orc-cli processes the sinks one after the other,
+# each stacking afresh, and marks where each begins with "Processing sink".
+sink_logs() {
+  awk '/Processing sink [0-9]+\/[0-9]+:/ { if (n++) print rec; rec = ""; next }
+       { i = index($0, "StackerStage report: "); if (i) rec = rec substr($0, i) "|" }
+       END { if (n) print rec }' "$1"
+}
+
 # video_weights <stack.log> <frames> <set>...: the stacker's measured noise
 # and share of the weight for each set over the stack of <frames> frames,
 # whether its noise model was trusted, each shift of a set's sample grid onto
@@ -1967,10 +2176,12 @@ check_mkv() {
 # holds for. All of it is read from the stacker's report records: the lines
 # holding "StackerStage report: " and a JSON object with "v": 1 after it,
 # whose inputs and frames count from 1. Its sources are the sets in the
-# order given.
+# order given. Only the first sink's records are read: each sink stacks the
+# side afresh, the same way (check_video checks that), so the records of a
+# project with two sinks are the same twice.
 video_weights() {
   local log="$1" frames="$2"; shift 2
-  jq -R -s --argjson n "$frames" --args '
+  awk '/Processing sink [0-9]+\/[0-9]+:/ && n++ { exit } { print }' "$log" | jq -R -s --argjson n "$frames" --args '
     def r: . * 10 | round / 10;
     [ split("\n")[] | split("StackerStage report: ") | select(length > 1)
       | .[1:] | join("StackerStage report: ") | fromjson? | select(.v == 1) ] as $records
@@ -2003,7 +2214,7 @@ video_weights() {
         reference_substitutions: [ $records[] | select(.kind == "reference")
                                    | { from_frame: .frames[0], to_frame: .frames[1],
                                        stand_in: (if .input then $ARGS.positional[.input - 1] else null end), offset } ] }' \
-    "$@" < "$log"
+    "$@"
 }
 
 # --- vfs: the stacked, verified .dat and .bsm ------------------------------
@@ -2621,15 +2832,16 @@ check_quality() {
   rm -f -- "$dir/check.failed.txt"
 }
 
-# --- pack: the three files and their provenance ----------------------------
+# --- pack: the four files and their provenance -----------------------------
 #
-# The video and vfs stages' outputs are hard-linked into the pack where the
-# share allows it, so nothing is copied or recomputed, and copied otherwise.
+# The video and vfs stages' outputs, both mkvs among them, are hard-linked
+# into the pack where the share allows it, so nothing is copied or
+# recomputed, and copied otherwise.
 # They are then checked again as they stand (docs/emulator-pack-plan.md,
-# phase 7): the mkv as the video stage checks it, and the image's hashes
-# against the vfs stage's and the reference, its bad sector map and
+# phase 7): the two mkvs as the video stage checks them, and the image's
+# hashes against the vfs stage's and the reference, its bad sector map and
 # vfs-verifier on it. A side with no EFM has no vfs stage, and its pack is
-# the mkv alone.
+# the two mkvs alone.
 #
 # Beside them go SHA256SUMS and <stem>.provenance.yaml, which vp415e ignores:
 # the captures' fingerprints, the tool revisions, the selection and the
@@ -2637,8 +2849,8 @@ check_quality() {
 # and every stage's checks.
 #
 # The pack's id is the first 16 hex digits of the sha256 of SHA256SUMS' lines
-# for the three files the player loads (for the mkv alone, on a side with no
-# EFM). Putting the pack on the player is install-pack.sh's, run by hand, and
+# for the files the player loads: the mkv, the image and its map (the mkv
+# alone, on a side with no EFM), and the lossy mkv. Putting the pack on the player is install-pack.sh's, run by hand, and
 # not part of the build.
 #
 # $OUT/pack links to the current version, for install-pack.sh.
@@ -2665,7 +2877,7 @@ build_pack() {
 
   # Under their final names, so that each is checked as the player will find
   # it. The stamp, written last, is what makes the pack complete.
-  files=("$PACK_VIDEO/$STEM.mkv")
+  files=("$PACK_VIDEO/$STEM.mkv" "$PACK_VIDEO/$LOSSY_STEM.mkv")
   has_efm && files+=("$PACK_VFS/$STEM.dat" "$PACK_VFS/$STEM.dat.bsm")
   for f in "${files[@]}"; do
     if ln -- "$f" "${f##*/}" 2>/dev/null; then
@@ -2703,8 +2915,8 @@ build_pack() {
 # check.txt, SHA256SUMS, pack.json and the provenance to their stage_tmp
 # names, and return non-zero if any failed.
 check_pack() {
-  local dir="$1" out fails=0 level text frames=0 keys=0 a name src how hashpid accept sums id
-  local dathash bsmhash
+  local dir="$1" out fails=0 level text frames=0 keys=0 a name src how hashpid lossypid accept sums id
+  local dathash bsmhash lossy_frames=0 lossy_keys=0
   local -a rows=()
   shift
   out=$(stage_tmp check.txt) || return 1
@@ -2719,6 +2931,8 @@ check_pack() {
   # of it over the share overlap.
   sha256_stdin < "$dir/$STEM.mkv" > "$dir/mkv-sha256.txt" &
   hashpid=$!
+  sha256_stdin < "$dir/$LOSSY_STEM.mkv" > "$dir/lossy-sha256.txt" &
+  lossypid=$!
 
   {
     printf 'stage:   pack\nvideo:   %s\nvfs:     %s\nchecked: %s\n\n' "${PACK_VIDEO#"$OUT"/}" \
@@ -2744,11 +2958,12 @@ check_pack() {
     else
       fail "the disc metadata differs from the document the video stage checked"
     fi
+    check_lossy "$dir/$LOSSY_STEM.mkv" "$dir" "$dir/metadata.yaml" "$dir/probe.json" "$frames"
 
     # The vfs stage's checks, again, on the pack's image. A side with no EFM
     # has none.
     if ! has_efm; then
-      note "no data area: the side has no EFM (DISC_EFM=no), so the pack is $STEM.mkv alone"
+      note "no data area: the side has no EFM (DISC_EFM=no), so the pack is $STEM.mkv and $LOSSY_STEM.mkv alone"
     else
       dathash=$(sha256_stdin < "$dir/$STEM.dat")
       bsmhash=$(sha256_stdin < "$dir/$STEM.dat.bsm")
@@ -2786,17 +3001,14 @@ check_pack() {
     fi
 
     # The hashes, and the pack's id.
-    if wait "$hashpid" && [ -s "$dir/mkv-sha256.txt" ]; then
-      if has_efm; then
-        printf '%s  %s\n%s  %s\n%s  %s\n' "$(cat -- "$dir/mkv-sha256.txt")" "$STEM.mkv" \
-          "$dathash" "$STEM.dat" "$bsmhash" "$STEM.dat.bsm" > "$sums"
-      else
-        printf '%s  %s\n' "$(cat -- "$dir/mkv-sha256.txt")" "$STEM.mkv" > "$sums"
-      fi
+    if wait "$hashpid" && [ -s "$dir/mkv-sha256.txt" ] && wait "$lossypid" && [ -s "$dir/lossy-sha256.txt" ]; then
+      printf '%s  %s\n' "$(cat -- "$dir/mkv-sha256.txt")" "$STEM.mkv" > "$sums"
+      ! has_efm || printf '%s  %s\n%s  %s\n' "$dathash" "$STEM.dat" "$bsmhash" "$STEM.dat.bsm" >> "$sums"
+      printf '%s  %s\n' "$(cat -- "$dir/lossy-sha256.txt")" "$LOSSY_STEM.mkv" >> "$sums"
       id=$(sha256_stdin < "$sums" | cut -c1-16)
       ok "hashed: SHA256SUMS; the pack's id is $id"
     else
-      fail "could not hash $STEM.mkv"
+      fail "could not hash $STEM.mkv and $LOSSY_STEM.mkv"
       id=unknown
     fi
 

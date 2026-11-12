@@ -3,7 +3,8 @@
 // (sys.inputs.graphs). Compiled with --root /, so both are absolute paths.
 
 #let data = json(sys.inputs.data)
-// A side with no EFM has no data area, and its pack is the mkv alone.
+// A side with no EFM has no data area, and its pack is the mkv alone (with
+// its lossy alternative, <stem>-lossy.mkv, as every pack has).
 #let has-efm = data.at("has_efm", default: true)
 #let graph(name) = image(sys.inputs.graphs + "/" + name, width: 100%)
 
@@ -103,7 +104,7 @@
 #block(below: 3pt, text(size: 9.5pt, fill: ink2)[#data.side · #mono(data.stem, size: 9pt) · pack #mono(data.id, size: 9pt)])
 #block(below: 12pt, text(size: 9.5pt, fill: ink2)[Directory #mono(data.place + "/" + data.version + "/", size: 9pt) on the decodes share])
 
-#block(below: 10pt, text(size: 8.5pt)[Made by build-pack.sh from #data.captures.rows.len() RF captures of the side: decoded by ld-decode, mapped, stacked and measured by decode-orc#if has-efm [, and the data area stacked and verified by vfs-verifier], each at the exact revision in @tools. Every step is automatic except the selection of the sets, which is a person's (@selection); @pipeline lists the steps.#if not has-efm [ The side has no EFM, so it has no data area, and the pack is the mkv alone.]])
+#block(below: 10pt, text(size: 8.5pt)[Made by build-pack.sh from #data.captures.rows.len() RF captures of the side: decoded by ld-decode, mapped, stacked and measured by decode-orc#if has-efm [, and the data area stacked and verified by vfs-verifier], each at the exact revision in @tools. Every step is automatic except the selection of the sets, which is a person's (@selection); @pipeline lists the steps.#if not has-efm [ The side has no EFM, so it has no data area, and the pack is the mkv alone.] The mkv comes twice: #mono(data.stem + ".mkv") is lossless, and #mono(data.stem + "-lossy.mkv") the same stack in H.264.])
 
 // The best single video set for a measure, for a tile's detail line.
 #let best(k) = { let b = data.key.at("best_" + k, default: none); if b == none [–] else [best single set #b.set: #b.value dB] }
@@ -132,7 +133,7 @@
   [#heading(level: 2, numbering: none)[The pack]
 #kv(
   ("Disc", [#data.title (#data.disc), #data.side]),
-  ("Pack id", [#mono(data.id) — the first 16 hex digits of the sha256 of #if has-efm [the three files' lines] else [the mkv's line] of SHA256SUMS. It names the files the player loads, not the directory]),
+  ("Pack id", [#mono(data.id) — the first 16 hex digits of the sha256 of #if has-efm [the four files' lines] else [the two mkvs' lines] of SHA256SUMS. It names the files the player loads, not the directory]),
   ("Directory", [#mono(data.place + "/" + data.version + "/") on the decodes share; #mono(data.place + "/pack") points at the current pack]),
   ("Built", [#data.built, by build-pack.sh at #mono(data.script.commit)#if data.script.dirty [ (with uncommitted changes)]]),
   ("Video stack", data.video_sets.join(", ") + [, in stack order (the first sets the sample grid)]),
@@ -204,7 +205,7 @@ Which sets go into each stack is a person's decision, made from the compare stag
 
 = The video stack
 
-The sets #data.video_sets.join(", ") are stacked by decode-orc's stacker, then dropout-corrected and written by the video sink with the #mono(data.decoder) chroma decoder as FFV1 in Matroska. #data.stacker_text#if data.noise_reduction != none [ #data.noise_reduction]
+The sets #data.video_sets.join(", ") are stacked by decode-orc's stacker, then dropout-corrected and written by the video sinks with the #mono(data.decoder) chroma decoder in Matroska twice: as FFV1, and as H.264 for the lossy mkv. #data.stacker_text#if data.noise_reduction != none [ #data.noise_reduction]
 
 #if "weights" in data.graphs { graph(data.graphs.weights) }
 #tbl(data.weights)
@@ -331,7 +332,7 @@ Each set's EFM is decoded to an image of 2048-byte sectors and a map of the sect
 
 = The pack
 
-#if has-efm [The pack stage makes a new pack version, #mono(data.version), from the video and vfs stages' outputs: it links the three files the player loads rather than copying them, checks them again as vp415e reads them (the container, every stream, the disc metadata against the container, the image and its bad sector map against the vfs stage's), hashes them into SHA256SUMS, and writes the provenance and this report.] else [The pack stage makes a new pack version, #mono(data.version), from the video stage's output: it links the mkv, the one file the player loads, since the side has no EFM, rather than copying it, checks it again as vp415e reads it (the container, every stream, the disc metadata against the container), hashes it into SHA256SUMS, and writes the provenance and this report.] A pack is only built when every stage before it is up to date, and only stamped when every check passes; `pack` then points at it, and the previous version is kept.
+#if has-efm [The pack stage makes a new pack version, #mono(data.version), from the video and vfs stages' outputs: it links the files the player loads (the lossless mkv, its lossy H.264 alternative, the image and its bad sector map) rather than copying them, checks them again as vp415e reads them (the container, every stream, the disc metadata against the container and the lossy mkv's against the lossless one's, the image and its bad sector map against the vfs stage's), hashes them into SHA256SUMS, and writes the provenance and this report.] else [The pack stage makes a new pack version, #mono(data.version), from the video stage's output: it links the mkv, the one file the player loads since the side has no EFM, and its lossy H.264 alternative, rather than copying them, checks them again as vp415e reads them (the container, every stream, the disc metadata against the container and the lossy mkv's against the lossless one's), hashes them into SHA256SUMS, and writes the provenance and this report.] A pack is only built when every stage before it is up to date, and only stamped when every check passes; `pack` then points at it, and the previous version is kept.
 
 #tbl(data.files, mono-cols: (2,))
 
