@@ -8,15 +8,16 @@
           "flake-utils"
         ],
         "nixpkgs": "nixpkgs",
+        "nixpkgs-linux": "nixpkgs-linux",
         "qtnodes": "qtnodes",
         "videosynth": "videosynth"
       },
       "locked": {
-        "lastModified": 1794431667,
-        "narHash": "sha256-Cfu3QCjOdXIOqmBOOVpUw+k06XaNUsN6VAJ9H7ifusU=",
+        "lastModified": 1794817498,
+        "narHash": "sha256-94vkQxlwlIbDsQEfXOp37CZqw5JE59y901c7htjhkcM=",
         "owner": "decode-orc",
         "repo": "decode-orc",
-        "rev": "6e8e46788009fe68e5de6d140e918b4b81774ddd",
+        "rev": "270de6f605da6580a2064d22153ca5b204d0f1df",
         "type": "github"
       },
       "original": {
@@ -66,11 +67,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1794313278,
-        "narHash": "sha256-VlM6k6Al2yYWjVUX5PxBInJxYz2acbE/qq6gHWFD5bI=",
+        "lastModified": 1794770347,
+        "narHash": "sha256-pd631/9Tl6ORa0usk6kN3UhnYAClkmASHR7bqFfOFPo=",
         "owner": "happycube",
         "repo": "ld-decode",
-        "rev": "27c6bb91a63c64a9697b6d60d866df63ba4f2544",
+        "rev": "469ecf841d12f80a9018e743215dc41efa531d09",
         "type": "github"
       },
       "original": {
@@ -92,6 +93,22 @@
       "original": {
         "owner": "NixOS",
         "ref": "nixos-26.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs-linux": {
+      "locked": {
+        "lastModified": 1767313136,
+        "narHash": "sha256-16KkgfdYqjaeRGBaYsNrhPRRENs0qzkQVUooNHtoy2w=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "ac62194c3917d5f474c1a844b6fd6da2db95077d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-25.05",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -209,17 +226,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1793803728,
-        "narHash": "sha256-KiO0s4NgB1MEoqzkoAHSbsgnYDRkvHXMaBIjRQ3G3h8=",
+        "lastModified": 1794740079,
+        "narHash": "sha256-ta19XWP6JkfCdrtS9dbkwwUa3TpY3sH1PdMIgwuA3Ew=",
         "owner": "decode-orc",
         "repo": "videosynth",
-        "rev": "049c712cd61c3255a5eae6c445666002073c6aba",
+        "rev": "ac85300cb990a9d01d10a115b65eb71facd34a04",
         "type": "github"
       },
       "original": {
         "owner": "decode-orc",
         "repo": "videosynth",
-        "rev": "049c712cd61c3255a5eae6c445666002073c6aba",
+        "rev": "ac85300cb990a9d01d10a115b65eb71facd34a04",
         "type": "github"
       }
     }
