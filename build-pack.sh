@@ -198,10 +198,10 @@ done < <(sed -n '/^SETS=(/,/^)/p' "$SELF_DIR/$DISC_SCRIPT" | sed -n 's/^  "\(.*\
 [ "${#SETS[@]}" -gt 0 ] || die "no SETS table found in $DISC_SCRIPT"
 
 # And its ld-decode flags, which are part of every decode's stamp. The decode
-# script always writes CVBS here, with the spec origin.
+# script always writes CVBS here, which the pinned build 0H-aligns by default.
 DECODE_FLAGS=$(sed -n 's/^DECODE_FLAGS=(\(.*\))$/\1/p' "$SELF_DIR/$DISC_SCRIPT")
 [ -n "$DECODE_FLAGS" ] || die "no DECODE_FLAGS line found in $DISC_SCRIPT"
-DECODE_FLAGS="$DECODE_FLAGS --cvbs --cvbs-spec-origin"
+DECODE_FLAGS="$DECODE_FLAGS --cvbs"
 case " $DECODE_FLAGS " in
   *" --noEFM "*) ! has_efm || die "$DISC_SCRIPT decodes with --noEFM, but disc.conf does not say DISC_EFM=no" ;;
   *)             has_efm || die "disc.conf says DISC_EFM=no, but $DISC_SCRIPT does not decode with --noEFM" ;;
@@ -1678,8 +1678,8 @@ compare_report() {
 #
 # The project has two video sinks, Video Out writing the lossless mkv
 # (mkv-ffv1-bt601) and Video Out Lossy the lossy <stem>-lossy.mkv (mkv-h264),
-# set alike; orc-cli processes them one after the other, each stacking the
-# side afresh, so the stage takes about twice as long as one sink would.
+# set alike. orc-cli runs the two side by side on shared inputs: the side is
+# stacked once and each frame of the stack goes to both encoders.
 #
 # The mkv is then checked as vp415e loads it (docs/emulator-pack-plan.md,
 # phase 5): the container, every packet a keyframe, the audio, and the disc
@@ -1894,13 +1894,13 @@ check_video() {
         fail "${name/.building/} was not written: orc-cli exited $rc ($(grep -v '\[\(info\|debug\)\]' "$dir/stack.log" 2>/dev/null | tail -3 | tr '\n' ' '))"
       fi
     done
-    # The sinks are processed one after the other, each stacking the side
-    # afresh; the stacker's records for the two must be the same, so that
-    # the two files are one stack.
-    if [ "$(sink_logs "$dir/stack.log" | sort -u | wc -l)" = 1 ] && [ "$(sink_logs "$dir/stack.log" | wc -l)" = 2 ]; then
-      ok "the stacker logged the same records for both sinks: the two mkvs are one stack"
+    # orc-cli runs the two sinks side by side on shared inputs, so a single
+    # stacker run feeds both and the two files are one stack. It says so in
+    # the log; a build that ran them apart would stack the side twice.
+    if grep -q "Running 2 sinks side by side on shared inputs" "$dir/stack.log" 2>/dev/null; then
+      ok "both sinks ran side by side on one stacker run: the two mkvs are one stack"
     else
-      fail "the stacker did not log the same records for both sinks"
+      fail "orc-cli did not run the two sinks side by side on shared inputs, so the two mkvs may not be one stack"
     fi
 
     check_mkv "$mkv" "$dir" "$(stage_tmp metadata.yaml)"
@@ -2156,15 +2156,6 @@ check_lossy() {
   fi
 }
 
-# sink_logs <stack.log>: the stacker's report records for each sink, one
-# line per sink processed. orc-cli processes the sinks one after the other,
-# each stacking afresh, and marks where each begins with "Processing sink".
-sink_logs() {
-  awk '/Processing sink [0-9]+\/[0-9]+:/ { if (n++) print rec; rec = ""; next }
-       { i = index($0, "StackerStage report: "); if (i) rec = rec substr($0, i) "|" }
-       END { if (n) print rec }' "$1"
-}
-
 # video_weights <stack.log> <frames> <set>...: the stacker's measured noise
 # and share of the weight for each set over the stack of <frames> frames,
 # whether its noise model was trusted, each shift of a set's sample grid onto
@@ -2176,12 +2167,11 @@ sink_logs() {
 # holds for. All of it is read from the stacker's report records: the lines
 # holding "StackerStage report: " and a JSON object with "v": 1 after it,
 # whose inputs and frames count from 1. Its sources are the sets in the
-# order given. Only the first sink's records are read: each sink stacks the
-# side afresh, the same way (check_video checks that), so the records of a
-# project with two sinks are the same twice.
+# order given. The two sinks share one stacker run (check_video checks that),
+# so each record is logged once.
 video_weights() {
   local log="$1" frames="$2"; shift 2
-  awk '/Processing sink [0-9]+\/[0-9]+:/ && n++ { exit } { print }' "$log" | jq -R -s --argjson n "$frames" --args '
+  jq -R -s --argjson n "$frames" --args '
     def r: . * 10 | round / 10;
     [ split("\n")[] | split("StackerStage report: ") | select(length > 1)
       | .[1:] | join("StackerStage report: ") | fromjson? | select(.v == 1) ] as $records
@@ -2214,7 +2204,7 @@ video_weights() {
         reference_substitutions: [ $records[] | select(.kind == "reference")
                                    | { from_frame: .frames[0], to_frame: .frames[1],
                                        stand_in: (if .input then $ARGS.positional[.input - 1] else null end), offset } ] }' \
-    "$@"
+    "$@" < "$log"
 }
 
 # --- vfs: the stacked, verified .dat and .bsm ------------------------------

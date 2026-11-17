@@ -587,8 +587,8 @@ Where the build settles something the text above left open:
     kept, within 1%. A `--frames N` decode may come out up to
     `(opens − start) + 1` short, because `--length` counts from the start
     ld-decode is given, not from where its writer opens.
-  - **decode-orc's view** comes from a one-source project, built with
-    `orc-cli -i PAL_CVBS_Source=… --export-project` in `.work` and listed with
+  - **decode-orc's view** comes from a one-source template project in
+    `.work`, pointed at the decode with `orc-cli nodes set` and listed with
     `nodes list --json`.
   - **Picture numbers** are taken from ld-decode's log, which names the CAV
     picture on every frame it writes.

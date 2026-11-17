@@ -44,7 +44,7 @@
 #   the animation moves from frame to frame. build-pack.sh sets the decoder
 #   from disc.conf, so the two are the same.
 #
-# Two video sinks write the same stack, one after the other: Video Out the
+# Two video sinks write the same stack, side by side: Video Out the
 # pack's lossless mkv (mkv-ffv1-bt601), and Video Out Lossy its lossy
 # <stem>-lossy.mkv (mkv-h264, as decode-orc's H.264 for VP415e preset: CRF
 # 20, encoder preset slow). Everything else about the two is the same, and

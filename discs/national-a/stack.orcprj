@@ -47,7 +47,7 @@
 #   19 at the stage's input) just before it is processed. Where it finds no
 #   smear, smear_fraction 0 passes every frame unchanged.
 #
-# Two video sinks write the same stack, one after the other: Video Out the
+# Two video sinks write the same stack, side by side: Video Out the
 # pack's lossless mkv (mkv-ffv1-bt601), and Video Out Lossy its lossy
 # <stem>-lossy.mkv (mkv-h264, as decode-orc's H.264 for VP415e preset: CRF
 # 20, encoder preset slow). Everything else about the two is the same, and

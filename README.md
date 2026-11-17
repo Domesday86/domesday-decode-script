@@ -318,8 +318,8 @@ fact about the captures.
 EFM front end is switched off on exactly the CLV sides:
 
 ```
-ld-decode --pal --noEFM --cvbs --cvbs-spec-origin --V4300D_coherent_subtract ...   # National B
-ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...           # the CAV sides
+ld-decode --pal --noEFM --cvbs --V4300D_coherent_subtract ...   # National B
+ld-decode --pal --V4300D_coherent_subtract --cvbs ...           # the CAV sides
 ```
 
 Run against a side that has none, the front end spends its time demodulating
@@ -402,7 +402,7 @@ audio. Those are facts about the disc and the captures rather than choices, so
 they are asserted in the script instead of offered as flags:
 
 ```sh
-ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs ...
 ```
 
 EFM is therefore decoded on every set — Volcanoes is a CAV AIV disc and the
@@ -607,8 +607,8 @@ rather than choices, so they are asserted in the scripts instead of offered as
 flags:
 
 ```sh
-ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...           # Side 1
-ld-decode --pal --noEFM --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...   # Side 2
+ld-decode --pal --V4300D_coherent_subtract --cvbs ...           # Side 1
+ld-decode --pal --noEFM --V4300D_coherent_subtract --cvbs ...   # Side 2
 ```
 
 Player spur removal is the same coherent subtraction the Domesday and Volcanoes
@@ -667,7 +667,7 @@ data. Those are facts about the discs and the captures rather than choices, so
 they are asserted in each script instead of offered as flags:
 
 ```sh
-ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs ...
 ```
 
 EFM is therefore decoded on **every** capture, and no City script has an
@@ -1003,7 +1003,7 @@ carries EFM digital audio. Those are facts about the disc and the captures, so
 they are asserted in the scripts instead of offered as flags:
 
 ```sh
-ld-decode --pal --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
+ld-decode --pal --V4300D_coherent_subtract --cvbs ...
 ```
 
 Each was checked rather than assumed:
@@ -1112,7 +1112,7 @@ root `/Users/Shared/Domesday86/Domesday86_Decodes/decode-script/north-polar`.
 Every capture is PAL CAV, was made on an LD-V4300D, and carries **no EFM**:
 
 ```sh
-ld-decode --pal --noEFM --V4300D_coherent_subtract --cvbs --cvbs-spec-origin ...
+ld-decode --pal --noEFM --V4300D_coherent_subtract --cvbs ...
 ```
 
 **No EFM** is the one that differs from the BBC AIV discs, and it was measured.
@@ -1210,7 +1210,7 @@ The decodes are checked and stamped as the pack scripts' are.
 ### What the script asserts
 
 ```sh
-ld-decode --ntsc --noEFM --cvbs --cvbs-spec-origin ...
+ld-decode --ntsc --noEFM --cvbs ...
 ```
 
 - **NTSC.** `--ntsc` takes the place of `--pal`, and the PAL sides'
@@ -1285,7 +1285,7 @@ given.
 ### What the scripts assert
 
 ```sh
-ld-decode --ntsc --noEFM --cvbs --cvbs-spec-origin ...
+ld-decode --ntsc --noEFM --cvbs ...
 ```
 
 - **NTSC**, as for [Dragon's Lair](#decoding-the-dragons-lair-disc).
@@ -2116,12 +2116,11 @@ the script looks for afterwards follows the flag, so a decode made under a
 flipped default would be reported as having written no video file after the
 hours it took to make.
 
-With CVBS they also pass `--cvbs-spec-origin`, on the recommendation of
-ld-decode's author: it 0H-aligns every frame as the CVBS specification
-requires, with 0H of each frame's line 0 in the sample before sample 0. The
-pinned 8.0.0dev build still defaults to `--cvbs-legacy-origin`, the decoder's
-own line origin, which is not spec compliant. The flag is part of each
-decode's stamp, so decodes made without it are stale.
+With CVBS the pinned 8.0.0dev build 0H-aligns every frame as the CVBS
+specification requires, with 0H of each frame's line 0 in the sample before
+sample 0. That is now its default: the `--cvbs-spec-origin` flag earlier
+builds needed has been removed, and `--cvbs-legacy-origin` (the decoder's own
+line origin, not spec compliant) is the opt-out, which the scripts never pass.
 
 The sample encoding differs by standard, and ld-decode chooses it from whether
 the signal can carry non-standard values:

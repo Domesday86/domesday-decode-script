@@ -515,7 +515,7 @@ elif [ "$USE_CVBS" != 1 ]; then
   STAMPING=0; NO_STAMP_WHY="only CVBS decodes are stamped"
 fi
 [ "$STAMPING" = 1 ] || [ "$ADOPT" = 0 ] || die "--adopt stamps a decode, and $NO_STAMP_WHY"
-FLAGS_LABEL="${DECODE_FLAGS[*]} --cvbs --cvbs-spec-origin"
+FLAGS_LABEL="${DECODE_FLAGS[*]} --cvbs"
 
 if [ "$STAMPING" = 1 ] && [ "$DRY_RUN" != 1 ]; then
   for tool in orc-cli sqlite3 jq; do
@@ -769,7 +769,14 @@ check_decode() {
     # And what decode-orc makes of it: a one-source project, listed. decode-orc
     # refuses a CVBS source in any state but these two.
     prj="$WORK/check-$id.orcprj"
-    if orc-cli --log-level warn -i "NTSC_CVBS_Source=input_path=$dest/$base.cvbs" --export-project "$prj" >/dev/null 2>&1 \
+    # orc-cli no longer builds a project from its command line (-i went in
+    # decode-orc 270de6f), so a one-source template is written and pointed at
+    # the decode with nodes set.
+    printf '%s\n' 'project:' '  name: check' '  version: 2.0' '  video_format: NTSC' \
+      '  source_format: Composite' '  amplitude_unit: 10bit' 'dag:' '  nodes:' '    - id: 1' \
+      '      stage: NTSC_CVBS_Source' '      node_type: SOURCE' '      display_name: CVBS Source' \
+      '      user_label: Source' '      parameters: {}' '  edges: []' > "$prj.in"
+    if orc-cli nodes set "$prj.in" Source "input_path=$dest/$base.cvbs" --output "$prj" >/dev/null 2>&1 \
        && orc=$(orc-cli nodes list "$prj" --json 2>/dev/null); then
       read -r status sstate scont < <(jq -r '.[0] | "\(.status) \(.signal_state) \(.sequence_continuous)"' <<< "$orc") || true
       case "$sstate" in
@@ -896,10 +903,10 @@ decode_one() {
   # extension `existing_product` then looks for follows the flag, so a silently
   # flipped default would fail a finished decode as "wrote no video file" --
   # after the hours it took to make it.
-  # With CVBS, --cvbs-spec-origin 0H-aligns each frame as the CVBS
-  # specification requires; the pinned build still defaults to its legacy
-  # origin, and its author recommends the spec origin.
-  if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs --cvbs-spec-origin); else cmd+=(--tbc); fi
+  # With CVBS, the pinned build 0H-aligns each frame as the CVBS specification
+  # requires by default (--cvbs-spec-origin is gone; --cvbs-legacy-origin opts
+  # out), so no origin flag is passed.
+  if [ "$USE_CVBS" = 1 ]; then cmd+=(--cvbs); else cmd+=(--tbc); fi
   cmd+=(--start "$start")
   [ "$FRAMES" = all ] || cmd+=(--length "$FRAMES")
   cmd+=(--threads "$DECODE_THREADS" "$src" "$dest/$base")
