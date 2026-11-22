@@ -1015,8 +1015,10 @@ The stack template is filled in with the selected video sets. Its stages are:
   picture was held: 3D is about 1 dB better on held pictures and 2.7 dB
   worse on single-frame stills. Since decode-orc 7995d1f the stills ranges
   and the default take `palstill` instead of `transform2d`. A side with no
-  ranges yet (the City discs) takes `palstill, held:transform3d` until a
-  person gives them. The schedule counts the
+  ranges yet (the Apple Visual Almanac) takes a `held:` schedule until a
+  person gives them. The City discs' ranges were given (2026-11-22) as
+  source frames, 1-based, of one set per side, and are put on the sink's
+  frames through that set's frame map and alignment. The schedule counts the
   sink's frames 0-based; on a CAV side whose address map is one run with
   picture p on frame p, the picture ranges are the frame ranges. The table
   below gives each side's decoder.
@@ -1029,7 +1031,7 @@ The stack template is filled in with the selected video sets. Its stages are:
     times slower than `transform2d`.
   - The manual ranges stay as they were, with `palstill` in place of
     `transform2d`.
-  - The City discs, which have no ranges yet, take
+  - The City discs, until their ranges were given (2026-11-22), took
     `palstill, held:transform3d`. `held:` is stricter than the guess the
     old schedule made: it gives a frame to `transform3d` only where the
     Stacker found the picture held for at least 4 frames either side, the
@@ -1075,7 +1077,10 @@ programme.
 | Domesday National B | Motion (the CLV side) | `transform3d` on every frame |
 | EcoDisc side 1 | Motion, with still sections | By picture: `transform3d` 1–4750, 6649–53520 and 53551–53800, `palstill` 4751–6648, 53521–53550 and 53801–54000 |
 | EcoDisc side 2 | A TV programme (motion) | `transform3d` |
-| City (all four discs) | Likely mostly stills | `palstill, held:transform3d`, until ranges are given |
+| City Culture 1 | Motion, then stills | By frame: `transform3d` 96–32965, `palstill` 32966–44004 |
+| City Culture 2 | Motion, then stills | By frame: `transform3d` 96–31353, `palstill` 31354–39105 |
+| City Financial 1 | Motion, stills, motion | By frame: `transform3d` 96–29579 and 38951–53982, `palstill` 29580–38950 |
+| City Financial 2 | Motion, a short still section, motion | By frame: `transform3d` 96–716 and 931–52522, `palstill` 717–930 |
 | North Polar | Mostly motion | `transform3d` |
 | Apple Visual Almanac (both sides, NTSC) | Stills, video and film | `ntsc2d, held:ntsc3d`, until ranges are given |
 | Countryside side 1 | Motion, with a still section | By picture: `transform3d` 1–5999 and 11500–54085, `palstill` 6000–11499 |
@@ -2070,7 +2075,7 @@ carries no EFM, so each side is built as a video-only pack, the mkv alone.
   its order.
 - The disc is stills, video and film in 3:2 pulldown, and which pictures are
   which isn't known yet. So the sink decodes with `ntsc2d, held:ntsc3d`, as
-  the City discs take `palstill, held:transform3d` until their ranges are
+  the City discs took `palstill, held:transform3d` until their ranges were
   given.
 - The Disc Mapper, run on DS1 of each side (2026-11-05), reads side A as CAV
   side 1, user code 1315, and side B as CAV side 2, user code 2315, both
@@ -2087,7 +2092,7 @@ carries no EFM, so each side is built as a video-only pack, the mkv alone.
 | Question | Decision |
 | --- | --- |
 | Display aspect | The analogue active line at 4:3: `display_aspect_ratio` `auto`, sample aspect 128:117 (PAL) or 1936:2133 (NTSC), since decode-orc 6e8e467; 4:3 over the whole frame before |
-| Chroma decoder | Per side (phase 5 table): `transform3d` on every frame for Domesday National B, EcoDisc side 2 and North Polar; by known picture ranges (`transform3d` on the motion, `palstill` on the stills) for Volcanoes, EcoDisc side 1, both Countryside sides, National A and Community North and South; `palstill, held:transform3d` for the City discs until their ranges are given; on NTSC, `ntsc3d` for Dragon's Lair and `ntsc2d, held:ntsc3d` for both Apple Visual Almanac sides |
+| Chroma decoder | Per side (phase 5 table): `transform3d` on every frame for Domesday National B, EcoDisc side 2 and North Polar; by known picture ranges (`transform3d` on the motion, `palstill` on the stills) for Volcanoes, EcoDisc side 1, both Countryside sides, National A and Community North and South; by frame ranges for the four City discs (given as source frames and put on the sink's frames through each side's frame map); on NTSC, `ntsc3d` for Dragon's Lair and `ntsc2d, held:ntsc3d` for both Apple Visual Almanac sides |
 | Library access | Read-only, never written; all output and r/w goes to the decodes share |
 | Choosing sets and removing outliers | Decided by a person from the phase 4 results, then committed; the scripts are not dynamic |
 | Outputs per title | One emulation output per AIV title (one stem per side); outlier sets are dropped, never made into a second output |

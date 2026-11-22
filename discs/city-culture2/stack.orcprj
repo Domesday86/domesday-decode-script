@@ -47,12 +47,10 @@
 # several frames is stacked across them as well as across the sets, which is
 # most of what stacking gains on held pictures. still_frame_search,
 # luma_level_match and chroma_gain_match are left to decode-orc's defaults (24
-# frames, on, on). The video sink decodes with palstill, the PAL Still decoder
-# made for single-frame stills, and gives the frames the Stacker finds held to
-# transform3d (decoder_type multiple, decoder_schedule "palstill,
-# held:transform3d"): the disc is mostly stills (the phase 5 table in
-# docs/emulator-pack-plan.md). build-pack.sh sets the decoder from disc.conf,
-# so the two are the same.
+# frames, on, on). The video sink decodes by frame range, 3D on the side's
+# motion and palstill, the PAL Still decoder, on its stills (decoder_type
+# multiple, the decoder_schedule below; disc.conf gives the ranges).
+# build-pack.sh sets the decoder from disc.conf, so the two are the same.
 #
 # Two video sinks write the same stack, side by side: Video Out the
 # pack's lossless mkv (mkv-ffv1-bt601), and Video Out Lossy its lossy
@@ -230,7 +228,7 @@ dag:
           value: multiple
         decoder_schedule:
           type: string
-          value: palstill, held:transform3d
+          value: palstill, 96-31353:transform3d, 31354-39105:palstill
         display_aspect_ratio:
           type: string
           value: auto
@@ -336,7 +334,7 @@ dag:
           value: multiple
         decoder_schedule:
           type: string
-          value: palstill, held:transform3d
+          value: palstill, 96-31353:transform3d, 31354-39105:palstill
         display_aspect_ratio:
           type: string
           value: auto
