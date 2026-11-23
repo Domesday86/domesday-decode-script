@@ -2,8 +2,8 @@
   description = "Scripts for automatically decoding Domesday LaserDisc images through ld-decode";
 
   inputs = {
-    # ld-decode is itself a flake; pinned to upstream's rev8 development branch.
-    ld-decode.url = "github:happycube/ld-decode/8.0.0dev";
+    # ld-decode is itself a flake; pinned to upstream's main (rev8).
+    ld-decode.url = "github:happycube/ld-decode/main";
 
     # Take nixpkgs from ld-decode rather than pinning a second copy, so the
     # tools in the dev shell are the same builds ld-decode itself was tested

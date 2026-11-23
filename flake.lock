@@ -13,11 +13,11 @@
         "videosynth": "videosynth"
       },
       "locked": {
-        "lastModified": 1794817498,
-        "narHash": "sha256-94vkQxlwlIbDsQEfXOp37CZqw5JE59y901c7htjhkcM=",
+        "lastModified": 1795370881,
+        "narHash": "sha256-xWkYhEns8PpfsJ6sQMS+xAjvTJCQfAPNW4qTgjxULXg=",
         "owner": "decode-orc",
         "repo": "decode-orc",
-        "rev": "270de6f605da6580a2064d22153ca5b204d0f1df",
+        "rev": "07f284b43fdca2e7cc011c4adb711eaba90fd60f",
         "type": "github"
       },
       "original": {
@@ -67,16 +67,16 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1794770347,
-        "narHash": "sha256-pd631/9Tl6ORa0usk6kN3UhnYAClkmASHR7bqFfOFPo=",
+        "lastModified": 1795289097,
+        "narHash": "sha256-BgBmHjkzusvQnW+zDbZEj8yIE/ONDEJhtdJPt7wRia8=",
         "owner": "happycube",
         "repo": "ld-decode",
-        "rev": "469ecf841d12f80a9018e743215dc41efa531d09",
+        "rev": "d6055b303f67869d005a23619e886453ff73130d",
         "type": "github"
       },
       "original": {
         "owner": "happycube",
-        "ref": "8.0.0dev",
+        "ref": "main",
         "repo": "ld-decode",
         "type": "github"
       }

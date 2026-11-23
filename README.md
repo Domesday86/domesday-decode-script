@@ -7,8 +7,8 @@ and Countryside AIV LaserDisc sets, and the North Polar Expedition disc, through
 ## Environment
 
 The toolchain is provided by a Nix flake, so the exact `ld-decode` build used
-for a decode is pinned and reproducible. It tracks the `8.0.0dev` (rev8)
-branch of [ld-decode](https://github.com/happycube/ld-decode/tree/8.0.0dev).
+for a decode is pinned and reproducible. It tracks the `main` branch
+of [ld-decode](https://github.com/happycube/ld-decode), which is now rev8.
 
 Requires Nix with flakes enabled:
 
@@ -1809,6 +1809,11 @@ directory over ssh. It is never part of the build:
 
 The last line installs another version, such as the previous one.
 
+`--lossy` installs the pack's `<stem>-lossy.mkv` in place of the lossless
+`<stem>.mkv`, named `<stem>.mkv` on the player, since the player pairs a
+side's `.mkv` with its `.dat` by the stem. Its hash is checked against the
+lossy file's line in `SHA256SUMS`.
+
 **Before copying,** it checks:
 - the pack is stamped;
 - the media directory (default `/srv/vp415e/media`) is group `vp415d` and
@@ -2116,7 +2121,7 @@ the script looks for afterwards follows the flag, so a decode made under a
 flipped default would be reported as having written no video file after the
 hours it took to make.
 
-With CVBS the pinned 8.0.0dev build 0H-aligns every frame as the CVBS
+With CVBS the pinned rev8 build 0H-aligns every frame as the CVBS
 specification requires, with 0H of each frame's line 0 in the sample before
 sample 0. That is now its default: the `--cvbs-spec-origin` flag earlier
 builds needed has been removed, and `--cvbs-legacy-origin` (the decoder's own

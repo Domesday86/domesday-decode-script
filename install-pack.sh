@@ -5,6 +5,9 @@
 # directory over ssh, and check that they arrived whole and that the player's
 # service account can work with them (docs/emulator-pack-plan.md, phase 7). A
 # side with no EFM (DISC_EFM=no) has no data area: its pack is the mkv alone.
+# With --lossy, the pack's <stem>-lossy.mkv (H.264) goes to the player in
+# place of the lossless <stem>.mkv, named <stem>.mkv there, since the player
+# pairs a side's .mkv with its .dat by the stem.
 #
 # Never part of the build: build-pack.sh makes the pack, and this is run by
 # hand to put it on the player.
@@ -39,6 +42,8 @@ such as development@vp415e-pi, and check it there. Discs: $(for d in "$SELF_DIR"
 Options:
       --pack DIR       install this pack version (a pack-<key> directory, such
                        as the previous one) instead of the current one
+      --lossy          install the lossy <stem>-lossy.mkv as the side's
+                       <stem>.mkv, in place of the lossless one
       --media-dir DIR  the player's media directory (default $MEDIA_DIR)
       --group NAME     the group the player's files must have (default $GROUP)
   -n, --dry-run        check both ends and show what would be copied; change
@@ -58,12 +63,14 @@ DISC=""
 HOST=""
 PACK=""
 DRY_RUN=0
+LOSSY=0
 NO_MOUNT=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --pack)      PACK="${2:?--pack needs a directory}"; shift 2 ;;
     --media-dir) MEDIA_DIR="${2:?--media-dir needs a directory}"; shift 2 ;;
     --group)     GROUP="${2:?--group needs a name}"; shift 2 ;;
+    --lossy)     LOSSY=1; shift ;;
     -n|--dry-run) DRY_RUN=1; shift ;;
     --no-mount)  NO_MOUNT=(--no-mount); shift ;;
     -h|--help)   usage; exit 0 ;;
@@ -97,16 +104,22 @@ if [ "${DISC_EFM:-yes}" = no ]; then
 else
   FILES=("$STEM.dat" "$STEM.dat.bsm" "$STEM.mkv")
 fi
+# FILES are the names on the player; src_of gives each one's file in the pack,
+# which differs only for the lossy mkv.
+MKV_SRC="$STEM.mkv"
+[ "$LOSSY" = 0 ] || MKV_SRC="$STEM-lossy.mkv"
+src_of() { if [ "$1" = "$STEM.mkv" ]; then printf '%s' "$MKV_SRC"; else printf '%s' "$1"; fi; }
 for f in "${FILES[@]}" SHA256SUMS pack.json; do
-  [ -f "$PACK/$f" ] || die "$PACK has no $f"
+  [ -f "$PACK/$(src_of "$f")" ] || die "$PACK has no $(src_of "$f")"
 done
 ID=$(jq -r .id "$PACK/pack.json")
-SUMS=$(for f in "${FILES[@]}"; do awk -v n="$f" '$2 == n' "$PACK/SHA256SUMS"; done)
+SUMS=$(for f in "${FILES[@]}"; do awk -v n="$(src_of "$f")" -v d="$f" '$2 == n { print $1 "  " d }' "$PACK/SHA256SUMS"; done)
 [ "$(wc -l <<< "$SUMS")" = "${#FILES[@]}" ] || die "$PACK/SHA256SUMS does not list the pack's ${#FILES[@]} file(s)"
 BYTES=0
-for f in "${FILES[@]}"; do BYTES=$(( BYTES + $(file_size "$PACK/$f") )); done
+for f in "${FILES[@]}"; do BYTES=$(( BYTES + $(file_size "$PACK/$(src_of "$f")") )); done
 
 printf 'pack:   %s (id %s), %s GB\n' "$PACK" "$ID" "$(awk -v b="$BYTES" 'BEGIN { printf "%.1f", b / 1e9 }')"
+[ "$LOSSY" = 0 ] || printf 'video:  %s, as %s\n' "$MKV_SRC" "$STEM.mkv"
 printf 'to:     %s:%s\n\n' "$HOST" "$MEDIA_DIR"
 
 # --- the player ------------------------------------------------------------
@@ -152,7 +165,9 @@ remote "$PREFLIGHT" "$MEDIA_DIR" "$GROUP" "$BYTES" || die "the player is not rea
 RSYNC=(rsync -e "ssh -o BatchMode=yes" --times --perms --chmod=F0644 --no-group --no-owner --human-readable)
 if [ "$DRY_RUN" = 1 ]; then
   printf '\nwhat would be copied (dry run):\n'
-  "${RSYNC[@]}" --dry-run --itemize-changes -- "${FILES[@]/#/$PACK/}" "$HOST:$MEDIA_DIR/"
+  for f in "${FILES[@]}"; do
+    "${RSYNC[@]}" --dry-run --itemize-changes -- "$PACK/$(src_of "$f")" "$HOST:$MEDIA_DIR/$f"
+  done
   printf '\ndry run: nothing was changed\n'
   exit 0
 fi
@@ -163,7 +178,7 @@ if [ "${#FILES[@]}" -gt 1 ]; then
 else
   printf '\ncopying the side (it has no data area)\n'
 fi
-"${RSYNC[@]}" --info=progress2 -- "$PACK/$STEM.mkv" "$HOST:$MEDIA_DIR/"
+"${RSYNC[@]}" --info=progress2 -- "$PACK/$MKV_SRC" "$HOST:$MEDIA_DIR/$STEM.mkv"
 
 # --- the checks on the player ----------------------------------------------
 
