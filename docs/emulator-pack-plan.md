@@ -487,8 +487,8 @@ Where the build settles something the text above left open:
   `discs/<disc>/set-efm.orcprj` and `set-quality.orcprj`, which every set
   shares (since phase 2), and at `discs/<disc>/map.orcprj` (since phase 3).
   Until `stack.orcprj` is written, the `video` stamp records it as missing.
-- **Linux mount points** default to `/home/sdi/raid/Domesday86_{Library,Decodes}`
-  in `shares.conf`. A host that differs sets them in `shares.local.conf`.
+- **Linux mount points** default to `/home/sdi/raid/{library,decodes}` in
+  `shares.conf`, matching the host's NixOS automounts. A host that differs sets them in `shares.local.conf`.
 - **Scratch.** Once the decodes share passes its check, `ensure_shares`
   points `TMPDIR` at `decode-script/.work/`. That catches every `mktemp` in
   the decode scripts and in `find-disc-start.sh` without changing them.

@@ -204,6 +204,7 @@ _share_library_sentinel() {
     | awk '{ size = $2; sub(/^[^ ]+  [^ ]+  /, ""); print size, $0 }'
 }
 
+_share_list() { ls -A -- "$1" >/dev/null && printf 'ok'; }
 _share_size_is() { [ "$(file_size "$1")" = "$2" ] && printf 'ok'; }
 _share_is_file() { [ -f "$1" ] && printf 'ok'; }
 _share_readable() { [ -r "$1" ] && [ -x "$1" ] && printf 'ok'; }
@@ -228,8 +229,15 @@ share_check() {
   want_src=$(share_conf "$role" source)
   want_type=$(share_conf "$role" fstype)
 
-  # 1. It is a mount.
-  if ! entry=$(share_mount_entry "$role"); then
+  # 1. It is a mount. A systemd automount that has idled out leaves only its
+  # autofs trigger in the table (source "systemd-1"); touching the path brings
+  # the real mount back, so that is done (under the timeout) before judging.
+  entry=$(share_mount_entry "$role") || entry=""
+  if [ "$SHARES_PLATFORM" = linux ] && [ "$(printf '%s\n' "$entry" | cut -f3)" = autofs ]; then
+    share_timed _share_list "$mp" >/dev/null || true
+    entry=$(share_mount_entry "$role") || entry=""
+  fi
+  if [ -z "$entry" ]; then
     elsewhere=$(share_mounted_elsewhere "$role" | head -1)
     if [ -n "$elsewhere" ]; then
       SHARE_PROBLEM="$want_src is mounted at $elsewhere, not at $mp"

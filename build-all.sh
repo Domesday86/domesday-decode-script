@@ -29,6 +29,19 @@ set -euo pipefail
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/shares.sh
 . "$SELF_DIR/lib/shares.sh"
+# shellcheck source=lib/stage.sh
+. "$SELF_DIR/lib/stage.sh"
+# shellcheck source=lib/perf.sh
+. "$SELF_DIR/lib/perf.sh"
+
+# The pinned tools a whole-disc build runs, as one name for performance.tsv.
+perf_tools() {
+  local t out=""
+  for t in ld-decode decode-orc vfs-verifier; do
+    out+="${out:++}$(stage_tool_dir "$t" 2>/dev/null || echo "$t-?")"
+  done
+  printf '%s\n' "$out"
+}
 
 ORDER=(
   # PAL: the Domesday discs
@@ -146,6 +159,8 @@ for d in "${DISCS[@]}"; do
   say "$d: building"
   if "$SELF_DIR/build-pack.sh" "$d" "${NO_MOUNT[@]}" > "$LOGS/$d.log" 2>&1; then
     say "$d: ok after $(( SECONDS - t ))s"
+    # A run that found the pack up to date did nothing, and is not a timing.
+    [ "$(( SECONDS - t ))" -lt 60 ] || perf_record "$d" build - "$(perf_tools)" - "$(( SECONDS - t ))"
   else
     rc=$?
     say "$d: FAILED (exit $rc) after $(( SECONDS - t ))s; the end of $d.log:"
@@ -154,6 +169,12 @@ for d in "${DISCS[@]}"; do
     [ "$STOP" = 0 ] || break
   fi
 done
+
+# Speed by stage and tool version, beside the summary, so a run that has
+# slowed down says so in its own logs.
+"$SELF_DIR/perf-report.sh" "${NO_MOUNT[@]}" > "$LOGS/performance.txt" 2>&1 \
+  && say "performance by stage and tool version: $LOGS/performance.txt" \
+  || say "perf-report.sh failed; see $LOGS/performance.txt"
 
 if [ "${#failed[@]}" = 0 ]; then
   say "done: every pack is up to date"

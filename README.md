@@ -1878,6 +1878,37 @@ D=/Volumes/Domesday86_SFTP/simoninns/emulation-packs
 Per-disc settings live in `discs/<disc>/disc.conf`. The disc's sets are read
 from its decode script's `SETS` table, so there is one list of captures.
 
+### Tracking performance
+
+`build-pack.sh` appends a line to `decode-script/performance.tsv` on the
+decodes share for every step it times: each set's decode (from ld-decode's
+own `Took` line, so the start search is left out), each set's EFM image and
+analyses, the map, the video stack, the VFS stack and each quality analysis.
+`build-all.sh` adds one `build` line per disc for the whole build. A line
+gives the host, its CPU count, the disc, stage and set, the tool's version
+(`ld-decode-<rev>`, `orc-<rev>`, `vfs-<rev>`), the frames, the seconds and
+the FPS. Every `build-all.sh` run also writes `performance.txt`, the summary
+below, beside its `summary.txt`.
+
+```sh
+./perf-report.sh                   # average FPS by stage, host and tool version
+./perf-report.sh --disc volcanoes  # one disc
+./perf-report.sh --backfill        # once: add the decodes already on the share
+./perf-report.sh --raw             # the lines themselves
+```
+
+The average is total frames over total seconds, so a full side counts for
+more than a short test (steps under 5,000 frames are left out by default:
+`--min-frames`). `vs prev` compares each version of a tool with the one
+before it on the same host and stage, and marks one more than 10% slower
+(`--threshold`) as `SLOWER`. Compare like with like: a host's figures move
+with what else it is doing, and the set stage reads the share, so two discs
+building at once on two hosts slow each other down.
+
+`--backfill` reads the logs of the ld-decode decodes already on the share.
+Their host was not recorded, so their lines are named by platform, `macos`
+or `linux`, from the path in each decode's `check.txt`.
+
 ## How the decodes work
 
 The rest of this applies to all six scripts: they share

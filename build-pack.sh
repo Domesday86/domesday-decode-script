@@ -49,6 +49,8 @@ SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "$SELF_DIR/lib/stage.sh"
 # shellcheck source=lib/decode.sh
 . "$SELF_DIR/lib/decode.sh"
+# shellcheck source=lib/perf.sh
+. "$SELF_DIR/lib/perf.sh"
 
 STAGES=(decode set map compare select video vfs quality pack)
 
@@ -410,6 +412,8 @@ OUT="$DD_DECODES/decode-script/$DISC_OUT"
 LDD_DIR=$(stage_tool_dir ld-decode)    || die "flake.lock pins no ld-decode"
 ORC_DIR=$(stage_tool_dir decode-orc)   || die "flake.lock pins no decode-orc"
 VFS_DIR=$(stage_tool_dir vfs-verifier) || die "flake.lock pins no vfs-verifier"
+# The undated names, which performance.tsv records each step under.
+ORC_TOOL="$ORC_DIR" VFS_TOOL="$VFS_DIR"
 ORC_DIR=$(stage_version_name "$OUT" "$ORC_DIR")
 VFS_DIR=$(stage_version_name "$OUT" "$VFS_DIR")
 
@@ -827,7 +831,17 @@ run_decode() {
   fi
   for u; do
     state=$(unit_state "$u") || die "$u: still $state after decoding"
+    perf_decode "${u#decode:}"
   done
+}
+
+# perf_decode <set>: record a decode's time and frames, from ld-decode's own
+# "Took" line, which leaves out the start search.
+perf_decode() {
+  local id="$1" rel took
+  rel=$(set_field "$id" 3)
+  took=$(perf_decode_took "$OUT/$(set_decode "$id")/$(decode_base "$rel").cvbs") || return 0
+  perf_record "$DISC" decode "$id" "$LDD_DIR" "${took#* }" "${took%% *}"
 }
 
 # --- set: each set's EFM image and quality figures -------------------------
@@ -871,7 +885,7 @@ run_set() {
 # build_set <set>: make one set's EFM image and quality figures, check them,
 # and stamp them if they pass.
 build_set() {
-  local id="$1" dir decode efm rel a tool node csv rc t
+  local id="$1" dir decode efm rel a tool node csv rc t frames
   describe_set "$id"
   dir="$STAGE_DIR"; decode="$SET_DECODE"; efm="${id,,}_efm.dat"
 
@@ -903,11 +917,13 @@ build_set() {
   cd -- "$dir" || return 1
 
   rc=0
+  frames=$(perf_decode_frames "$decode") || frames=""
   if has_efm; then
     printf 'EFM: decoding %s\n' "${decode##*/}"
     t=$SECONDS
     orc-cli "$dir/efm.orcprj" --process --log-file "$dir/efm.log" --log-out file || rc=$?
     printf 'EFM: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+    [ "$rc" != 0 ] || perf_record "$DISC" set:efm "$id" "$ORC_TOOL" "$frames" "$(( SECONDS - t ))"
   fi
 
   for a in "${SET_ANALYSES[@]}"; do
@@ -916,6 +932,7 @@ build_set() {
     orc-cli tools run "$dir/quality.orcprj" "$tool" --node "$node" --json --quiet \
       --csv "$(stage_tmp "$csv.csv")" > "$dir/$csv.json" 2> "$dir/$csv.log" || true
     printf '%s: analysed in %ss\n' "$node" "$(( SECONDS - t ))"
+    perf_record "$DISC" "set:$csv" "$id" "$ORC_TOOL" "$frames" "$(( SECONDS - t ))"
   done
 
   if ! check_set "$id" "$dir" "$efm" "$rc"; then
@@ -1092,6 +1109,15 @@ build_map() {
   t=$SECONDS rc=0
   orc-cli tools refresh "$dir/map.orcprj" --json > "$(stage_tmp refresh.json)" 2> "$dir/refresh.log" || rc=$?
   printf 'map: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+  if [ "$rc" = 0 ]; then
+    # Frames read: the Disc Mapper reads every set's decode in full.
+    local f frames=0
+    for d in "${MAP_DECODES[@]}"; do
+      f=$(perf_decode_frames "${d#*|}") || { frames=""; break; }
+      frames=$(( frames + f ))
+    done
+    perf_record "$DISC" map - "$ORC_TOOL" "$frames" "$(( SECONDS - t ))"
+  fi
 
   if ! check_map "$dir" "$rc"; then
     cat -- "$dir/check.failed.txt" >&2
@@ -1722,7 +1748,7 @@ single_project() {
 }
 
 build_video() {
-  local dir d id cvbs rel n=0 mode pad min map="" problems mkv lossy rc t band spid
+  local dir d id cvbs rel n=0 mode pad min map="" problems mkv lossy rc t band spid vt
   describe_video
   dir="$STAGE_DIR"
   problems=$(stack_problems)
@@ -1835,6 +1861,7 @@ build_video() {
   t=$SECONDS rc=0
   orc-cli "$dir/stack.orcprj" --process --log-file "$dir/stack.log" --log-out file > "$dir/console.log" 2>&1 || rc=$?
   printf 'video: orc-cli exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+  vt=$(( SECONDS - t ))
   VIDEO_SINGLE_RC=0
   wait "$spid" || VIDEO_SINGLE_RC=$?
   printf 'video: the single captures'\'' VBI read, orc-cli exited %s\n' "$VIDEO_SINGLE_RC"
@@ -1849,6 +1876,8 @@ build_video() {
   cat -- "$dir/check.txt.partial"
   stage_commit || { printf 'video: could not stamp the stage\n' >&2; return 1; }
   printf 'video: checked and stamped: %s/%s.mkv and %s.mkv\n' "$dir" "$STEM" "$LOSSY_STEM"
+  # Frames written, though the stack reads that many from every video set.
+  perf_record "$DISC" video - "$ORC_TOOL" "$(jq -r '.metadata.frame_count // empty' "$dir/video.json" 2>/dev/null)" "$vt"
 }
 
 # check_video <dir> <orc-cli exit code> <mkv> <lossy mkv>: run the checks,
@@ -2263,6 +2292,7 @@ build_vfs() {
   t=$SECONDS rc=0
   vfs-stacker --log-file "$dir/vfs-stacker.debug.log" -o "$dat" "${images[@]}" > "$dir/vfs-stacker.txt" 2>&1 || rc=$?
   printf 'vfs: vfs-stacker exited %s after %ss\n' "$rc" "$(( SECONDS - t ))"
+  [ "$rc" != 0 ] || perf_record "$DISC" vfs - "$VFS_TOOL" - "$(( SECONDS - t ))"
   vrc=0
   if [ -f "$dat" ]; then
     vfs-verifier "$dat" > "$dir/vfs-verifier.txt" 2>&1 || vrc=$?
@@ -2688,7 +2718,7 @@ quality_project() {
 }
 
 build_quality() {
-  local dir a tool node csv t stacker frames over
+  local dir a tool node csv t stacker frames over qframes
   describe_quality
   dir="$STAGE_DIR"
 
@@ -2701,6 +2731,8 @@ build_quality() {
   frames=$(jq -r '.metadata.frame_count // empty' "$QUALITY_VIDEO/video.json" 2>/dev/null) || frames=""
   [ -n "$frames" ] || { printf 'quality: %s gives no frame count\n' "$QUALITY_VIDEO/video.json" >&2; return 1; }
   QUALITY_RANGES=$(quality_sample "$frames")
+  qframes="$frames"
+  [ -z "$QUALITY_RANGES" ] || qframes=$(quality_sample_count)
 
   # Beside the video stage's directory, so the sources' relative paths hold.
   quality_project "$QUALITY_VIDEO/stack.orcprj" "$DISC_DIR/set-quality.orcprj" "$QUALITY_RANGES" > "$dir/quality.orcprj" \
@@ -2717,6 +2749,7 @@ build_quality() {
     orc-cli tools run "$dir/quality.orcprj" "$tool" --node "$node" --json --quiet \
       --csv "$(stage_tmp "$csv.csv")" > "$dir/$csv.json" 2> "$dir/$csv.log" || true
     printf 'quality: %s analysed in %ss\n' "$node" "$(( SECONDS - t ))"
+    perf_record "$DISC" "quality:$csv" - "$ORC_TOOL" "$qframes" "$(( SECONDS - t ))"
     [ ! -f "$dir/$csv.csv.partial" ] || quality_renumber "$dir/$csv.csv.partial" \
       || { printf 'quality: %s.csv has a frame outside the sample\n' "$csv" >&2; return 1; }
   done
@@ -2729,6 +2762,7 @@ build_quality() {
     orc-cli tools run "$dir/quality-mean.orcprj" snr_analysis --node SNR --json --quiet \
       --csv "$(stage_tmp mean-snr.csv)" > "$dir/mean-snr.json" 2> "$dir/mean-snr.log" || true
     printf 'quality: SNR in Mean analysed in %ss\n' "$(( SECONDS - t ))"
+    perf_record "$DISC" quality:mean-snr - "$ORC_TOOL" "$qframes" "$(( SECONDS - t ))"
     [ ! -f "$dir/mean-snr.csv.partial" ] || quality_renumber "$dir/mean-snr.csv.partial" \
       || { printf 'quality: mean-snr.csv has a frame outside the sample\n' >&2; return 1; }
   else
